@@ -12,8 +12,10 @@ import org.openbridge.protocol.Session
 import org.openbridge.protocol.Store
 import org.openbridge.protocol.Wire
 import java.io.Closeable
+import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.InetSocketAddress
+import java.net.NetworkInterface
 import java.security.KeyPairGenerator
 import java.security.KeyStore
 import java.security.MessageDigest
@@ -38,9 +40,11 @@ class SharingServer(context: Context, store: Store, private val stopped: (String
     private val secret = ByteArray(32).also { SecureRandom().nextBytes(it) }
     private val session = Session(store, secret)
     private var callbackRegistered = false
-    private val network: Network
+    /** Wi-Fi network being served, or null when serving over a USB tethering cable. */
+    private val network: Network?
     private val address: InetAddress
     private val listener: SSLServerSocket
+    val usb: Boolean get() = network == null
     val host: String get() = address.hostAddress!!
     val port: Int get() = listener.localPort
     val pairingSecret: String = secret.hex()
@@ -55,14 +59,16 @@ class SharingServer(context: Context, store: Store, private val stopped: (String
     }
 
     init {
-        val candidate = connectivity.allNetworks.firstNotNullOfOrNull { candidate ->
+        // A USB tethering link is preferred: it only reaches the cable-connected computer.
+        val tethered = usbTetherAddress()
+        val candidate = if (tethered != null) null to tethered else connectivity.allNetworks.firstNotNullOfOrNull { candidate ->
             val caps = connectivity.getNetworkCapabilities(candidate)
             if (caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true &&
                 caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)) {
                 connectivity.getLinkProperties(candidate)?.linkAddresses
                     ?.firstOrNull { Wire.isPrivateIPv4(it.address) }?.let { candidate to it.address }
             } else null
-        } ?: throw IllegalStateException("Connect to Wi-Fi with a private IPv4 address first")
+        } ?: throw IllegalStateException("Connect to Wi-Fi or turn on USB tethering first")
         network = candidate.first
         address = candidate.second
 
@@ -91,11 +97,13 @@ class SharingServer(context: Context, store: Store, private val stopped: (String
         try {
             // Never bind 0.0.0.0, cellular, or a public interface. No discovery or port mapping.
             listener.bind(InetSocketAddress(address, 0), 2)
-            connectivity.registerNetworkCallback(NetworkRequest.Builder()
-                .addTransportType(NetworkCapabilities.TRANSPORT_WIFI).build(), callback)
-            callbackRegistered = true
-            if (connectivity.getLinkProperties(network)?.linkAddresses?.none { it.address == address } != false)
-                throw IllegalStateException("Wi-Fi disconnected")
+            if (network != null) {
+                connectivity.registerNetworkCallback(NetworkRequest.Builder()
+                    .addTransportType(NetworkCapabilities.TRANSPORT_WIFI).build(), callback)
+                callbackRegistered = true
+                if (connectivity.getLinkProperties(network)?.linkAddresses?.none { it.address == address } != false)
+                    throw IllegalStateException("Wi-Fi disconnected")
+            }
         } catch (e: Exception) { close(); throw e }
     }
 
@@ -124,6 +132,15 @@ class SharingServer(context: Context, store: Store, private val stopped: (String
                 }
             } catch (_: Exception) { if (!closed.get()) stop("Sharing server stopped unexpectedly") }
         }, "openbridge-listener").start()
+        // Tethering interfaces are not exposed as ConnectivityManager networks, so poll for cable removal.
+        if (usb) Thread({
+            try {
+                while (!closed.get()) {
+                    Thread.sleep(2_000)
+                    if (!closed.get() && usbTetherAddress() != address) stop("USB cable disconnected or tethering turned off")
+                }
+            } catch (_: InterruptedException) {}
+        }, "openbridge-usb-watch").apply { isDaemon = true }.start()
     }
 
     private fun stop(reason: String) { close(); stopped(reason) }
@@ -137,5 +154,13 @@ class SharingServer(context: Context, store: Store, private val stopped: (String
         secret.fill(0)
     }
 }
+
+/** Private IPv4 address of an active USB tethering interface, if any. */
+private fun usbTetherAddress(): InetAddress? = runCatching {
+    NetworkInterface.getNetworkInterfaces()?.toList().orEmpty()
+        .filter { it.isUp && Wire.isUsbTetherInterface(it.name) }
+        .flatMap { it.inetAddresses.toList() }
+        .firstOrNull { it is Inet4Address && Wire.isPrivateIPv4(it) }
+}.getOrNull()
 
 private fun ByteArray.hex() = joinToString("") { "%02x".format(it.toInt() and 255) }

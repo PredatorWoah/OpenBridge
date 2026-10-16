@@ -1,16 +1,38 @@
 # OpenBridge
 
-An open-source Android ↔ macOS companion. Phase 1 shares **one user-selected local Android folder** over Wi-Fi: browse folders, download to Mac, and upload to Android. No accounts, hosted backend, discovery service, telemetry, or cloud dependency at runtime. Licensed under [MIT](LICENSE).
+[![Latest release](https://img.shields.io/github/v/release/PredatorWoah/OpenBridge?sort=semver)](https://github.com/PredatorWoah/OpenBridge/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Platforms](https://img.shields.io/badge/platforms-Android%208%2B%20%7C%20macOS%2013%2B-lightgrey)
 
-This is an early MVP implementation. See [verification status](docs/verification.md) for exactly what has and has not been tested. Physical-device behavior is not yet verified.
+![OpenBridge: an Android phone and a Mac connected over Wi-Fi or a USB cable](docs/images/hero.svg)
+
+**OpenBridge is a free, open-source way to move files between an Android phone and a Mac.** Pick one folder on the phone, and browse, download and upload it from your Mac over your home Wi-Fi or a USB cable. Everything stays on your own network: no accounts, no cloud, no tracking.
+
+- 🔒 **Encrypted and pinned.** Every request uses TLS, and the Mac checks the phone's certificate fingerprint before sending anything.
+- 📁 **One folder, nothing else.** The phone shares only the folder you pick, and only while the app is open.
+- 🛡️ **Never overwrites.** Existing files are never replaced on either side, and interrupted transfers are cleaned up.
+- 🔌 **Wi-Fi or USB.** Use your LAN, or a cable with USB tethering.
+
+**Download:** grab the Android APK and the Mac app from the [latest release](https://github.com/PredatorWoah/OpenBridge/releases/latest). See the [changelog](CHANGELOG.md) for what's new.
+
+> **Status:** the automated tests pass, including a real Java/Swift TLS interoperability test, but behavior on physical devices has not yet been verified. See [verification status](docs/verification.md).
+
+## How it works
+
+![How OpenBridge works: choose a folder, start sharing, pair on the Mac, then browse and transfer](docs/images/how-it-works.svg)
 
 ## Requirements
 
-- Android 8.0/API 26 or later, private IPv4 Wi-Fi, and a writable folder in internal storage or an SD card.
+- Android 8.0/API 26 or later, private IPv4 Wi-Fi or USB tethering (see below), and a writable folder in internal storage or an SD card.
 - macOS 13 or later. Both devices must be reachable on the same local network; guest Wi-Fi/client isolation can prevent connections.
 - Development: JDK **17**, Gradle **8.13**, Android SDK platform **35**, and Android Studio or the command-line SDK. Mac builds need Xcode command-line tools/Swift 5.9 or later. These tools and dependency downloads are build-time requirements only.
 
-## Build and install
+## Install a release
+
+1. **Android:** download `OpenBridge-<version>.apk` from the release onto your phone and open it. Allow installing from your browser or file manager when asked.
+2. **Mac:** download `OpenBridge-<version>-macOS.zip`, unzip it, and move `OpenBridge.app` to Applications. The app is not notarized, so the first time, right-click it and choose **Open**, then **Open** again. If macOS says the app is damaged, run `xattr -dr com.apple.quarantine /Applications/OpenBridge.app` in Terminal.
+
+## Build from source
 
 ```sh
 git clone https://github.com/PredatorWoah/OpenBridge.git
@@ -36,12 +58,25 @@ The script makes an application bundle with a **local ad-hoc signature**. It doe
 ## Transfer files
 
 1. Put both devices on the same trusted LAN. Open Android OpenBridge and choose **Choose folder**. Select a folder under internal storage or the SD card in the system picker. Android intentionally disallows some roots; use a subfolder such as `Documents/OpenBridge`. Cloud providers are rejected.
-2. Press **Start sharing**. Keep the Android app visible and the phone awake. The screen shows the Wi-Fi IPv4 address, a dynamically allocated port, a SHA-256 certificate fingerprint, and a 64-character pairing secret.
+2. Press **Start sharing**. Keep the Android app visible; the screen stays on while sharing. The screen shows the connection type (Wi-Fi or USB cable), the phone's IPv4 address, a dynamically allocated port, a SHA-256 certificate fingerprint, and a 64-character pairing secret.
 3. Open the Mac app. Enter those four values, copying the fingerprint **directly from the phone**. Press **Pair and browse**. A wrong certificate or secret is rejected; TLS verification has no bypass.
 4. Use **Open**, **Up**, and **Refresh** to browse. Use **Download…** to save a file on Mac, or **Upload file…** to send a regular file into the current Android folder. Progress and failures appear in the window. Empty files are supported; the per-file limit is 64 GiB.
-5. Use **Stop** on Android when finished. Leaving the Android app or losing/changing Wi-Fi also stops sharing. Restarting creates new credentials; disconnect and pair again on Mac.
+5. Use **Stop** on Android when finished. Leaving the Android app, losing/changing Wi-Fi, or unplugging the USB cable also stops sharing. Restarting creates new credentials; disconnect and pair again on Mac.
 
-Existing filenames are rejected on both sides. Choose another name (rename the source before upload). Downloads use temporary sibling files; uploads use temporary SAF documents and publish only after the declared body is received. On a normal disconnection/cancellation, partial files are removed. After a process kill or power loss, remove any leftover `.openbridge-part-*` Android documents or `.openbridge-*.part` Mac files manually. A cancellation exactly at upload completion can mean the phone committed the file before the Mac received its acknowledgement; refresh before retrying.
+Existing filenames are rejected on both sides, before any data is transferred. On Android, names are compared ignoring case (`Photo.JPG` collides with `photo.jpg`), and the characters `" * : < > ? |` are not allowed. Choose another name (rename the source before upload). Downloads use temporary sibling files; uploads use temporary SAF documents and publish only after the declared body is received. On a normal disconnection/cancellation, partial files are removed. After a process kill or power loss, remove any leftover `.openbridge-part-*` Android documents (hidden from the Mac's file list) or `.openbridge-*.part` Mac files manually. A cancellation exactly at upload completion can mean the phone committed the file before the Mac received its acknowledgement; refresh before retrying.
+
+### Over a USB cable
+
+1. Plug the phone into the Mac. On the phone, tap **USB cable: turn on USB tethering** in OpenBridge (or find *USB tethering* under Settings → Network → Hotspot & tethering) and switch it on. Return to OpenBridge.
+2. Press **Start sharing**. It shows **Connection: USB cable**. When tethering is on, OpenBridge prefers the cable over Wi-Fi.
+3. Pair on the Mac exactly as above, using the IP, port, fingerprint and secret on the phone. Wi-Fi is not needed.
+
+Limitations, stated plainly:
+
+- **Android does not let apps turn on tethering**, so you switch it on yourself each time you plug in.
+- **macOS supports NCM tethering** (used by most Android 11+ phones, including Pixels) but **not RNDIS**, which many older phones and some Samsung models still use. If the Mac never shows a new network interface (System Settings → Network) after tethering is on, your phone uses RNDIS and USB mode will not work on a Mac. Use Wi-Fi.
+- Some carriers block tethering entirely.
+- Tethering also shares the phone's internet, and macOS may route its traffic through it, **using mobile data**. Put Wi-Fi above the phone in System Settings → Network → ⋯ → Set Service Order, or turn off mobile data while transferring.
 
 If a connection fails, check that sharing is still on, copy the current port/credentials, allow local network access on Mac, and disable Wi-Fi client isolation. Public IPs, hostnames, IPv6, cellular-only connections, and VPN interfaces are intentionally unsupported. Do not forward the port or tunnel the server to the internet.
 
@@ -72,7 +107,7 @@ The integration test is explicitly skipped when fixture variables are missing. C
 ## Structure and scope
 
 - `protocol/`: small Java streaming handler and storage interface, executable tests, CI-only TLS fixture. No Android dependencies.
-- `android/app/`: Kotlin/Compose UI, local Wi-Fi listener, AndroidKeyStore TLS identity, SAF-backed storage.
+- `android/app/`: Kotlin/Compose UI, local Wi-Fi/USB-tethering listener, AndroidKeyStore TLS identity, SAF-backed storage.
 - `macos/`: SwiftUI app, independent Swift wire codec, pinned TLS channel, streaming transfers and tests.
 - `docs/`: protocol contract, limitations, and manual verification.
 

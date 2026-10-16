@@ -4,6 +4,8 @@ import android.app.Application
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -54,7 +56,9 @@ class ShareModel(application: Application) : AndroidViewModel(application) {
                 }
                 main.post {
                     if (generation != current) created.close() else {
-                        server = created; busy = false; message = "Sharing on local Wi-Fi. Keep this app visible."
+                        server = created; busy = false
+                        message = if (created.usb) "Sharing over the USB cable. Keep this app visible."
+                            else "Sharing on local Wi-Fi. Keep this app visible."
                         created.start()
                     }
                 }
@@ -65,7 +69,7 @@ class ShareModel(application: Application) : AndroidViewModel(application) {
                         message = when (e) {
                             is SecurityException -> "Storage permission denied. Select the folder again."
                             is IllegalStateException -> e.message ?: "Unable to start sharing"
-                            else -> "Unable to start sharing. Check Wi-Fi and folder access."
+                            else -> "Unable to start sharing. Check Wi-Fi or USB tethering, and folder access."
                         }
                     }
                 }
@@ -83,6 +87,15 @@ class ShareModel(application: Application) : AndroidViewModel(application) {
 
 class MainActivity : ComponentActivity() {
     private lateinit var model: ShareModel
+
+    /** There is no public tethering-settings intent; fall back to the general network settings. */
+    private fun openTetheringSettings() {
+        val tether = Intent().setClassName("com.android.settings", "com.android.settings.TetherSettings")
+        try { startActivity(tether) } catch (_: Exception) {
+            runCatching { startActivity(Intent(Settings.ACTION_WIRELESS_SETTINGS)) }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         model = ViewModelProvider(this)[ShareModel::class.java]
@@ -90,12 +103,18 @@ class MainActivity : ComponentActivity() {
             if (result.resultCode == RESULT_OK) result.data?.data?.let(model::select)
         }
         setContent {
+            val sharing = model.server != null
+            // Sharing stops when the Activity stops, so stop the screen timeout from ending transfers.
+            LaunchedEffect(sharing) {
+                if (sharing) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
             MaterialTheme {
                 Surface(Modifier.fillMaxSize()) {
                     Column(Modifier.padding(24.dp).verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         Text("OpenBridge", style = MaterialTheme.typography.headlineLarge)
-                        Text("Share one approved folder with your Mac over local Wi-Fi.")
+                        Text("Share one approved folder with your Mac over local Wi-Fi or a USB cable.")
                         Button(onClick = {
                             picker.launch(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
                                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
@@ -110,11 +129,16 @@ class MainActivity : ComponentActivity() {
                             }
                             OutlinedButton(onClick = model::stop, enabled = model.server != null || model.busy) { Text("Stop") }
                         }
+                        if (model.server == null) {
+                            OutlinedButton(onClick = ::openTetheringSettings, enabled = !model.busy) {
+                                Text("USB cable: turn on USB tethering")
+                            }
+                        }
                         Text(model.message)
                         model.server?.let { sharing ->
                             SelectionContainer {
                                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    Text("Phone IP: ${sharing.host}\nPort: ${sharing.port}")
+                                    Text("Connection: ${if (sharing.usb) "USB cable" else "Wi-Fi"}\nPhone IP: ${sharing.host}\nPort: ${sharing.port}")
                                     Text("Certificate SHA-256:\n${sharing.fingerprint}")
                                     Text("Pairing secret:\n${sharing.pairingSecret}")
                                 }
@@ -122,7 +146,7 @@ class MainActivity : ComponentActivity() {
                             Text("Enter these values on your Mac. Verify the fingerprint directly from this screen. " +
                                 "Anyone with these credentials can read and upload in this folder while sharing is on.")
                         }
-                        Text("Leaving this app stops sharing. Interrupted uploads are discarded. " +
+                        Text("The screen stays on while sharing. Leaving this app stops sharing. Interrupted uploads are discarded. " +
                             "Existing filenames are never intentionally overwritten.")
                     }
                 }

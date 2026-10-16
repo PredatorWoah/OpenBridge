@@ -49,6 +49,11 @@ public final class Wire {
         return x == 10 || (x == 172 && y >= 16 && y <= 31) || (x == 192 && y == 168);
     }
 
+    /** Android USB tethering interfaces: RNDIS on older devices, NCM on newer ones (which macOS supports natively). */
+    public static boolean isUsbTetherInterface(String name) {
+        return name != null && name.matches("(rndis|usb|ncm)\\d+");
+    }
+
     public static void authenticate(DataInputStream in, byte[] secret) throws IOException {
         if (secret.length != 32) throw new IllegalArgumentException("Secret must be 32 bytes");
         byte[] magic = new byte[4], supplied = new byte[32];

@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 380" width="1200" height="380" role="img" aria-labelledby="t d">
+  <title id="t">OpenBridge</title>
+  <desc id="d">An Android phone and a Mac connected over Wi-Fi or a USB cable, with an encrypted, pinned connection.</desc>
+  <style>
+    .bg { fill: #f6f8fb; }
+    .card { fill: #ffffff; stroke: #d0d7e2; }
+    .ink { fill: #0f1b2d; }
+    .muted { fill: #5b6b80; }
+    .line { stroke: #2f6fed; }
+    .usb { stroke: #0f9d76; }
+    .accent { fill: #2f6fed; }
+    .accent2 { fill: #0f9d76; }
+    .screen { fill: #eaf1ff; }
+    .pill { fill: #ffffff; stroke: #d0d7e2; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #0d1117; }
+      .card { fill: #161b22; stroke: #30363d; }
+      .ink { fill: #e6edf3; }
+      .muted { fill: #9aa7b6; }
+      .line { stroke: #6ea0ff; }
+      .usb { stroke: #3fd0a3; }
+      .accent { fill: #6ea0ff; }
+      .accent2 { fill: #3fd0a3; }
+      .screen { fill: #1b2638; }
+      .pill { fill: #161b22; stroke: #30363d; }
+    }
+    text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  </style>
+  <rect class="bg" width="1200" height="380" rx="20"/>
+
+  <!-- Title -->
+  <text class="ink" x="600" y="70" font-size="44" font-weight="700" text-anchor="middle">OpenBridge</text>
+  <text class="muted" x="600" y="104" font-size="19" text-anchor="middle">Browse and move files between Android and macOS. Local, encrypted, no cloud.</text>
+
+  <!-- Phone -->
+  <rect class="card" x="250" y="140" width="130" height="220" rx="22" stroke-width="2"/>
+  <rect class="screen" x="262" y="164" width="106" height="172" rx="8"/>
+  <rect class="accent" x="300" y="150" width="30" height="5" rx="2.5"/>
+  <rect class="accent" x="274" y="180" width="60" height="9" rx="4.5" opacity=".9"/>
+  <rect class="muted" x="274" y="200" width="82" height="7" rx="3.5" opacity=".5"/>
+  <rect class="muted" x="274" y="215" width="70" height="7" rx="3.5" opacity=".5"/>
+  <rect class="muted" x="274" y="230" width="78" height="7" rx="3.5" opacity=".5"/>
+  <rect class="accent2" x="274" y="300" width="82" height="22" rx="11"/>
+
+  <!-- Mac -->
+  <rect class="card" x="790" y="150" width="230" height="150" rx="12" stroke-width="2"/>
+  <rect class="screen" x="802" y="162" width="206" height="126" rx="6"/>
+  <rect class="card" x="760" y="300" width="290" height="16" rx="8" stroke-width="2"/>
+  <rect class="accent" x="814" y="176" width="70" height="9" rx="4.5"/>
+  <g class="muted" opacity=".55">
+    <rect x="814" y="198" width="14" height="11" rx="2"/><rect x="836" y="200" width="110" height="7" rx="3.5"/>
+    <rect x="814" y="220" width="14" height="11" rx="2"/><rect x="836" y="222" width="90" height="7" rx="3.5"/>
+    <rect x="814" y="242" width="14" height="11" rx="2"/><rect x="836" y="244" width="124" height="7" rx="3.5"/>
+  </g>
+  <rect class="accent" x="814" y="264" width="48" height="12" rx="6" opacity=".9"/>
+
+  <!-- Wi-Fi link -->
+  <path class="line" d="M395 205 C 520 165, 660 165, 775 205" fill="none" stroke-width="3" stroke-dasharray="2 9" stroke-linecap="round"/>
+  <rect class="pill" x="532" y="152" width="136" height="34" rx="17" stroke-width="1.5"/>
+  <g class="accent" transform="translate(552 162)">
+    <path d="M0 6 a14 14 0 0 1 20 0 l-2.4 2.4 a10.6 10.6 0 0 0 -15.2 0z"/>
+    <path d="M4.4 10.4 a7.8 7.8 0 0 1 11.2 0 l-2.4 2.4 a4.4 4.4 0 0 0 -6.4 0z"/>
+    <circle cx="10" cy="15.5" r="2"/>
+  </g>
+  <text class="ink" x="582" y="175" font-size="16" font-weight="600">Wi-Fi</text>
+  <text class="muted" x="628" y="175" font-size="13">LAN</text>
+
+  <!-- USB link -->
+  <path class="usb" d="M395 300 C 520 330, 660 330, 760 304" fill="none" stroke-width="3" stroke-linecap="round"/>
+  <rect class="pill" x="526" y="300" width="148" height="34" rx="17" stroke-width="1.5"/>
+  <g class="accent2" transform="translate(546 309)">
+    <rect x="0" y="5" width="12" height="7" rx="1.5"/>
+    <rect x="12" y="7" width="8" height="3" rx="1"/>
+    <rect x="2" y="3" width="8" height="2" rx="1"/>
+  </g>
+  <text class="ink" x="574" y="323" font-size="16" font-weight="600">USB cable</text>
+
+  <!-- Lock -->
+  <g transform="translate(583 228)">
+    <circle class="pill" cx="17" cy="17" r="27" stroke-width="1.5"/>
+    <path class="line" d="M9 14 v-4 a8 8 0 0 1 16 0 v4" fill="none" stroke-width="3"/>
+    <rect class="accent" x="5" y="14" width="24" height="17" rx="4"/>
+  </g>
+  <text class="muted" x="600" y="296" font-size="13" text-anchor="middle">TLS + pinned certificate</text>
+</svg>

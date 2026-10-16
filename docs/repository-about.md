@@ -4,11 +4,11 @@ Prepared metadata for the GitHub repository. Applying this requires repository-s
 
 **Description**
 
-Open-source Android–macOS companion for secure local file browsing and two-way transfers over Wi-Fi. Built with Kotlin, Jetpack Compose, and SwiftUI.
+Move files between Android and Mac over Wi-Fi or USB. Encrypted, local only, no accounts or cloud. Kotlin + SwiftUI, MIT licensed.
 
 **Topics**
 
-`android`, `macos`, `kotlin`, `jetpack-compose`, `swift`, `swiftui`, `file-transfer`, `local-network`, `tls`, `open-source`
+`android`, `macos`, `kotlin`, `jetpack-compose`, `swift`, `swiftui`, `file-transfer`, `local-network`, `usb`, `tls`, `privacy`, `open-source`
 
 **Website**
 
