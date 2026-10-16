@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/images/icon.png" width="128" height="128" alt="OpenBridge app icon: a sunset-coloured arch bridge and its reflection"></p>
+
 # OpenBridge
 
 [![Latest release](https://img.shields.io/github/v/release/PredatorWoah/OpenBridge?sort=semver)](https://github.com/PredatorWoah/OpenBridge/releases/latest)

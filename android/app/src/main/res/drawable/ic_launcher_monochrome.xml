@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Single-colour arch, waterline and sun for Android 13+ themed icons. Same geometry as assets/icon/foreground.svg. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="1024" android:viewportHeight="1024">
+    <group android:pivotX="512" android:pivotY="512" android:scaleX="0.78" android:scaleY="0.78">
+        <group android:translateY="-122">
+            <path android:pathData="M232,620 A280,280 0 0,1 792,620"
+                android:strokeColor="#FFFFFFFF" android:strokeWidth="112" android:strokeLineCap="round" />
+            <path android:fillColor="#FFFFFFFF"
+                android:pathData="M164,620 H860 A14,14 0 0,1 860,648 H164 A14,14 0 0,1 164,620 Z" />
+            <path android:fillColor="#FFFFFFFF"
+                android:pathData="M432,340 A80,80 0 1,0 592,340 A80,80 0 1,0 432,340 Z" />
+        </group>
+    </group>
+</vector>
