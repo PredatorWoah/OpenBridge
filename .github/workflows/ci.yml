@@ -18,6 +18,13 @@ jobs:
           java-version: '17'
       - run: bash scripts/test-protocol.sh
       - run: python3 scripts/test-tls.py
+  mtp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container: swift:5.10
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/test-mtp.sh
   android:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest

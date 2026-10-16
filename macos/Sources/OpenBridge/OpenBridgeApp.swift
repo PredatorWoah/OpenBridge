@@ -15,7 +15,8 @@ final class BrowserModel: ObservableObject {
     @Published var status = "Start sharing on Android, then enter the credentials shown on the phone."
     @Published var error: String?
     @Published var fraction: Double = 0
-    private var client: BridgeClient?
+    @Published var connectionLabel = ""
+    private var client: (any FileSource)?
     private var task: Task<Void, Never>?
 
     private func run(_ work: @escaping () async throws -> Void) {
@@ -39,13 +40,28 @@ final class BrowserModel: ObservableObject {
             let entries = try await candidate.list()
             self.client = candidate; self.connected = true
             self.path = [("", "Shared folder")]; self.entries = entries
+            self.connectionLabel = "\(self.host):\(self.port) on the local network"
             self.status = "Paired. Certificate fingerprint matched the value entered from the phone."
+        }
+    }
+
+    /// USB cable in File transfer (MTP) mode: no app or pairing needed on the phone.
+    func connectUSB() {
+        run {
+            self.status = "Looking for a phone on USB…"
+            let usb = try await MTPClient.connectUSB()
+            let storages = try await usb.list(id: "")
+            self.client = usb; self.connected = true
+            self.path = [("", usb.name)]; self.entries = storages
+            self.connectionLabel = "\(usb.name) over USB"
+            self.status = "Connected over USB. Open a storage to browse."
         }
     }
 
     func disconnect() {
         guard !busy else { return }
-        client = nil; connected = false; entries = []; path = [("", "Shared folder")]
+        if let old = client { Task { await old.disconnect() } }
+        client = nil; connected = false; entries = []; path = [("", "Shared folder")]; connectionLabel = ""
         secret = ""; fingerprint = ""; error = nil
         status = "Disconnected. Credentials are kept only in memory."
     }
@@ -122,9 +138,13 @@ struct BrowserView: View {
                 TextField("Certificate SHA-256 (64 hex characters)", text: $model.fingerprint)
                 SecureField("Pairing secret (64 hex characters)", text: $model.secret)
                 Button("Pair and browse", action: model.connect).disabled(model.busy)
+                Divider().padding(.vertical, 6)
+                Text("USB cable").font(.headline)
+                Text("Plug in your phone, unlock it, and choose File transfer in its USB notification. Nothing needs to be installed on the phone.")
+                Button("Connect over USB", action: model.connectUSB).disabled(model.busy)
             } else {
                 HStack {
-                    Text("\(model.host):\(model.port)")
+                    Text(model.connectionLabel)
                     Spacer()
                     Button("Disconnect", action: model.disconnect).disabled(model.busy)
                 }
@@ -156,7 +176,7 @@ struct BrowserView: View {
             }
             Text(model.status).textSelection(.enabled)
             if let error = model.error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
-            Text("Sharing stops when you leave the Android app. Restarting it requires new pairing credentials.")
+            Text(model.connectionLabel.hasSuffix("over USB") ? "Keep the phone unlocked and plugged in during transfers." : "Sharing stops when you leave the Android app. Restarting it requires new pairing credentials.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .padding(24)
