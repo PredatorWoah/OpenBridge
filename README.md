@@ -1,8 +1,25 @@
 # OpenBridge
 
-An open-source Android ↔ macOS companion. Phase 1 shares **one user-selected local Android folder** over Wi-Fi or a USB cable: browse folders, download to Mac, and upload to Android. No accounts, hosted backend, discovery service, telemetry, or cloud dependency at runtime. Licensed under [MIT](LICENSE).
+[![Latest release](https://img.shields.io/github/v/release/PredatorWoah/OpenBridge?sort=semver)](https://github.com/PredatorWoah/OpenBridge/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Platforms](https://img.shields.io/badge/platforms-Android%208%2B%20%7C%20macOS%2013%2B-lightgrey)
 
-This is an early MVP implementation. See [verification status](docs/verification.md) for exactly what has and has not been tested. Physical-device behavior is not yet verified.
+![OpenBridge: an Android phone and a Mac connected over Wi-Fi or a USB cable](docs/images/hero.svg)
+
+**OpenBridge is a free, open-source way to move files between an Android phone and a Mac.** Pick one folder on the phone, and browse, download and upload it from your Mac over your home Wi-Fi or a USB cable. Everything stays on your own network: no accounts, no cloud, no tracking.
+
+- 🔒 **Encrypted and pinned.** Every request uses TLS, and the Mac checks the phone's certificate fingerprint before sending anything.
+- 📁 **One folder, nothing else.** The phone shares only the folder you pick, and only while the app is open.
+- 🛡️ **Never overwrites.** Existing files are never replaced on either side, and interrupted transfers are cleaned up.
+- 🔌 **Wi-Fi or USB.** Use your LAN, or a cable with USB tethering.
+
+**Download:** grab the Android APK and the Mac app from the [latest release](https://github.com/PredatorWoah/OpenBridge/releases/latest). See the [changelog](CHANGELOG.md) for what's new.
+
+> **Status:** the automated tests pass, including a real Java/Swift TLS interoperability test, but behavior on physical devices has not yet been verified. See [verification status](docs/verification.md).
+
+## How it works
+
+![How OpenBridge works: choose a folder, start sharing, pair on the Mac, then browse and transfer](docs/images/how-it-works.svg)
 
 ## Requirements
 
@@ -10,7 +27,12 @@ This is an early MVP implementation. See [verification status](docs/verification
 - macOS 13 or later. Both devices must be reachable on the same local network; guest Wi-Fi/client isolation can prevent connections.
 - Development: JDK **17**, Gradle **8.13**, Android SDK platform **35**, and Android Studio or the command-line SDK. Mac builds need Xcode command-line tools/Swift 5.9 or later. These tools and dependency downloads are build-time requirements only.
 
-## Build and install
+## Install a release
+
+1. **Android:** download `OpenBridge-<version>.apk` from the release onto your phone and open it. Allow installing from your browser or file manager when asked.
+2. **Mac:** download `OpenBridge-<version>-macOS.zip`, unzip it, and move `OpenBridge.app` to Applications. The app is not notarized, so the first time, right-click it and choose **Open**, then **Open** again. If macOS says the app is damaged, run `xattr -dr com.apple.quarantine /Applications/OpenBridge.app` in Terminal.
+
+## Build from source
 
 ```sh
 git clone https://github.com/PredatorWoah/OpenBridge.git
