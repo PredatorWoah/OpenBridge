@@ -18,13 +18,15 @@ extension BridgeClient: FileSource {
 public final class MTPClient: FileSource, @unchecked Sendable {
     public let name: String
     private let queue = DispatchQueue(label: "org.openbridge.mtp")
+    /// The phone this client was opened on. Entry IDs and upload handles are only meaningful on it.
+    private let identity: MTPDeviceIdentity
     private let reconnect: () throws -> MTPSession
     private var session: MTPSession?
     private static let chunk = 1 << 20
     private static let progressStep: Int64 = 1 << 20
 
-    init(name: String, session: MTPSession?, reconnect: @escaping () throws -> MTPSession) {
-        self.name = name; self.session = session; self.reconnect = reconnect
+    init(name: String, identity: MTPDeviceIdentity, session: MTPSession?, reconnect: @escaping () throws -> MTPSession) {
+        self.name = name; self.identity = identity; self.session = session; self.reconnect = reconnect
     }
 
     #if canImport(IOUSBHost)
@@ -34,8 +36,9 @@ public final class MTPClient: FileSource, @unchecked Sendable {
             DispatchQueue.global(qos: .userInitiated).async {
                 do {
                     let (session, info) = try USBTransport.openSession()
-                    continuation.resume(returning: MTPClient(name: info.displayName, session: session,
-                                                             reconnect: { try USBTransport.openSession().0 }))
+                    let identity = info.identity
+                    continuation.resume(returning: MTPClient(name: info.displayName, identity: identity, session: session,
+                                                             reconnect: { try USBTransport.openSession(matching: identity).0 }))
                 } catch { continuation.resume(throwing: error) }
             }
         }
@@ -124,8 +127,10 @@ public final class MTPClient: FileSource, @unchecked Sendable {
 
         let file = try FileHandle(forReadingFrom: source)
         defer { try? file.close() }
-        let (handle, stream) = try await run { try $0.beginUpload(storage: storage, parent: location.handle, name: name, size: size) }
+        // The object exists on the phone from here on; every failure below must go through cleanup.
+        let created = try await run { try $0.createObject(storage: storage, parent: location.handle, name: name, size: size) }
         do {
+            let stream = try await run { try $0.beginSend(created) }
             var sent: Int64 = 0, reported: Int64 = 0
             await progress(0, Int64(size))
             while UInt64(sent) < size {
@@ -141,9 +146,11 @@ public final class MTPClient: FileSource, @unchecked Sendable {
             await progress(sent, Int64(size))
         } catch {
             await abandon()
-            // Remove the partial file the phone created, on a fresh session.
-            _ = try? await run { try $0.delete(handle) }
-            throw error
+            // Remove the partial file on a fresh session, but only on the same phone and only if the handle
+            // still names that same object.
+            let removed = (try? await run { try $0.deleteIfUnchanged(created) }) ?? false
+            if removed { throw error }
+            throw BridgeError.message("\(error.localizedDescription) A partial copy of “\(name)” may remain on the phone; delete it there before retrying.")
         }
     }
 
@@ -179,7 +186,7 @@ public final class MTPClient: FileSource, @unchecked Sendable {
         try await withCheckedThrowingContinuation { continuation in
             queue.async {
                 do {
-                    let current = try self.session ?? self.reconnect()
+                    let current = try self.session ?? self.reconnectSamePhone()
                     self.session = current
                     continuation.resume(returning: try work(current))
                 } catch {
@@ -188,6 +195,16 @@ public final class MTPClient: FileSource, @unchecked Sendable {
                 }
             }
         }
+    }
+
+    /// Reconnects and proves it is the same phone; IDs on screen and upload handles belong to that phone only.
+    private func reconnectSamePhone() throws -> MTPSession {
+        let candidate = try reconnect()
+        guard (try? candidate.deviceInfo().identity) == identity else {
+            candidate.close()
+            throw BridgeError.message("A different phone is connected now. Disconnect and connect again.")
+        }
+        return candidate
     }
 
     /// Resets the phone after a cancelled or broken transfer; the next operation reconnects.

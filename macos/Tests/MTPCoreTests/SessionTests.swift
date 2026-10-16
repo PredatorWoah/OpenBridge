@@ -20,6 +20,7 @@ final class SessionTests: XCTestCase {
         let phone = FakePhone()
         let session = MTPSession(transport: phone, chunkSize: 4096)
         XCTAssertEqual(try session.deviceInfo().displayName, "Google Pixel 8")
+        XCTAssertEqual(try session.deviceInfo().identity, MTPDeviceIdentity(manufacturer: "Google", model: "Pixel 8", serialNumber: "SERIAL"))
         try session.open()
         let storages = try session.storages()
         XCTAssertEqual(storages.map(\.name), ["Internal shared storage"])

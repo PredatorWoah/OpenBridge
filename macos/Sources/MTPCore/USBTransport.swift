@@ -74,8 +74,9 @@ public final class USBTransport: MTPTransport {
     // MARK: Discovery
 
     /// Finds a USB-connected phone in File transfer (MTP) or PTP mode and opens a session.
-    public static func openSession() throws -> (MTPSession, MTPDeviceInfo) {
-        var busy = false
+    /// With `identity`, only that phone is accepted, so a reconnect never switches devices.
+    public static func openSession(matching identity: MTPDeviceIdentity? = nil) throws -> (MTPSession, MTPDeviceInfo) {
+        var busy = false, other = false
         for attempt in 0..<2 {
             // Android's MTP interface is vendor class 0xFF/0xFF/0; PTP mode uses the still-image class 6/1/1.
             for (interfaceClass, subclass, interfaceProtocol) in [(0xFF, 0xFF, 0x00), (0x06, 0x01, 0x01)] {
@@ -86,6 +87,7 @@ public final class USBTransport: MTPTransport {
                         let session = MTPSession(transport: transport)
                         do {
                             let info = try session.deviceInfo()
+                            if let identity, info.identity != identity { other = true; transport.close(); continue }
                             try session.open()
                             return (session, info)
                         } catch { transport.close() }
@@ -98,6 +100,9 @@ public final class USBTransport: MTPTransport {
             // so stopping it only lets this app open the phone; nothing is lost.
             guard busy, attempt == 0 else { break }
             releaseFromImageCapture()
+        }
+        if identity != nil && other && !busy {
+            throw MTPError.transport("The phone you were using is no longer connected (a different one is). Disconnect and connect again.")
         }
         if busy {
             throw MTPError.transport("Another app (Photos, Image Capture or a file transfer app) is using the phone. Quit it and try again.")

@@ -1,12 +1,27 @@
 # Verification status and manual acceptance
 
-Initial implementation environment: Linux, 2026-10-16. No Android hardware or macOS machine is attached. The workspace lacks the `javac` launcher, Gradle, Android SDK, Swift, and Xcode. Java 21's compiler module is available and was used with Java 17 language/bytecode settings (the image lacks the Java 17 API signature archive). Its configured network proxy refuses CLI connections, so tools cannot be downloaded here. GitHub connector read access works separately; publishing returned a 403 integration-permission error.
+Status as of 0.5.0. **Everything below is automated; nothing has yet been verified on physical devices.**
 
-Local results: **86 Java protocol assertions passed**, compilation passed with lint warnings treated as errors, and repository checks passed (XML/plist parsing, shell syntax, required files and Git whitespace checks). The Python/Java socket TLS integration test was attempted but the sandbox rejected socket creation (`Operation not permitted`); a request to enable networking was cancelled. Android build/lint and Swift build/tests have not run. The checked-in CI supplies full JDK 17 and both native build environments, but cannot run until the branch is published. The existence of a CI workflow is not evidence it passed.
+## Continuous integration
 
-Automated coverage includes protocol authentication, malformed headers, strict UTF-8 and bounds, opaque-ID traversal rejection, directory listing, binary multi-chunk/Unicode/empty file transfers, collisions preserving the original, interrupted upload cleanup, and commit failures. The macOS integration suite starts a real Java TLS server, then exercises the production Swift TLS channel/client with a pinned certificate, both transfer directions, binary equality, progress, filename collisions, temporary-file cleanup, and wrong-pin/wrong-secret rejection. The loopback fixture is test-only and never included in either application.
+| Trigger | Jobs | What runs |
+| --- | --- | --- |
+| Every push and pull request | `protocol`, `mtp`, `repository` | Java protocol tests, the real Java TLS server against a Python client, the MTP protocol tests (Swift on Linux), and repository checks. |
+| Manual (Actions → *Build and protocol checks* → Run workflow) | adds `android`, `macos` | Android build and lint; macOS build, all Swift tests (including the Java/Swift TLS interoperability test and the MTP client tests) and the app bundle. |
+| Release (Actions → *Release*, or a `v*` tag) | `verify`, `android`, `macos`, `publish` | Checks the version matches both apps and has a changelog entry, reruns the tests, builds both apps and publishes them with checksums. |
+
+Native builds stay manual to save CI minutes. Run them before merging anything that touches `android/` or `macos/`.
+
+## Automated coverage
+
+- **Wi-Fi protocol (OB01):** authentication, malformed headers, strict UTF-8 and bounds, opaque-ID traversal rejection, listings, binary multi-chunk, Unicode and empty transfers, collisions that preserve the original, interrupted-upload cleanup, commit failures, and Android filename rules (storage-provider characters, case-insensitive collisions, reserved temporary names).
+- **TLS:** a real Java TLS server exercised by a Python client and by the production Swift client, with a pinned certificate, both transfer directions, progress, collisions, temporary-file cleanup, and wrong-pin and wrong-secret rejection. The fixture is test-only and never shipped.
+- **USB File transfer (MTP):** a simulated phone that enforces USB bulk rules (short packets end a data phase, exact multiples need a zero-length packet, unknown-length data phases) covers sessions, storages, listings, downloads and uploads across packet boundaries, files of 4 GiB or more, free-space checks, case-insensitive collisions, error responses, recovery after a USB failure, device identity on reconnect, and cleanup of failed uploads.
+- **Builds:** Android lint, the macOS release bundle, and checks that both apps reference the app icon.
 
 ## Physical Android + Mac acceptance (not yet performed)
+
+Start with one Pixel and one Samsung. USB File transfer stays labelled beta until these pass.
 
 Record device model, Android/API version, storage/provider, macOS version, network type, commit SHA, result, and any logs without secrets. All items remain unverified until performed:
 
