@@ -1,0 +1,25 @@
+# Verification status and manual acceptance
+
+Initial implementation environment: Linux, 2026-10-16. No Android hardware or macOS machine is attached. The workspace lacks the `javac` launcher, Gradle, Android SDK, Swift, and Xcode. Java 21's compiler module is available and was used with Java 17 language/bytecode settings (the image lacks the Java 17 API signature archive). Its configured network proxy refuses CLI connections, so tools cannot be downloaded here. GitHub connector read access works separately; publishing returned a 403 integration-permission error.
+
+Local results: **86 Java protocol assertions passed**, compilation passed with lint warnings treated as errors, and repository checks passed (XML/plist parsing, shell syntax, required files and Git whitespace checks). The Python/Java socket TLS integration test was attempted but the sandbox rejected socket creation (`Operation not permitted`); a request to enable networking was cancelled. Android build/lint and Swift build/tests have not run. The checked-in CI supplies full JDK 17 and both native build environments, but cannot run until the branch is published. The existence of a CI workflow is not evidence it passed.
+
+Automated coverage includes protocol authentication, malformed headers, strict UTF-8 and bounds, opaque-ID traversal rejection, directory listing, binary multi-chunk/Unicode/empty file transfers, collisions preserving the original, interrupted upload cleanup, and commit failures. The macOS integration suite starts a real Java TLS server, then exercises the production Swift TLS channel/client with a pinned certificate, both transfer directions, binary equality, progress, filename collisions, temporary-file cleanup, and wrong-pin/wrong-secret rejection. The loopback fixture is test-only and never included in either application.
+
+## Physical Android + Mac acceptance (not yet performed)
+
+Record device model, Android/API version, storage/provider, macOS version, network type, commit SHA, result, and any logs without secrets. All items remain unverified until performed:
+
+- [ ] Build/install the APK and Mac bundle; confirm local-network prompt/allow behavior on supported macOS versions.
+- [ ] Choose an internal-storage subfolder and an SD-card subfolder; reject cloud providers and unsupported roots. Confirm access outside the chosen tree is impossible. Confirm revoked grants produce a clear error.
+- [ ] Verify AndroidKeyStore certificate generation and TLS handshakes on Android 8/API 26 and current Android, including TLS 1.2/1.3 compatibility and screen rotation.
+- [ ] Pair by copying the phone's fingerprint and secret. Wrong fingerprint, wrong secret, old credentials and a public endpoint must fail without file access. A plaintext client must not obtain metadata.
+- [ ] Browse empty, nested, Unicode and large folders. Deleted/stale IDs should fail safely; refresh should recover.
+- [ ] Transfer empty files, Unicode filenames, random binary files, files larger than 64 KiB, and a multi-gigabyte file both ways. Compare SHA-256 locally on both devices. Confirm progress, bounded memory, and useful errors.
+- [ ] Upload/download a duplicate name and simultaneous same-name uploads. Verify original bytes remain intact. Test built-in SAF provider rename behavior and a competing external writer. Stop release if exclusive collision behavior is not reliable under the supported usage model.
+- [ ] Switch off Wi-Fi, change Wi-Fi addresses, enable guest-network isolation, cancel, stop sharing, lock the phone, switch apps and rotate the device during transfers. The server should close on background/network change, partial transfers should fail, normal partials should be removed, and restart should require new credentials.
+- [ ] Fill Android storage and Mac destination storage, revoke folder access, remove the SD card, select read-only storage, and edit the source while transferring. Verify errors and cleanup without damaging existing files.
+- [ ] Force-kill both apps mid-transfer; identify/remove documented temporary files and confirm no incomplete upload is presented as success. Refresh after a lost final acknowledgement.
+- [ ] Check that the listening socket is bound only to the selected private Wi-Fi IPv4 address and accepts no public/cellular/VPN interface. Confirm no router port mapping is requested. This cannot prevent deliberate external forwarding by a network administrator.
+
+The MVP intentionally stops when Android leaves the foreground. A foreground service, wake lock, persistent pairing and transfer resume require a later explicit design and permission review; they are not hidden prerequisites for Phase 1.

@@ -1,0 +1,47 @@
+package org.openbridge.protocol;
+
+import java.io.*;
+import java.util.*;
+
+/** Capability-based test store; never uses host filesystem paths. */
+public final class MemoryStore implements Store {
+    public final Map<String, byte[]> files = new LinkedHashMap<>();
+    public int aborted;
+    public boolean failCommit;
+    public MemoryStore() { files.put("hello.txt", "Hello from Android\n".getBytes(java.nio.charset.StandardCharsets.UTF_8)); }
+    @Override public synchronized List<Entry> list(String id) throws IOException {
+        if (!id.isEmpty() && !id.equals("folder-id")) throw new IOException("Unknown directory");
+        if (id.equals("folder-id")) return Collections.emptyList();
+        List<Entry> entries = new ArrayList<>();
+        entries.add(new Entry("folder-id", "Nested", true, 0));
+        files.forEach((name, data) -> entries.add(new Entry("file:" + name, name, false, data.length)));
+        return entries;
+    }
+    @Override public synchronized Read open(String id) throws IOException {
+        if (!id.startsWith("file:") || !files.containsKey(id.substring(5))) throw new IOException("Unknown file");
+        byte[] content = files.get(id.substring(5)).clone();
+        return new Read() {
+            private final InputStream stream = new ByteArrayInputStream(content);
+            public long size() { return content.length; }
+            public InputStream stream() { return stream; }
+            public void close() throws IOException { stream.close(); }
+        };
+    }
+    @Override public synchronized Upload create(String id, String name) throws IOException {
+        if (!id.isEmpty()) throw new IOException("Unknown directory");
+        if (files.containsKey(name)) throw new IOException("Filename already exists");
+        return new Upload() {
+            private final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+            private boolean committed;
+            public OutputStream stream() { return buffer; }
+            public void commit() throws IOException {
+                synchronized (MemoryStore.this) {
+                    if (failCommit) throw new IOException("Storage full");
+                    if (files.containsKey(name)) throw new IOException("Filename already exists");
+                    files.put(name, buffer.toByteArray()); committed = true;
+                }
+            }
+            public void close() { if (!committed) aborted++; }
+        };
+    }
+}
