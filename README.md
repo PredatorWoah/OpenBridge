@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/images/icon.png" width="128" height="128" alt="OpenBridge app icon: a sunset-coloured arch bridge with a sun at its keystone"></p>
+
 # OpenBridge
 
 [![Latest release](https://img.shields.io/github/v/release/PredatorWoah/OpenBridge?sort=semver)](https://github.com/PredatorWoah/OpenBridge/releases/latest)
@@ -11,7 +13,7 @@
 - 🔒 **Encrypted and pinned.** Every request uses TLS, and the Mac checks the phone's certificate fingerprint before sending anything.
 - 📁 **One folder, nothing else.** The phone shares only the folder you pick, and only while the app is open.
 - 🛡️ **Never overwrites.** Existing files are never replaced on either side, and interrupted transfers are cleaned up.
-- 🔌 **Wi-Fi or USB.** Use your LAN, or a cable with USB tethering.
+- 🔌 **Wi-Fi or USB.** Use your LAN, or just plug in a cable and choose File transfer, like on Windows.
 
 **Download:** grab the Android APK and the Mac app from the [latest release](https://github.com/PredatorWoah/OpenBridge/releases/latest). See the [changelog](CHANGELOG.md) for what's new.
 
@@ -65,7 +67,24 @@ The script makes an application bundle with a **local ad-hoc signature**. It doe
 
 Existing filenames are rejected on both sides, before any data is transferred. On Android, names are compared ignoring case (`Photo.JPG` collides with `photo.jpg`), and the characters `" * : < > ? |` are not allowed. Choose another name (rename the source before upload). Downloads use temporary sibling files; uploads use temporary SAF documents and publish only after the declared body is received. On a normal disconnection/cancellation, partial files are removed. After a process kill or power loss, remove any leftover `.openbridge-part-*` Android documents (hidden from the Mac's file list) or `.openbridge-*.part` Mac files manually. A cancellation exactly at upload completion can mean the phone committed the file before the Mac received its acknowledgement; refresh before retrying.
 
-### Over a USB cable
+### Over a USB cable (File transfer, like on Windows)
+
+No app or pairing is needed on the phone for this.
+
+1. Plug the phone into the Mac and unlock it.
+2. Pull down the notification shade, tap the **USB** notification (often "Charging this device via USB"), and choose **File transfer**.
+3. In the Mac app, press **Connect over USB**. Your phone's storage appears; open it to browse, download and upload.
+
+Good to know:
+
+- If Photos, Image Capture, Android File Transfer, OpenMTP or a similar app is using the phone, the Mac app cannot open it. OpenBridge releases it from macOS's background photo import service automatically; quit any other such app.
+- Files are never replaced. Names are compared ignoring case, like the phone's storage does.
+- Large files work both ways, including files of 4 GiB and more. Uploads check the phone's free space first.
+- Keep the phone unlocked. Some phones close the connection when the screen locks.
+
+### Over a USB cable with tethering (alternative)
+
+This uses the OpenBridge Android app and the same encrypted protocol as Wi-Fi, over the cable.
 
 1. Plug the phone into the Mac. On the phone, tap **USB cable: turn on USB tethering** in OpenBridge (or find *USB tethering* under Settings → Network → Hotspot & tethering) and switch it on. Return to OpenBridge.
 2. Press **Start sharing**. It shows **Connection: USB cable**. When tethering is on, OpenBridge prefers the cable over Wi-Fi.

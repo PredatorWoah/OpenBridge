@@ -21,9 +21,14 @@ with (root / "macos/Info.plist").open("rb") as handle:
 assert info["CFBundleExecutable"] == "OpenBridge"
 assert info["NSLocalNetworkUsageDescription"]
 assert "NSAppTransportSecurity" not in info
+assert info["CFBundleIconFile"] == "AppIcon" and (root / "macos/AppIcon.icns").read_bytes()[:4] == b"icns"
+application = manifest.find("application").attrib
+assert application[ns + "icon"] == "@mipmap/ic_launcher" and application[ns + "roundIcon"] == "@mipmap/ic_launcher_round"
 for required in ["LICENSE", "SECURITY.md", "README.md", "docs/protocol.md", "docs/verification.md",
                  "macos/Package.swift", ".github/workflows/ci.yml", ".github/workflows/release.yml",
-                 "CHANGELOG.md", "docs/images/hero.svg", "docs/images/how-it-works.svg"]:
+                 "CHANGELOG.md", "docs/images/hero.svg", "docs/images/how-it-works.svg",
+                 "macos/AppIcon.icns", "assets/icon/icon.svg",
+                 "android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml"]:
     assert (root / required).is_file(), required
 for script in (root / "scripts").glob("*.sh"):
     subprocess.run(["bash", "-n", str(script)], check=True)

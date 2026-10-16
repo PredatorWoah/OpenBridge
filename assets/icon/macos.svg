@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+<defs>
+    <radialGradient id="bg" cx="50%" cy="28%" r="85%">
+      <stop offset="0" stop-color="#3a2470"/><stop offset=".55" stop-color="#1d1546"/><stop offset="1" stop-color="#0d0b26"/>
+    </radialGradient>
+    <linearGradient id="left" x1="232" y1="620" x2="512" y2="300" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6d5dfc"/><stop offset="1" stop-color="#ff5c8a"/>
+    </linearGradient>
+    <linearGradient id="right" x1="512" y1="300" x2="792" y2="620" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ff5c8a"/><stop offset="1" stop-color="#ffb347"/>
+    </linearGradient>
+    <radialGradient id="sunglow"><stop offset="0" stop-color="#fff3b0" stop-opacity=".95"/><stop offset="1" stop-color="#ffd166" stop-opacity="0"/></radialGradient>
+    <linearGradient id="sun" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fffbe0"/><stop offset="1" stop-color="#ffd166"/></linearGradient>
+    <g id="arch">
+      <path d="M232 620 A280 280 0 0 1 512 340" fill="none" stroke="url(#left)" stroke-width="112" stroke-linecap="round"/>
+      <path d="M512 340 A280 280 0 0 1 792 620" fill="none" stroke="url(#right)" stroke-width="112" stroke-linecap="round"/>
+    </g>
+    <clipPath id="body"><rect x="100" y="100" width="824" height="824" rx="185"/></clipPath>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#000" flood-opacity=".32"/></filter>
+  </defs>
+<rect x="100" y="100" width="824" height="824" rx="185" fill="#1d1546" filter="url(#shadow)"/>
+<g clip-path="url(#body)"><g transform="translate(100 100) scale(.8046875)">
+<rect width="1024" height="1024" fill="url(#bg)"/>
+<g transform="translate(0 34)">
+    <use href="#arch"/>
+    <rect x="150" y="620" width="724" height="28" rx="14" fill="#fff6e0" opacity=".95"/>
+    <circle cx="512" cy="340" r="160" fill="url(#sunglow)" opacity=".6"/>
+    <circle cx="512" cy="340" r="60" fill="url(#sun)"/>
+  </g>
+</g></g>
+<rect x="100.5" y="100.5" width="823" height="823" rx="184.5" fill="none" stroke="#fff" stroke-opacity=".08"/>
+</svg>
