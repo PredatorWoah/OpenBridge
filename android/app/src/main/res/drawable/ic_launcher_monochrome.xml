@@ -1,15 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Themed icon (Android 13+): arch with a gap around the sun keystone, and the waterline,
-     centred on the icon. Coordinates match assets/icon/icon.svg. -->
+<!-- Themed icon (Android 13+): arch ending flat on the waterline, a gap around the sun keystone, and a
+     faint reflection; centred on the waterline like the full-colour icon. Matches assets/icon/icon.svg. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="1024" android:viewportHeight="1024">
     <group android:pivotX="512" android:pivotY="512" android:scaleX="0.78" android:scaleY="0.78">
-        <group android:translateY="40">
+        <group android:translateY="-122">
+            <path android:pathData="M232,648 A280,280 0 0,0 792,648"
+                android:strokeColor="#FFFFFFFF" android:strokeAlpha="0.35" android:strokeWidth="112" android:strokeLineCap="butt" />
             <path android:pathData="M232,620 A280,280 0 0,1 362.2,383.5"
-                android:strokeColor="#FFFFFFFF" android:strokeWidth="112" android:strokeLineCap="round" />
+                android:strokeColor="#FFFFFFFF" android:strokeWidth="112" android:strokeLineCap="butt" />
             <path android:pathData="M661.8,383.5 A280,280 0 0,1 792,620"
-                android:strokeColor="#FFFFFFFF" android:strokeWidth="112" android:strokeLineCap="round" />
+                android:strokeColor="#FFFFFFFF" android:strokeWidth="112" android:strokeLineCap="butt" />
+            <path android:fillColor="#FFFFFFFF"
+                android:pathData="M306.2,383.5 A56,56 0 1,0 418.2,383.5 A56,56 0 1,0 306.2,383.5 Z" />
+            <path android:fillColor="#FFFFFFFF"
+                android:pathData="M605.8,383.5 A56,56 0 1,0 717.8,383.5 A56,56 0 1,0 605.8,383.5 Z" />
             <path android:fillColor="#FFFFFFFF"
                 android:pathData="M164,620 H860 A14,14 0 0,1 860,648 H164 A14,14 0 0,1 164,620 Z" />
             <path android:fillColor="#FFFFFFFF"

@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/images/icon.png" width="128" height="128" alt="OpenBridge app icon: a sunset-coloured arch bridge with a sun at its keystone"></p>
+<p align="center"><img src="docs/images/icon.png" width="128" height="128" alt="OpenBridge app icon: a sunset-coloured glass arch bridge with a glowing sun at its keystone"></p>
 
 # OpenBridge
 

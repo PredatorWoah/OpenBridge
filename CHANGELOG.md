@@ -4,14 +4,19 @@ All notable changes to OpenBridge are recorded here. Every release has an entry;
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-16
+
+USB File transfer on the Mac, like on Windows, and a new app icon.
+
 ### Added
-- **New app icon** on Android and macOS: a sunset-coloured arch bridge with a sun as its keystone, over a bright waterline. Adaptive on Android, including a monochrome layer for themed icons on Android 13 and later.
+- **New app icon** on Android and macOS: a sunset-coloured glass arch bridge with a glowing sun as its keystone, reflected in the water, in the style of Apple's Liquid Glass icons. Adaptive on Android, including a monochrome layer for themed icons on Android 13 and later.
 - **USB File transfer on the Mac, like on Windows.** Plug in the phone, choose *File transfer* in its USB notification, and press **Connect over USB**. No app or pairing is needed on the phone. Browse every storage, download, and upload, with progress and cancel. Built directly on Apple's USB framework: nothing extra to install.
 - Uploads over USB never replace files (names compared ignoring case) and partial uploads are removed if a transfer fails. The Mac reconnects automatically after a USB error.
 - Files of 4 GiB and more transfer in both directions over USB, and uploads check the phone's free space before sending anything.
 
 ### Known limitations
-- USB File transfer is not yet verified with physical phones.
+- USB File transfer is not yet verified with physical phones. Please report your phone model if it is not found or a transfer fails.
+- The APK is still signed with a build-machine debug key; if installing over 1.0.0 fails, uninstall 1.0.0 first.
 
 ## [1.0.0] - 2026-10-16
 
@@ -35,4 +40,5 @@ The first release: share one Android folder with a Mac, over Wi-Fi or a USB cabl
 - The APK is signed with a build-machine debug key, so a later version may need the previous one uninstalled first. The Mac app is ad-hoc signed and not notarized (see the README for how to open it).
 - No resumable transfers, folder creation, deletion, multi-file upload or automatic discovery.
 
+[1.1.0]: https://github.com/PredatorWoah/OpenBridge/releases/tag/v1.1.0
 [1.0.0]: https://github.com/PredatorWoah/OpenBridge/releases/tag/v1.0.0
