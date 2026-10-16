@@ -45,6 +45,14 @@ jobs:
       - run: bash scripts/test-protocol.sh
       - run: python3 scripts/test-tls.py
       - run: gradle :protocol:check :android:app:assembleDebug :android:app:lintDebug --stacktrace
+      - name: Check release signing with a throwaway key
+        run: |
+          keytool -genkeypair -alias ci -keyalg RSA -keysize 2048 -storetype PKCS12 -keystore "$RUNNER_TEMP/ci.p12" \
+            -storepass ci-only-password -dname CN=OpenBridge-CI -validity 1
+          OPENBRIDGE_KEYSTORE="$RUNNER_TEMP/ci.p12" OPENBRIDGE_KEYSTORE_PASSWORD=ci-only-password OPENBRIDGE_KEY_ALIAS=ci \
+            gradle :android:app:assembleRelease :android:app:lintRelease --stacktrace
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs android/app/build/outputs/apk/release/app-release.apk | tee certs.txt
+          grep -q 'CN=OpenBridge-CI' certs.txt
       - uses: actions/upload-artifact@v4
         with:
           name: OpenBridge-Android-debug

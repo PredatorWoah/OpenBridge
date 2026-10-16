@@ -57,12 +57,39 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
-      - run: gradle :protocol:check :android:app:assembleDebug :android:app:lintDebug --stacktrace
-      - run: cp android/app/build/outputs/apk/debug/app-debug.apk "OpenBridge-${{ needs.verify.outputs.version }}.apk"
+      - name: Build the APK, signed with the release key when it is configured
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          OPENBRIDGE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          OPENBRIDGE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            keystore="$RUNNER_TEMP/release.p12"
+            trap 'rm -f "$keystore"' EXIT
+            printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$keystore"
+            OPENBRIDGE_KEYSTORE="$keystore" gradle :protocol:check :android:app:assembleRelease :android:app:lintRelease --stacktrace
+            apk=android/app/build/outputs/apk/release/app-release.apk
+            "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$apk" > certs.txt
+            grep -m1 'certificate SHA-256 digest' certs.txt | sed 's/.*digest: //' > android-signing-sha256.txt
+            test -s android-signing-sha256.txt
+          else
+            # 1.0 and later must never ship with a throwaway key: updates would refuse to install.
+            case "$VERSION" in
+              0.*) echo "::warning::No release key configured; publishing a debug-signed preview APK." ;;
+              *) echo "::error::Add the ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD and ANDROID_KEY_ALIAS secrets (see docs/releasing.md) before releasing $VERSION."; exit 1 ;;
+            esac
+            gradle :protocol:check :android:app:assembleDebug :android:app:lintDebug --stacktrace
+            apk=android/app/build/outputs/apk/debug/app-debug.apk
+          fi
+          cp "$apk" "OpenBridge-$VERSION.apk"
       - uses: actions/upload-artifact@v4
         with:
           name: android
-          path: OpenBridge-*.apk
+          path: |
+            OpenBridge-*.apk
+            android-signing-sha256.txt
+          if-no-files-found: error
   macos:
     needs: verify
     runs-on: macos-14
@@ -98,12 +125,16 @@ jobs:
         with:
           path: dist
           merge-multiple: true
-      - name: Checksums
-        run: cd dist && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
       - name: Create GitHub release from the changelog
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           python3 scripts/release-notes.py "${{ needs.verify.outputs.version }}" > notes.md
+          # Publish the Android signing fingerprint in the notes, not as a download.
+          if [ -f dist/android-signing-sha256.txt ]; then
+            printf '\n**Android signing certificate (SHA-256):** `%s`\n' "$(cat dist/android-signing-sha256.txt)" >> notes.md
+            rm dist/android-signing-sha256.txt
+          fi
+          (cd dist && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt)
           tag="v${{ needs.verify.outputs.version }}"
           gh release create "$tag" dist/* --target "$GITHUB_SHA" --title "OpenBridge $tag" --notes-file notes.md
