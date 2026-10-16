@@ -3,6 +3,11 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
+
+// Release signing comes only from the environment (set by the release workflow from repository secrets).
+// Without it, release builds are unsigned and local debug builds use Android's debug key as usual.
+val releaseKeystore: String? = System.getenv("OPENBRIDGE_KEYSTORE")
+
 android {
     namespace = "org.openbridge.android"
     compileSdk = 35
@@ -12,6 +17,24 @@ android {
         targetSdk = 35
         versionCode = 4
         versionName = "0.5.0"
+    }
+    signingConfigs {
+        if (releaseKeystore != null) {
+            create("release") {
+                storeFile = file(releaseKeystore)
+                storeType = "pkcs12"
+                // PKCS12 keystores use one password for the store and the key.
+                storePassword = System.getenv("OPENBRIDGE_KEYSTORE_PASSWORD")
+                keyPassword = System.getenv("OPENBRIDGE_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("OPENBRIDGE_KEY_ALIAS")
+            }
+        }
+    }
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            if (releaseKeystore != null) signingConfig = signingConfigs.getByName("release")
+        }
     }
     buildFeatures { compose = true }
     compileOptions {
