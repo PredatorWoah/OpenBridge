@@ -1,6 +1,6 @@
 # Verification status and manual acceptance
 
-Status as of 1.1.0. **Everything below is automated; nothing has yet been verified on physical devices.**
+Status as of 0.5.0. **Everything below is automated; nothing has yet been verified on physical devices.**
 
 ## Continuous integration
 

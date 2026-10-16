@@ -4,50 +4,20 @@ All notable changes to OpenBridge are recorded here. Every release has an entry;
 
 ## [Unreleased]
 
-### Fixed
-- **USB reconnects stay on the same phone.** After a USB error the Mac now reconnects only to the phone it was using (matched by manufacturer, model and serial number) and refuses to continue on a different one, so folders on screen can never be applied to another device.
-- **Failed USB uploads are always cleaned up, safely.** Cleanup now also covers a failure right after the file is created on the phone, and it deletes a partial upload only after confirming the item is still that same file on that same phone. Otherwise it leaves it and says a partial copy may remain.
+## [0.5.0] - 2026-10-16
 
-### Changed
-- USB File transfer is labelled **beta** in the app and README until it is verified on real phones.
-- The README and security notes now state plainly that USB File transfer uses Android's File transfer mode: no TLS, and access to everything that mode shares rather than one folder.
-- Verification notes describe current CI and test coverage.
-
-## [1.1.0] - 2026-10-16
-
-USB File transfer on the Mac, like on Windows, and a new app icon.
+The first public preview: move files between an Android phone and a Mac, privately, on your own network or over a cable.
 
 ### Added
-- **New app icon** on Android and macOS: a sunset-coloured glass arch bridge with a glowing sun as its keystone, reflected in the water, in the style of Apple's Liquid Glass icons. Adaptive on Android, including a monochrome layer for themed icons on Android 13 and later.
-- **USB File transfer on the Mac, like on Windows.** Plug in the phone, choose *File transfer* in its USB notification, and press **Connect over USB**. No app or pairing is needed on the phone. Browse every storage, download, and upload, with progress and cancel. Built directly on Apple's USB framework: nothing extra to install.
-- Uploads over USB never replace files (names compared ignoring case) and partial uploads are removed if a transfer fails. The Mac reconnects automatically after a USB error.
-- Files of 4 GiB and more transfer in both directions over USB, and uploads check the phone's free space before sending anything.
+- **Android app** (Android 8.0 and later): pick one local folder and share it with your Mac while the app is open. Each start shows the phone's address, port, certificate fingerprint and a fresh pairing secret.
+- **Mac app** (macOS 13 and later): pair with the phone, then browse folders, download files to the Mac and upload files to the phone, with progress and cancel.
+- **Private by design:** every Wi-Fi request is encrypted with TLS, and the Mac checks the phone's certificate fingerprint before it sends anything. No accounts, no cloud, no tracking.
+- **Never overwrites:** existing files are never replaced on either side, and interrupted transfers clean up after themselves.
+- **USB File transfer on the Mac (beta):** plug in the phone, choose *File transfer*, and press **Connect over USB** to browse and move files, like on Windows. No app needed on the phone.
 
 ### Known limitations
-- USB File transfer is not yet verified with physical phones. Please report your phone model if it is not found or a transfer fails.
-- The APK is still signed with a build-machine debug key; if installing over 1.0.0 fails, uninstall 1.0.0 first.
+- This is a preview. It has passed automated tests but has not yet been verified on physical devices. Please report problems, following [SECURITY.md](SECURITY.md) for anything security related.
+- Pairing over Wi-Fi requires typing the address, port, fingerprint and secret.
+- The APK is signed with a build-machine key and the Mac app is not notarized; see the README for how to install and open them. If you installed an earlier test build, uninstall it first.
 
-## [1.0.0] - 2026-10-16
-
-The first release: share one Android folder with a Mac, over Wi-Fi or a USB cable.
-
-### Added
-- **Android app** (Android 8.0+): pick one local folder (internal storage or SD card) and share it while the app is open. Shows the phone's address, port, certificate fingerprint and a fresh pairing secret on every start.
-- **Mac app** (macOS 13+): pair by entering those values, then browse folders, download files to the Mac and upload files to the phone, with progress and cancel.
-- **Security:** TLS 1.2+ on every request, with the Mac verifying the phone's certificate fingerprint before it sends the secret. A new certificate and 256-bit secret on every start. No accounts, cloud, discovery, telemetry or internet exposure.
-- **USB cable mode:** with USB tethering switched on, the phone shares over the cable instead of Wi-Fi, and stops when the cable is unplugged. Works on phones that use NCM tethering (most Android 11+ phones, including Pixels); macOS does not support the older RNDIS tethering.
-- **Safe transfers:** existing files are never replaced on either side; partial uploads and downloads are removed when interrupted.
-- The phone's screen stays on while sharing, so the display timeout does not stop transfers.
-- Uploads with names Android storage cannot hold (`" * : < > ? |`) or that differ from an existing file only by letter case are rejected before any data is sent.
-- Saving a download over an existing Mac file is refused before any data is sent.
-- Folder listings use one batched storage query, skip entries whose names cannot be transferred, and hide leftover temporary upload files.
-- Automated protocol, TLS and Java/Swift interoperability tests; CI on every push, with full Android and macOS builds and an automated release workflow.
-
-### Known limitations
-- Not yet verified on physical devices. Please report problems, following [SECURITY.md](SECURITY.md) for anything security related.
-- Pairing requires typing the address, port, 64-character fingerprint and 64-character secret.
-- The APK is signed with a build-machine debug key, so a later version may need the previous one uninstalled first. The Mac app is ad-hoc signed and not notarized (see the README for how to open it).
-- No resumable transfers, folder creation, deletion, multi-file upload or automatic discovery.
-
-[1.1.0]: https://github.com/PredatorWoah/OpenBridge/releases/tag/v1.1.0
-[1.0.0]: https://github.com/PredatorWoah/OpenBridge/releases/tag/v1.0.0
+[0.5.0]: https://github.com/PredatorWoah/OpenBridge/releases/tag/v0.5.0
