@@ -8,6 +8,6 @@
 | `android-background.svg` | Adaptive icon background layer (`mipmap-*/ic_launcher_background.png`). |
 | `android-foreground.svg` | Adaptive icon foreground, scaled to 78 % so the bridge stays inside the 66 dp safe zone (`mipmap-*/ic_launcher_foreground.png`). |
 
-The themed-icon layer is a hand-written vector: `android/app/src/main/res/drawable/ic_launcher_monochrome.xml`.
+The themed-icon layer is a hand-written vector, `android/app/src/main/res/drawable/ic_launcher_monochrome.xml`; `android-monochrome-preview.svg` shows the same geometry as Android 13 tints it.
 
 To regenerate the PNGs and `AppIcon.icns` after editing the SVGs, run `python3 assets/icon/build.py` (needs Node.js with Playwright and Chromium).
