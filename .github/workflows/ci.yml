@@ -1,0 +1,57 @@
+name: Build and protocol checks
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+          log-accepted-android-sdk-licenses: false
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+      - run: bash scripts/test-protocol.sh
+      - run: python3 scripts/test-tls.py
+      - run: gradle :protocol:check :android:app:assembleDebug :android:app:lintDebug --stacktrace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpenBridge-Android-debug
+          path: android/app/build/outputs/apk/debug/*.apk
+  macos:
+    runs-on: macos-14
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - run: bash scripts/test-protocol.sh
+      - name: Generate ephemeral TLS test certificate
+        run: keytool -genkeypair -alias fixture -keyalg RSA -keysize 2048 -storetype PKCS12 -keystore "$RUNNER_TEMP/fixture.p12" -storepass test-only -keypass test-only -dname CN=OpenBridge-CI -validity 1
+      - name: Swift unit and cross-language TLS tests
+        run: swift test --package-path macos
+        env:
+          FIXTURE_CLASSPATH: ${{ github.workspace }}/build/protocol-tests
+          FIXTURE_KEYSTORE: ${{ runner.temp }}/fixture.p12
+      - run: bash scripts/build-macos.sh
+      - run: ditto -c -k --keepParent macos/build/OpenBridge.app macos/build/OpenBridge-macOS.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpenBridge-macOS
+          path: macos/build/OpenBridge-macOS.zip
+  repository:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/check-repository.py

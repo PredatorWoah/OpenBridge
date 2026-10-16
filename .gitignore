@@ -1,0 +1,12 @@
+.gradle/
+build/
+local.properties
+*.iml
+.idea/
+.DS_Store
+.build/
+.swiftpm/
+*.app/
+*.keystore
+*.p12
+__pycache__/
