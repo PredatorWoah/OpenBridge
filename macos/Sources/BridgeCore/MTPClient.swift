@@ -113,7 +113,11 @@ public final class MTPClient: FileSource, @unchecked Sendable {
             throw BridgeError.message("Choose a regular file.")
         }
         let size = UInt64(rawSize)
-        guard size <= MTPSession.maxSingleUpload else { throw BridgeError.message("Files of 4 GiB or more cannot be sent over USB yet. Use Wi-Fi.") }
+        // Fail before sending anything if the phone reports too little space (0 or max means unknown).
+        let free = try await run { session in try session.storages().first { $0.id == storage }?.freeSpace }
+        if let free, free > 0, free < UInt64.max, size > free {
+            throw BridgeError.message("Not enough space on the phone: \(ByteCountFormatter.string(fromByteCount: Int64(clamping: free), countStyle: .file)) free.")
+        }
         // Phones' shared storage ignores letter case, so compare names that way. Never replace a file.
         let existing = Set(try await list(id: directoryID).map { $0.name.lowercased() })
         guard !existing.contains(name.lowercased()) else { throw BridgeError.message("Filename already exists on the phone.") }

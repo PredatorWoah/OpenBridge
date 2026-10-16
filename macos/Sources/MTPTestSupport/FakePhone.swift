@@ -18,6 +18,10 @@ public final class FakePhone: MTPTransport {
     public var sessionOpen = false
     public var closed = false
     public var failNextWith: UInt16?
+    public var freeSpace: UInt64 = 64 << 30
+    /// Size field of the last object info received, to check how large uploads are declared.
+    public private(set) var lastDeclaredSize: UInt32?
+    private var unknownLengthContainer: (header: ContainerHeader, body: Data)?
     /// Simulates a USB error (cable glitch) after this many more successful reads.
     public var breakAfterReads: Int?
     public private(set) var reads = 0
@@ -47,9 +51,23 @@ public final class FakePhone: MTPTransport {
             awaitingZLP = false
             if data.isEmpty { return }
         }
+        if var open = unknownLengthContainer {
+            // An unknown-length data phase ends with the first short or zero-length transfer.
+            open.body.append(data)
+            if data.isEmpty || data.count % maxPacketSize != 0 { unknownLengthContainer = nil; try handle(open.header, open.body) }
+            else { unknownLengthContainer = open }
+            return
+        }
         incoming.append(data)
         while incoming.count >= ContainerHeader.size {
             let header = try ContainerHeader(parsing: incoming)
+            if header.length == ContainerHeader.unknownLength {
+                guard header.type == ContainerType.data.rawValue else { violations.append("unknown length on a non-data container"); return }
+                let body = Data(incoming.dropFirst(ContainerHeader.size))
+                incoming = Data()
+                if data.count % maxPacketSize != 0 { try handle(header, body) } else { unknownLengthContainer = (header, body) }
+                return
+            }
             let length = Int(header.length)
             if incoming.count < length {
                 if data.count % maxPacketSize != 0 { violations.append("short packet inside a data phase") }
@@ -105,6 +123,7 @@ public final class FakePhone: MTPTransport {
         if header.type == ContainerType.data.rawValue {
             if header.code == MTPCode.sendObjectInfo, let info = pendingInfo {
                 let parsed = try MTPObjectInfo(parsing: body)
+                lastDeclaredSize = parsed.compressedSize
                 let handle = nextHandle; nextHandle += 1
                 objects[handle] = Object(storage: info.storage, parent: info.parent, name: parsed.filename, folder: false, data: Data(), bigSize: nil)
                 pendingSend = (handle, 0); pendingInfo = nil
@@ -133,7 +152,7 @@ public final class FakePhone: MTPTransport {
             dataThenOK(header.code, t, w.data)
         case MTPCode.getStorageInfo:
             var w = MTPWriter()
-            w.u16(3); w.u16(2); w.u16(0); w.u64(128 << 30); w.u64(64 << 30); w.u32(0xFFFF_FFFF)
+            w.u16(3); w.u16(2); w.u16(0); w.u64(128 << 30); w.u64(freeSpace); w.u32(0xFFFF_FFFF)
             try w.string("Internal shared storage"); try w.string("")
             dataThenOK(header.code, t, w.data)
         case MTPCode.getObjectHandles:

@@ -77,7 +77,7 @@ Good to know:
 
 - If Photos, Image Capture, Android File Transfer, OpenMTP or a similar app is using the phone, the Mac app cannot open it. OpenBridge releases it from macOS's background photo import service automatically; quit any other such app.
 - Files are never replaced. Names are compared ignoring case, like the phone's storage does.
-- Uploads over USB are limited to files under 4 GiB for now (downloads have no such limit). Use Wi-Fi for bigger uploads.
+- Large files work both ways, including files of 4 GiB and more. Uploads check the phone's free space first.
 - Keep the phone unlocked. Some phones close the connection when the screen locks.
 
 ### Over a USB cable with tethering (alternative)

@@ -56,6 +56,13 @@ final class MTPClientTests: XCTestCase {
         try bytes.write(to: shouting)
         do { try await client.upload(shouting, directoryID: top[1].id) { _, _ in }; XCTFail("case-insensitive collision") }
         catch { XCTAssertTrue(error.localizedDescription.contains("already exists")) }
+        phone.freeSpace = 100
+        let roomy = directory.appendingPathComponent("roomy.bin")
+        try bytes.write(to: roomy)
+        do { try await client.upload(roomy, directoryID: top[1].id) { _, _ in }; XCTFail("not enough space") }
+        catch { XCTAssertTrue(error.localizedDescription.contains("Not enough space")) }
+        XCTAssertFalse(phone.objects.values.contains { $0.name == "roomy.bin" }, "nothing created on the phone")
+        phone.freeSpace = 64 << 30
         do { try await client.upload(source, directoryID: "") { _, _ in }; XCTFail("device root is not a folder") }
         catch { XCTAssertTrue(error.localizedDescription.contains("storage")) }
         XCTAssertEqual(phone.violations, [])

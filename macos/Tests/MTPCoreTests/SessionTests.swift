@@ -90,10 +90,32 @@ final class SessionTests: XCTestCase {
         XCTAssertEqual(try session.storages().count, 1, "a response error keeps the session usable")
         phone.failNextWith = 0x200C
         XCTAssertThrowsError(try session.storages()) { XCTAssertEqual($0 as? MTPError, .response(0x200C)) }
-        XCTAssertThrowsError(try session.beginUpload(storage: 0x10001, parent: 3, name: "x", size: 1 << 32))
         let stream = try session.beginUpload(storage: 0x10001, parent: 3, name: "short", size: 10).stream
         XCTAssertThrowsError(try stream.finish(), "declared length must be sent")
         XCTAssertTrue(MTPError.response(0x200C).keepsSession)
         XCTAssertFalse(MTPError.protocolViolation("x").keepsSession)
+    }
+
+    /// Files of 4 GiB or more use an unknown size, ended by a short packet. Simulated with a lowered threshold.
+    func testLargeUploadsUseUnknownLength() throws {
+        for size in [1000, 4096 - 12, 4096, 4096 * 2, 9000] {
+            let phone = FakePhone()
+            let session = MTPSession(transport: phone, chunkSize: 4096)
+            session.sizeFieldLimit = 1000
+            try session.open()
+            let bytes = Data((0..<size).map { UInt8(($0 * 31) % 256) })
+            let (handle, stream) = try session.beginUpload(storage: 0x10001, parent: 3, name: "big.bin", size: UInt64(size))
+            try stream.write(bytes)
+            _ = try stream.finish()
+            XCTAssertEqual(phone.lastDeclaredSize, 0xFFFF_FFFF, "size \(size)")
+            XCTAssertEqual(phone.objects[handle]?.data, bytes, "size \(size)")
+            XCTAssertEqual(try session.storages().count, 1, "size \(size)")
+            XCTAssertEqual(phone.violations, [], "size \(size)")
+        }
+        let phone = FakePhone()
+        let session = MTPSession(transport: phone, chunkSize: 4096)
+        try session.open()
+        _ = try session.beginUpload(storage: 0x10001, parent: 3, name: "small", size: 999).stream
+        XCTAssertEqual(phone.lastDeclaredSize, 999, "normal files keep their real size")
     }
 }

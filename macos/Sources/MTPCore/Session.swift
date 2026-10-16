@@ -16,7 +16,9 @@ public protocol MTPTransport: AnyObject {
 public final class MTPSession {
     /// Parent handle meaning "top level of a storage".
     public static let root: UInt32 = 0xFFFF_FFFF
-    public static let maxSingleUpload: UInt64 = 0xFFFF_FFFE
+    /// Files at least this large are sent with an unknown (0xFFFFFFFF) size and ended by a short packet,
+    /// as Android expects for files of 4 GiB or more. Lowered only by tests.
+    var sizeFieldLimit: UInt64 = 0xFFFF_FFFF
 
     let transport: MTPTransport
     let chunkSize: Int
@@ -92,13 +94,13 @@ public final class MTPSession {
 
     /// Creates the object and starts its data phase. Returns the new handle and the stream for its bytes.
     public func beginUpload(storage: UInt32, parent: UInt32, name: String, size: UInt64) throws -> (handle: UInt32, stream: MTPOutbound) {
-        guard size <= MTPSession.maxSingleUpload else { throw MTPError.transport("Files of 4 GiB or more cannot be sent over USB yet.") }
+        let large = size >= sizeFieldLimit
         let info = MTPObjectInfo(storageID: storage, format: MTPCode.undefinedFormat,
-                                 compressedSize: UInt32(size), parent: parent, filename: name)
+                                 compressedSize: large ? 0xFFFF_FFFF : UInt32(size), parent: parent, filename: name)
         let reply = try dataOut(MTPCode.sendObjectInfo, [storage, parent], payload: try info.encoded())
         guard reply.count >= 3 else { throw MTPError.protocolViolation("missing object handle") }
         let id = try command(MTPCode.sendObject, [])
-        return (reply[2], MTPOutbound(session: self, code: MTPCode.sendObject, transactionID: id, length: size))
+        return (reply[2], MTPOutbound(session: self, code: MTPCode.sendObject, transactionID: id, length: size, unknownLength: large))
     }
 
     // MARK: Transactions
@@ -236,10 +238,12 @@ public final class MTPOutbound {
     private var sent: UInt64 = 0
     private var total: UInt64 = 0
 
-    init(session: MTPSession, code: UInt16, transactionID: UInt32, length: UInt64) {
+    init(session: MTPSession, code: UInt16, transactionID: UInt32, length: UInt64, unknownLength: Bool = false) {
         self.session = session; self.transactionID = transactionID; self.length = length
         let containerLength = length + UInt64(ContainerHeader.size)
-        let declared = containerLength > UInt64(ContainerHeader.unknownLength - 1) ? ContainerHeader.unknownLength : UInt32(containerLength)
+        // With an unknown length the device reads until a short or zero-length packet, which finish() guarantees.
+        let declared = unknownLength || containerLength >= UInt64(ContainerHeader.unknownLength)
+            ? ContainerHeader.unknownLength : UInt32(containerLength)
         buffer = ContainerHeader(length: declared, type: .data, code: code, transactionID: transactionID).encoded
     }
 

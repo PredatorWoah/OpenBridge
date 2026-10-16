@@ -7,9 +7,10 @@ All notable changes to OpenBridge are recorded here. Every release has an entry;
 ### Added
 - **USB File transfer on the Mac, like on Windows.** Plug in the phone, choose *File transfer* in its USB notification, and press **Connect over USB**. No app or pairing is needed on the phone. Browse every storage, download, and upload, with progress and cancel. Built directly on Apple's USB framework: nothing extra to install.
 - Uploads over USB never replace files (names compared ignoring case) and partial uploads are removed if a transfer fails. The Mac reconnects automatically after a USB error.
+- Files of 4 GiB and more transfer in both directions over USB, and uploads check the phone's free space before sending anything.
 
 ### Known limitations
-- USB uploads are limited to files under 4 GiB. Not yet verified with physical phones.
+- USB File transfer is not yet verified with physical phones.
 
 ## [1.0.0] - 2026-10-16
 
