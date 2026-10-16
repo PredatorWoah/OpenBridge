@@ -94,6 +94,10 @@ public final class ProtocolTest {
             check(Wire.isPrivateIPv4(InetAddress.getByName(address)), "Private IP " + address);
         for (String address : new String[] {"0.0.0.0", "127.0.0.1", "8.8.8.8", "172.32.0.1", "169.254.1.1", "100.64.0.1", "::1", "fd00::1"})
             check(!Wire.isPrivateIPv4(InetAddress.getByName(address)), "Reject non-RFC1918 " + address);
+        for (String name : new String[] {"rndis0", "usb0", "ncm0", "ncm12"})
+            check(Wire.isUsbTetherInterface(name), "USB tether interface " + name);
+        for (String name : new String[] {"wlan0", "rmnet_data0", "tun0", "lo", "ncm", "usb", "rndis0x", "eth0", null})
+            check(!Wire.isUsbTetherInterface(name), "Not a USB tether interface " + name);
         System.out.println("Protocol tests passed: " + checks + " assertions");
     }
 }

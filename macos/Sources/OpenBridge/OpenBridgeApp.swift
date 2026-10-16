@@ -27,7 +27,7 @@ final class BrowserModel: ObservableObject {
             catch is CancellationError { status = "Operation cancelled. Refresh to check the phone's folder." }
             catch {
                 self.error = error.localizedDescription
-                status = "Operation failed. Check Wi-Fi, sharing status, and the fingerprint on the phone."
+                status = "Operation failed. Check Wi-Fi or the USB cable, sharing status, and the fingerprint on the phone."
             }
         }
     }
@@ -114,7 +114,7 @@ struct BrowserView: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("OpenBridge").font(.largeTitle)
             if !model.connected {
-                Text("Connect both devices to the same trusted local network. Copy the fingerprint directly from your phone before pairing.")
+                Text("Connect both devices to the same trusted local network, or plug in the phone with USB tethering on. Copy the fingerprint directly from your phone before pairing.")
                 HStack {
                     TextField("Phone IPv4 address", text: $model.host)
                     TextField("Port", text: $model.port).frame(width: 90)

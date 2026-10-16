@@ -1,6 +1,6 @@
 # OB01 file-transfer protocol
 
-Transport: one request per **TLS** TCP connection, TLS 1.2 minimum. Pin the SHA-256 digest of the server's complete leaf certificate DER from the Android screen. A self-signed certificate is expected. Never send the secret before successful pin verification. The server is reachable only through its selected private Wi-Fi IPv4 address and ephemeral port.
+Transport: one request per **TLS** TCP connection, TLS 1.2 minimum. Pin the SHA-256 digest of the server's complete leaf certificate DER from the Android screen. A self-signed certificate is expected. Never send the secret before successful pin verification. The server is reachable only through its selected private IPv4 address (Wi-Fi, or a USB tethering interface) and ephemeral port.
 
 All integers are big endian. A string is a signed 32-bit nonnegative UTF-8 byte length followed by exactly that many bytes, strictly decoded. Strings are not Java modified UTF-8. Each connection starts with:
 
