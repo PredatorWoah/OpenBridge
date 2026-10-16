@@ -1,10 +1,25 @@
 name: Build and protocol checks
 on:
+  # Cheap Linux checks run on every push and pull request; native builds stay manual.
+  push:
+  pull_request:
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
+  protocol:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - run: bash scripts/test-protocol.sh
+      - run: python3 scripts/test-tls.py
   android:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -28,6 +43,7 @@ jobs:
           name: OpenBridge-Android-debug
           path: android/app/build/outputs/apk/debug/*.apk
   macos:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: macos-14
     timeout-minutes: 20
     steps:

@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -90,6 +91,12 @@ class MainActivity : ComponentActivity() {
             if (result.resultCode == RESULT_OK) result.data?.data?.let(model::select)
         }
         setContent {
+            val sharing = model.server != null
+            // Sharing stops when the Activity stops, so stop the screen timeout from ending transfers.
+            LaunchedEffect(sharing) {
+                if (sharing) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
             MaterialTheme {
                 Surface(Modifier.fillMaxSize()) {
                     Column(Modifier.padding(24.dp).verticalScroll(rememberScrollState()),
@@ -122,7 +129,7 @@ class MainActivity : ComponentActivity() {
                             Text("Enter these values on your Mac. Verify the fingerprint directly from this screen. " +
                                 "Anyone with these credentials can read and upload in this folder while sharing is on.")
                         }
-                        Text("Leaving this app stops sharing. Interrupted uploads are discarded. " +
+                        Text("The screen stays on while sharing. Leaving this app stops sharing. Interrupted uploads are discarded. " +
                             "Existing filenames are never intentionally overwritten.")
                     }
                 }

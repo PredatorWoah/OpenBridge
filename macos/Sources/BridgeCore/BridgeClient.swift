@@ -5,6 +5,8 @@ public struct BridgeClient {
     private let port: UInt16
     private let fingerprint: Data
     private let secret: Data
+    /// Report progress about once per MiB (and always at completion) instead of on every 64 KiB chunk.
+    private static let progressStep: Int64 = 1 << 20
 
     public init(host: String, port: String, fingerprint: String, secret: String) throws {
         guard Wire.privateIPv4(host), let number = UInt16(port), number > 0 else {
@@ -52,6 +54,10 @@ public struct BridgeClient {
     }
 
     public func download(_ entry: Entry, to destination: URL, progress: @MainActor (Int64, Int64) -> Void) async throws {
+        // Fail before transferring anything; the final move below would refuse to replace it anyway.
+        guard !FileManager.default.fileExists(atPath: destination.path) else {
+            throw BridgeError.message("\(destination.lastPathComponent) already exists. Choose a new name; OpenBridge never replaces files.")
+        }
         let channel = try await open(operation: 2, id: entry.id)
         defer { channel.close() }
         try await channel.status()
@@ -66,14 +72,17 @@ public struct BridgeClient {
         defer { try? manager.removeItem(at: temporary) }
         let file = try FileHandle(forWritingTo: temporary)
         do {
-            var received: Int64 = 0
+            var received: Int64 = 0, reported: Int64 = 0
             await progress(0, Int64(length))
             while received < length {
                 try Task.checkCancellation()
                 let chunk = try await channel.read(Int(min(65_536, length - UInt64(received))))
                 try file.write(contentsOf: chunk)
                 received += Int64(chunk.count)
-                await progress(received, Int64(length))
+                if received - reported >= Self.progressStep || received == Int64(length) {
+                    reported = received
+                    await progress(received, Int64(length))
+                }
             }
             try file.synchronize()
             try file.close()
@@ -97,7 +106,7 @@ public struct BridgeClient {
         defer { channel.close() }
         try await channel.send(Wire.string(name) + Wire.integer(size))
         try await channel.status()
-        var sent: Int64 = 0
+        var sent: Int64 = 0, reported: Int64 = 0
         await progress(0, size)
         while sent < size {
             try Task.checkCancellation()
@@ -106,7 +115,10 @@ public struct BridgeClient {
             }
             try await channel.send(chunk)
             sent += Int64(chunk.count)
-            await progress(sent, size)
+            if sent - reported >= Self.progressStep || sent == size {
+                reported = sent
+                await progress(sent, size)
+            }
         }
         // A completed send is not success until Android confirms publication.
         try await channel.status()
