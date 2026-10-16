@@ -4,6 +4,15 @@ All notable changes to OpenBridge are recorded here. Every release has an entry;
 
 ## [Unreleased]
 
+### Fixed
+- **USB reconnects stay on the same phone.** After a USB error the Mac now reconnects only to the phone it was using (matched by manufacturer, model and serial number) and refuses to continue on a different one, so folders on screen can never be applied to another device.
+- **Failed USB uploads are always cleaned up, safely.** Cleanup now also covers a failure right after the file is created on the phone, and it deletes a partial upload only after confirming the item is still that same file on that same phone. Otherwise it leaves it and says a partial copy may remain.
+
+### Changed
+- USB File transfer is labelled **beta** in the app and README until it is verified on real phones.
+- The README and security notes now state plainly that USB File transfer uses Android's File transfer mode: no TLS, and access to everything that mode shares rather than one folder.
+- Verification notes describe current CI and test coverage.
+
 ## [1.1.0] - 2026-10-16
 
 USB File transfer on the Mac, like on Windows, and a new app icon.

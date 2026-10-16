@@ -92,15 +92,40 @@ public final class MTPSession {
         try MTPInbound(session: self, code: MTPCode.getObject, transactionID: try command(MTPCode.getObject, [handle]))
     }
 
-    /// Creates the object and starts its data phase. Returns the new handle and the stream for its bytes.
-    public func beginUpload(storage: UInt32, parent: UInt32, name: String, size: UInt64) throws -> (handle: UInt32, stream: MTPOutbound) {
+    /// Creates the (still empty) object on the phone. From here on, a failed upload must be cleaned up
+    /// with `deleteIfUnchanged`.
+    public func createObject(storage: UInt32, parent: UInt32, name: String, size: UInt64) throws -> MTPCreatedObject {
         let large = size >= sizeFieldLimit
         let info = MTPObjectInfo(storageID: storage, format: MTPCode.undefinedFormat,
                                  compressedSize: large ? 0xFFFF_FFFF : UInt32(size), parent: parent, filename: name)
         let reply = try dataOut(MTPCode.sendObjectInfo, [storage, parent], payload: try info.encoded())
         guard reply.count >= 3 else { throw MTPError.protocolViolation("missing object handle") }
+        return MTPCreatedObject(handle: reply[2], storage: reply[0], parent: reply[1], name: name, size: size, unknownLength: large)
+    }
+
+    /// Starts the data phase for an object just created with `createObject`.
+    public func beginSend(_ object: MTPCreatedObject) throws -> MTPOutbound {
         let id = try command(MTPCode.sendObject, [])
-        return (reply[2], MTPOutbound(session: self, code: MTPCode.sendObject, transactionID: id, length: size, unknownLength: large))
+        return MTPOutbound(session: self, code: MTPCode.sendObject, transactionID: id, length: object.size, unknownLength: object.unknownLength)
+    }
+
+    /// Test convenience: create and start sending in one step.
+    func beginUpload(storage: UInt32, parent: UInt32, name: String, size: UInt64) throws -> (handle: UInt32, stream: MTPOutbound) {
+        let object = try createObject(storage: storage, parent: parent, name: name, size: size)
+        return (object.handle, try beginSend(object))
+    }
+
+    /// Deletes a failed upload only if the handle still names that same object; handles are just numbers
+    /// and must never be trusted on their own. Returns whether it deleted anything.
+    public func deleteIfUnchanged(_ object: MTPCreatedObject) throws -> Bool {
+        guard let current = try? info(object.handle) else { return false }
+        // Phones may report top-level objects with parent 0 instead of the root marker.
+        let sameParent = current.parent == object.parent
+            || (object.parent == MTPSession.root && current.parent == 0)
+            || (object.parent == 0 && current.parent == MTPSession.root)
+        guard current.filename == object.name, current.storageID == object.storage, sameParent, !current.isFolder else { return false }
+        try delete(object.handle)
+        return true
     }
 
     // MARK: Transactions
@@ -155,6 +180,16 @@ public final class MTPSession {
         try stream.write(payload)
         return try stream.finish()
     }
+}
+
+/// An object created on the phone by `createObject`, before or during its upload.
+public struct MTPCreatedObject: Equatable {
+    public let handle: UInt32
+    public let storage: UInt32
+    public let parent: UInt32
+    public let name: String
+    public let size: UInt64
+    let unknownLength: Bool
 }
 
 /// Device-to-host data phase, read in chunks, then its response.

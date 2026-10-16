@@ -11,6 +11,17 @@ OpenBridge grants a paired Mac read and upload access to **one approved SAF tree
 - Two concurrent Android handlers, a minimal accept backlog, 30-second socket read timeouts, bounded request fields/listings, and a bounded document-ID cache limit resource consumption. The Mac has a 30-second timeout per network read/write/handshake. These are safeguards for trusted-LAN use, not a promise of denial-of-service resistance on hostile networks. Android blocking socket writes may wait until transport failure or explicit stop if a peer stops reading.
 - Stopping closes the listener and active sockets. Network loss/address change and Activity backgrounding stop sharing. The screen is kept on while sharing so the display timeout does not interrupt transfers; locking the phone manually still stops sharing. Temporary files may survive an abrupt process kill; filenames clearly identify them. Storage access is deliberately not persisted across process restarts.
 
+## USB File transfer (MTP)
+
+The Mac app's **Connect over USB** does not use the protocol above. It talks to Android's built-in File transfer (MTP) mode directly, so none of the guarantees above apply to it:
+
+- **No TLS and no pairing secret.** The trust boundary is the USB cable plus the user unlocking the phone and choosing File transfer. Data crosses the cable unencrypted, as with any MTP client, including Windows.
+- **No single-folder restriction.** The Mac can see, download and upload anything Android exposes in File transfer mode, typically all shared internal storage and SD cards. OpenBridge never deletes or replaces files except for removing its own partial upload after a failure.
+- **Device identity.** A connection is bound to the phone it was opened on (manufacturer, model and serial number reported over MTP). After a USB error the Mac only reconnects to that same phone, and it only deletes a failed upload after re-reading the object and confirming its name, storage and folder still match.
+- **macOS photo import.** If macOS's background photo import service (`ptpcamerad`) holds the phone, OpenBridge stops it once so it can open the device; macOS restarts it on demand.
+
+Choose File transfer only on a Mac you trust, and switch the phone back to *No data transfer* afterwards. This mode is **beta** until verified on physical phones.
+
 No real-device test, penetration test, or third-party security audit is claimed. Validate the [device checklist](docs/verification.md) before relying on the app for sensitive data.
 
 Please avoid posting credentials or sensitive files in public bug reports. Report a vulnerability privately to the repository owner through GitHub's private vulnerability reporting if enabled, or request a private contact without posting exploit details.

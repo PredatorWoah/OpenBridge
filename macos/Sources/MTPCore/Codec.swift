@@ -158,10 +158,25 @@ struct MTPReader {
     }
 }
 
+/// Who a phone is, so a reconnect never silently continues on a different device.
+public struct MTPDeviceIdentity: Equatable {
+    public let manufacturer: String
+    public let model: String
+    public let serialNumber: String
+    public init(manufacturer: String, model: String, serialNumber: String) {
+        self.manufacturer = manufacturer; self.model = model; self.serialNumber = serialNumber
+    }
+}
+
 public struct MTPDeviceInfo: Equatable {
     public let manufacturer: String
     public let model: String
+    public let serialNumber: String
     public let vendorExtension: String
+
+    public var identity: MTPDeviceIdentity {
+        MTPDeviceIdentity(manufacturer: manufacturer, model: model, serialNumber: serialNumber)
+    }
 
     init(parsing data: Data) throws {
         var reader = MTPReader(data)
@@ -173,6 +188,8 @@ public struct MTPDeviceInfo: Equatable {
         for _ in 0..<5 { _ = try reader.u16Array() } // operations, events, properties, capture and playback formats
         manufacturer = try reader.string()
         model = try reader.string()
+        _ = try reader.string()           // device version
+        serialNumber = try reader.string()
     }
 
     /// A short human-readable name, avoiding a repeated manufacturer ("Google Pixel 8").

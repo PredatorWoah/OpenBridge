@@ -10,10 +10,10 @@
 
 **OpenBridge is a free, open-source way to move files between an Android phone and a Mac.** Pick one folder on the phone, and browse, download and upload it from your Mac over your home Wi-Fi or a USB cable. Everything stays on your own network: no accounts, no cloud, no tracking.
 
-- 🔒 **Encrypted and pinned.** Every request uses TLS, and the Mac checks the phone's certificate fingerprint before sending anything.
-- 📁 **One folder, nothing else.** The phone shares only the folder you pick, and only while the app is open.
+- 🔒 **Encrypted and pinned on Wi-Fi.** Over Wi-Fi (and USB tethering) every request uses TLS, and the Mac checks the phone's certificate fingerprint before sending anything.
+- 📁 **One folder on Wi-Fi.** The Android app shares only the folder you pick, and only while it is open.
 - 🛡️ **Never overwrites.** Existing files are never replaced on either side, and interrupted transfers are cleaned up.
-- 🔌 **Wi-Fi or USB.** Use your LAN, or just plug in a cable and choose File transfer, like on Windows.
+- 🔌 **Or just plug in (beta).** On a Mac, connect a cable, choose File transfer on the phone, and browse it like on Windows. This uses Android's own File transfer mode, so it sees everything that mode shares, not one folder; see [how the two modes differ](#wi-fi-vs-usb-file-transfer).
 
 **Download:** grab the Android APK and the Mac app from the [latest release](https://github.com/PredatorWoah/OpenBridge/releases/latest). See the [changelog](CHANGELOG.md) for what's new.
 
@@ -67,9 +67,9 @@ The script makes an application bundle with a **local ad-hoc signature**. It doe
 
 Existing filenames are rejected on both sides, before any data is transferred. On Android, names are compared ignoring case (`Photo.JPG` collides with `photo.jpg`), and the characters `" * : < > ? |` are not allowed. Choose another name (rename the source before upload). Downloads use temporary sibling files; uploads use temporary SAF documents and publish only after the declared body is received. On a normal disconnection/cancellation, partial files are removed. After a process kill or power loss, remove any leftover `.openbridge-part-*` Android documents (hidden from the Mac's file list) or `.openbridge-*.part` Mac files manually. A cancellation exactly at upload completion can mean the phone committed the file before the Mac received its acknowledgement; refresh before retrying.
 
-### Over a USB cable (File transfer, like on Windows)
+### Over a USB cable (File transfer, like on Windows) · beta
 
-No app or pairing is needed on the phone for this.
+No app or pairing is needed on the phone for this. **Beta:** it has passed automated tests against a simulated phone but not yet on real phones. Please report your phone model if it is not found or a transfer fails.
 
 1. Plug the phone into the Mac and unlock it.
 2. Pull down the notification shade, tap the **USB** notification (often "Charging this device via USB"), and choose **File transfer**.
@@ -81,6 +81,17 @@ Good to know:
 - Files are never replaced. Names are compared ignoring case, like the phone's storage does.
 - Large files work both ways, including files of 4 GiB and more. Uploads check the phone's free space first.
 - Keep the phone unlocked. Some phones close the connection when the screen locks.
+
+### Wi-Fi vs USB File transfer
+
+| | Wi-Fi (and USB tethering) | USB File transfer |
+| --- | --- | --- |
+| Needs the Android app | Yes | No |
+| What the Mac can see | Only the one folder you picked | Everything Android shares in File transfer mode (usually all of internal storage and the SD card) |
+| Protection | TLS with a pinned certificate and a pairing secret | The cable and your choice of File transfer on an unlocked phone; no encryption, as with any USB file transfer |
+| Stops when | You leave the app, press Stop, or the network drops | You unplug, lock the phone (on some phones), or choose another USB mode |
+
+Choose File transfer only on a Mac you trust, and switch the phone back to *No data transfer* when you are done.
 
 ### Over a USB cable with tethering (alternative)
 

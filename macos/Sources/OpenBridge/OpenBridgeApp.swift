@@ -139,8 +139,8 @@ struct BrowserView: View {
                 SecureField("Pairing secret (64 hex characters)", text: $model.secret)
                 Button("Pair and browse", action: model.connect).disabled(model.busy)
                 Divider().padding(.vertical, 6)
-                Text("USB cable").font(.headline)
-                Text("Plug in your phone, unlock it, and choose File transfer in its USB notification. Nothing needs to be installed on the phone.")
+                Text("USB cable (beta)").font(.headline)
+                Text("Plug in your phone, unlock it, and choose File transfer in its USB notification. Nothing needs to be installed on the phone. The Mac can then see everything File transfer shares, not one folder, and the connection is not encrypted: use it only on a Mac you trust.")
                 Button("Connect over USB", action: model.connectUSB).disabled(model.busy)
             } else {
                 HStack {

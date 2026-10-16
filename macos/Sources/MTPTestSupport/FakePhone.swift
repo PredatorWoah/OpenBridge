@@ -19,6 +19,12 @@ public final class FakePhone: MTPTransport {
     public var closed = false
     public var failNextWith: UInt16?
     public var freeSpace: UInt64 = 64 << 30
+    /// Reported in device info; a different value simulates a different phone.
+    public var serialNumber = "SERIAL"
+    /// Simulates a USB error when the host sends this command.
+    public var failWritingCommand: UInt16?
+    /// Simulates a USB error after this many more successful writes.
+    public var breakAfterWrites: Int?
     /// Size field of the last object info received, to check how large uploads are declared.
     public private(set) var lastDeclaredSize: UInt32?
     private var unknownLengthContainer: (header: ContainerHeader, body: Data)?
@@ -40,12 +46,23 @@ public final class FakePhone: MTPTransport {
     }
 
     public var aborted = false
-    public func abort() { aborted = true; outbound.removeAll(); incoming = Data(); awaitingZLP = false; sessionOpen = false }
+    /// Runs when the host resets the phone, to simulate changes before the host reconnects.
+    public var onAbort: (() -> Void)?
+    public func abort() { onAbort?(); aborted = true; outbound.removeAll(); incoming = Data(); awaitingZLP = false; sessionOpen = false }
     public func close() { closed = true }
 
     // MARK: Host to device
 
     public func write(_ data: Data) throws {
+        if let left = breakAfterWrites {
+            if left == 0 { breakAfterWrites = nil; throw MTPError.transport("simulated USB failure") }
+            breakAfterWrites = left - 1
+        }
+        if let code = failWritingCommand, incoming.isEmpty, unknownLengthContainer == nil, !awaitingZLP, data.count >= ContainerHeader.size,
+           let header = try? ContainerHeader(parsing: data), header.type == ContainerType.command.rawValue, header.code == code {
+            failWritingCommand = nil
+            throw MTPError.transport("simulated USB failure")
+        }
         if awaitingZLP {
             if !data.isEmpty { violations.append("missing zero-length packet") }
             awaitingZLP = false
@@ -127,7 +144,7 @@ public final class FakePhone: MTPTransport {
                 let handle = nextHandle; nextHandle += 1
                 objects[handle] = Object(storage: info.storage, parent: info.parent, name: parsed.filename, folder: false, data: Data(), bigSize: nil)
                 pendingSend = (handle, 0); pendingInfo = nil
-                respond(MTPCode.ok, info.transaction, [info.storage, info.parent, handle])
+                respond(MTPCode.ok, info.transaction, [info.storage, info.parent == MTPSession.root ? 0 : info.parent, handle])
             } else if header.code == MTPCode.sendObject, let target = pendingSend {
                 objects[target.handle]?.data = body
                 pendingSend = nil
@@ -141,7 +158,7 @@ public final class FakePhone: MTPTransport {
             var w = MTPWriter()
             w.u16(100); w.u32(6); w.u16(100); try w.string("microsoft.com: 1.0; android.com: 1.0;"); w.u16(0)
             for _ in 0..<5 { w.u32(0) }
-            try w.string("Google"); try w.string("Pixel 8"); try w.string("1.0"); try w.string("SERIAL")
+            try w.string("Google"); try w.string("Pixel 8"); try w.string("1.0"); try w.string(serialNumber)
             dataThenOK(header.code, t, w.data)
         case MTPCode.openSession:
             if sessionOpen { respond(MTPCode.sessionAlreadyOpen, t) } else { sessionOpen = true; respond(MTPCode.ok, t) }
