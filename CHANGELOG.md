@@ -2,6 +2,15 @@
 
 All notable changes to OpenBridge are recorded here. Every release has an entry; the release workflow refuses to publish a version that is missing from this file. Versions follow [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Added
+- **USB File transfer on the Mac, like on Windows.** Plug in the phone, choose *File transfer* in its USB notification, and press **Connect over USB**. No app or pairing is needed on the phone. Browse every storage, download, and upload, with progress and cancel. Built directly on Apple's USB framework: nothing extra to install.
+- Uploads over USB never replace files (names compared ignoring case) and partial uploads are removed if a transfer fails. The Mac reconnects automatically after a USB error.
+
+### Known limitations
+- USB uploads are limited to files under 4 GiB. Not yet verified with physical phones.
+
 ## [1.0.0] - 2026-10-16
 
 The first release: share one Android folder with a Mac, over Wi-Fi or a USB cable.

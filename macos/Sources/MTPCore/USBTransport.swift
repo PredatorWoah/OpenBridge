@@ -60,7 +60,7 @@ public final class USBTransport: MTPTransport {
     public func abort() {
         let request = IOUSBDeviceRequest(bmRequestType: 0x21, bRequest: 0x66, wValue: 0,
                                          wIndex: UInt16(interface.interfaceDescriptor.pointee.bInterfaceNumber), wLength: 0)
-        _ = try? interface.__sendDeviceRequest(request, data: nil, bytesTransferred: nil, completionTimeout: 5)
+        _ = try? interface.__send(request, data: nil, bytesTransferred: nil, completionTimeout: 5)
         _ = try? input.clearStall()
         _ = try? output.clearStall()
     }
