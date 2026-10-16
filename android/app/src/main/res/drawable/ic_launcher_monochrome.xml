@@ -1,13 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Themed icon (Android 13+): arch with a gap around the sun keystone, waterline, and a faint reflection,
-     centred on the waterline like the full-colour icon. Coordinates match assets/icon/icon.svg. -->
+<!-- Themed icon (Android 13+): arch with a gap around the sun keystone, and the waterline,
+     centred on the icon. Coordinates match assets/icon/icon.svg. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="1024" android:viewportHeight="1024">
     <group android:pivotX="512" android:pivotY="512" android:scaleX="0.78" android:scaleY="0.78">
-        <group android:translateY="-122">
-            <path android:pathData="M232,620 A280,280 0 0,0 792,620"
-                android:strokeColor="#FFFFFFFF" android:strokeAlpha="0.35" android:strokeWidth="112" android:strokeLineCap="round" />
+        <group android:translateY="40">
             <path android:pathData="M232,620 A280,280 0 0,1 362.2,383.5"
                 android:strokeColor="#FFFFFFFF" android:strokeWidth="112" android:strokeLineCap="round" />
             <path android:pathData="M661.8,383.5 A280,280 0 0,1 792,620"

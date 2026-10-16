@@ -9,10 +9,6 @@
     <linearGradient id="right" x1="512" y1="300" x2="792" y2="620" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#ff5c8a"/><stop offset="1" stop-color="#ffb347"/>
     </linearGradient>
-    <linearGradient id="fade" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#fff" stop-opacity=".55"/><stop offset="1" stop-color="#fff" stop-opacity="0"/>
-    </linearGradient>
-    <mask id="reflect" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024"><rect x="0" y="634" width="1024" height="330" fill="url(#fade)"/></mask>
     <radialGradient id="sunglow"><stop offset="0" stop-color="#fff3b0" stop-opacity=".95"/><stop offset="1" stop-color="#ffd166" stop-opacity="0"/></radialGradient>
     <linearGradient id="sun" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fffbe0"/><stop offset="1" stop-color="#ffd166"/></linearGradient>
     <g id="arch">
@@ -21,8 +17,7 @@
     </g>
   </defs>
 <g transform="translate(512 512) scale(.78) translate(-512 -512)">
-<g transform="translate(0 -122)">
-    <g mask="url(#reflect)"><g transform="translate(0 1268) scale(1 -1)"><use href="#arch"/></g></g>
+<g transform="translate(0 34)">
     <use href="#arch"/>
     <rect x="150" y="620" width="724" height="28" rx="14" fill="#fff6e0" opacity=".95"/>
     <circle cx="512" cy="340" r="160" fill="url(#sunglow)" opacity=".6"/>

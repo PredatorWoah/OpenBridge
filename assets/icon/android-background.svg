@@ -9,10 +9,6 @@
     <linearGradient id="right" x1="512" y1="300" x2="792" y2="620" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#ff5c8a"/><stop offset="1" stop-color="#ffb347"/>
     </linearGradient>
-    <linearGradient id="fade" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#fff" stop-opacity=".55"/><stop offset="1" stop-color="#fff" stop-opacity="0"/>
-    </linearGradient>
-    <mask id="reflect" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024"><rect x="0" y="634" width="1024" height="330" fill="url(#fade)"/></mask>
     <radialGradient id="sunglow"><stop offset="0" stop-color="#fff3b0" stop-opacity=".95"/><stop offset="1" stop-color="#ffd166" stop-opacity="0"/></radialGradient>
     <linearGradient id="sun" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fffbe0"/><stop offset="1" stop-color="#ffd166"/></linearGradient>
     <g id="arch">
