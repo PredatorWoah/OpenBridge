@@ -14,6 +14,7 @@ Fixes the Mac app crashing on **Connect over USB**.
 - If the phone is connected but does not answer, the message now includes the underlying reason.
 
 ### Changed
+- **The Mac app now comes as a disk image (`.dmg`).** Open it and drag OpenBridge onto Applications, like most Mac apps. No more zip.
 - If the phone is in USB tethering mode, the Mac now says so and explains how to switch to File transfer. macOS cannot use Android's USB tethering.
 
 ### Notes
