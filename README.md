@@ -6,27 +6,61 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Platforms](https://img.shields.io/badge/platforms-Android%208%2B%20%7C%20macOS%2013%2B-lightgrey)
 
-![OpenBridge: an Android phone and a Mac connected over Wi-Fi or a USB cable](docs/images/hero.svg)
+![OpenBridge on an Android phone and a Mac: the phone's sunset arch glows gold while the Mac browses the phone's Camera folder and downloads a photo](docs/images/screens.png)
 
-**OpenBridge is a free, open-source way to move files between an Android phone and a Mac.** Share one folder or your whole phone, and browse, download and upload from your Mac over your home Wi-Fi or a USB cable. Everything stays on your own network: no accounts, no cloud, no tracking.
+**OpenBridge is a free, open-source way to move files between an Android phone and a Mac.** Plug in a cable and your Mac opens your phone, like on Windows. Or tap the sun on your phone and pair over encrypted Wi‑Fi with a 6‑digit code. Everything stays between your two devices: no accounts, no cloud, no tracking.
 
-- 🔒 **Encrypted, with 6-digit pairing.** Over Wi-Fi (and USB tethering) every request uses TLS. To pair, check that both screens show the same 6-digit code and tap Pair on the phone, like pairing Bluetooth.
-- 📁 **One folder or the whole phone.** Over Wi-Fi the Android app shares the folder you pick, or all of your storage if you choose **Whole phone**, and only while it is open.
-- 🛡️ **Never overwrites.** Existing files are never replaced on either side, and interrupted transfers are cleaned up.
-- 🔌 **Or just plug in (beta).** On a Mac, connect a cable, choose File transfer on the phone, and browse it like on Windows. This uses Android's own File transfer mode, so it sees everything that mode shares, not one folder; see [how the two modes differ](#wi-fi-vs-usb-file-transfer).
+- 🔌 **Plug in and it opens.** Choose File transfer on the phone and the Mac app finds it by itself, with shortcuts straight to Camera, Download, Screenshots, WhatsApp or Documents. No driver, no kernel extension, no macFUSE.
+- ☀️ **Tap the sun to share over Wi‑Fi.** The arch from the icon is the button. It turns gold when your Mac connects, by Wi‑Fi or by cable.
+- 🔒 **Encrypted, with 6-digit pairing.** Every Wi‑Fi request uses TLS. To pair, check that both screens show the same 6-digit code and tap Pair on the phone, like Bluetooth.
+- 📁 **One folder or the whole phone**, your choice, and only while the app is open.
+- 🐘 **Big files are fine.** Files of 4 GB and more work both ways; a 7.83 GB file has been copied from a real phone.
+- 🛡️ **Never overwrites.** Existing files are never replaced on either side, and interrupted transfers clean up after themselves.
 
-**Download:** grab the Android APK and the Mac app from the [latest release](https://github.com/PredatorWoah/OpenBridge/releases/latest). See the [changelog](CHANGELOG.md) for what's new.
+**Download:** get the Android APK and the Mac app (`.dmg`) from the [latest release](https://github.com/PredatorWoah/OpenBridge/releases/latest). See the [changelog](CHANGELOG.md) for what's new.
 
-> **Status:** the automated tests pass, including a real Java/Swift TLS interoperability test, but behavior on physical devices has not yet been verified. See [verification status](docs/verification.md).
+> **Status: preview, tested on real hardware.** Verified on a vivo X300 Pro and a MacBook Air M1, including a 7.83 GB USB download, plus a full automated test suite with a simulated phone and real Java/Swift TLS interoperability. USB File transfer stays **beta** until more phone brands are tested. See [verification status](docs/verification.md).
 
 ## How it works
 
+![The phone's sun is grey until a Mac connects, then gold; on the Mac a card for the plugged-in phone offers Open phone and folder shortcuts](docs/images/connect.png)
+
 ![How OpenBridge works: pick what to share, tap the sun, pair on the Mac, then browse and transfer](docs/images/how-it-works.svg)
+
+## Why OpenBridge
+
+Apple and Android don't talk to each other out of the box, so most Mac users end up with a paid app, a cloud service, or Google's old Android File Transfer, which Google has discontinued. Here is where OpenBridge stands.
+
+**Better than most paid options at:**
+
+| | OpenBridge | Typical paid apps |
+| --- | --- | --- |
+| Price | Free forever, MIT licensed | Subscription or a paid licence, often with a limited free tier |
+| Your data | Stays on your devices. No account, no cloud relay, no analytics | Many need an account or route files through their servers |
+| Cable and Wi‑Fi | Both, in one app | Usually one or the other |
+| Wi‑Fi security | TLS with a pinned certificate and Bluetooth-style code pairing | Often a plain web page or an account login |
+| System changes | None: no drivers, kernel extensions or macFUSE | Some mounters need extra system components |
+| Safety | Never overwrites a file; partial uploads are removed | Varies; overwrite prompts are easy to click through |
+| Trust | Every line is public and reviewable | Closed source |
+| Size | About 1.4 MB, native Apple Silicon | Often much larger |
+
+**What it lacks compared with paid apps (stated plainly):**
+
+- **No Finder drive.** Your phone opens in OpenBridge's own window, not as a disk in Finder's sidebar. That needs Apple's File Provider system and a paid Apple developer account; it is on the list after 1.0.
+- **One file at a time.** No multi-select, whole-folder copies or drag and drop yet.
+- **No previews.** No thumbnails or Quick Look of photos and videos on the phone.
+- **No sync or backup.** It moves files you choose; it doesn't mirror folders or back up the phone.
+- **No extras.** No clipboard sharing, notifications, SMS or screen mirroring.
+- **Not notarized and not on Google Play (yet).** macOS asks you to confirm the first launch, and Android asks you to allow installing the APK.
+- **Wi‑Fi needs the phone app open**, and you type the phone's address on the Mac; there is no automatic discovery.
+- **Interrupted transfers start over** rather than resuming.
+- **Apple Silicon Macs only, for now.** The release is built for M-series Macs; Intel Macs need a universal build, which is planned.
+- **Young.** Tested on one phone and one Mac so far. Reports from other phones are very welcome.
 
 ## Requirements
 
 - Android 8.0/API 26 or later, private IPv4 Wi-Fi or USB tethering (see below), and a writable folder in internal storage or an SD card.
-- macOS 13 or later. Both devices must be reachable on the same local network; guest Wi-Fi/client isolation can prevent connections.
+- A Mac with Apple Silicon (M1 or later) and macOS 13 or later. Both devices must be reachable on the same local network; guest Wi-Fi/client isolation can prevent connections.
 - Development: JDK **17**, Gradle **8.13**, Android SDK platform **35**, and Android Studio or the command-line SDK. Mac builds need Xcode command-line tools/Swift 5.9 or later. These tools and dependency downloads are build-time requirements only.
 
 ## Install a release

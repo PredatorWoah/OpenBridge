@@ -1,5 +1,13 @@
 # Verification status and manual acceptance
 
+## Real-device results
+
+| Date | Devices | Result |
+| --- | --- | --- |
+| 2026-10-17 | vivo X300 Pro (V2514, Android) + MacBook Air M1 | USB File transfer: phone detected automatically, folders browsed, a 7.83 GB file downloaded successfully (covers the path for files of 4 GiB and more). Found and fixed: a crash on connect (0.9.3), a disappearing Mac window and blank folder lists (0.9.5). |
+| 2026-10-17 | vivo X300 Pro | The phone's USB tethering uses RNDIS, which macOS does not support; the Mac app explains this and points to File transfer. |
+
+
 Status as of 0.5.0. **Everything below is automated; nothing has yet been verified on physical devices.**
 
 ## Continuous integration
