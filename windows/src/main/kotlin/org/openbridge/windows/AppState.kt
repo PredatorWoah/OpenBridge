@@ -1,0 +1,346 @@
+package org.openbridge.windows
+
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.toComposeImageBitmap
+import java.awt.Toolkit
+import java.awt.datatransfer.DataFlavor
+import java.awt.datatransfer.StringSelection
+import java.io.File
+import java.util.concurrent.Executors
+import javax.swing.SwingUtilities
+
+enum class SortKey { NAME, SIZE, KIND }
+
+/** What a file is, from its name: decides its icon, sorting group and whether it has a preview. */
+enum class Kind { FOLDER, IMAGE, VIDEO, AUDIO, DOCUMENT, ARCHIVE, APP, OTHER;
+    val previewable get() = this == IMAGE || this == VIDEO
+    companion object {
+        fun of(entry: Entry): Kind = if (entry.directory) FOLDER else when (entry.name.substringAfterLast('.', "").lowercase()) {
+            "jpg", "jpeg", "png", "heic", "heif", "webp", "gif", "dng", "bmp" -> IMAGE
+            "mp4", "mov", "mkv", "3gp", "webm", "m4v", "avi" -> VIDEO
+            "mp3", "m4a", "aac", "wav", "flac", "ogg", "opus" -> AUDIO
+            "pdf", "txt", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "md", "rtf", "csv" -> DOCUMENT
+            "zip", "rar", "7z", "tar", "gz", "iso" -> ARCHIVE
+            "apk", "xapk", "apks" -> APP
+            else -> OTHER
+        }
+    }
+}
+
+/** One transfer; `at` is the phone folder by name, so it can be found again after pairing anew. */
+sealed class Job(val name: String) {
+    class Download(val entry: Entry, val target: File, val at: List<String>) : Job(entry.name)
+    class Upload(val file: File, val into: String, val at: List<String>, name: String = file.name) : Job(name)
+}
+
+data class Transfer(
+    val name: String, val upload: Boolean, val index: Int = 1, val count: Int = 1, val fraction: Float = 0f,
+    val done: Boolean = false, val saved: File? = null, val remaining: List<Job> = emptyList(), val connection: Int = 0,
+)
+
+/** The Windows app's state. Work runs on one background thread, one task at a time; the UI reads these values. */
+class AppState {
+    var nearby by mutableStateOf(emptyList<NearbyPhone>()); private set
+    var usbPhones by mutableStateOf(emptyList<String>()); private set
+    var host by mutableStateOf("")
+    var port by mutableStateOf("")
+    var pairingCode by mutableStateOf<String?>(null); private set
+    var busy by mutableStateOf(false); private set
+    var status by mutableStateOf(""); private set
+    var error by mutableStateOf<String?>(null); private set
+    var toast by mutableStateOf<String?>(null); private set
+    var client by mutableStateOf<BridgeClient?>(null); private set
+    var deviceName by mutableStateOf(S.phone); private set
+    var path by mutableStateOf(listOf("" to S.phone)); private set
+    var entries by mutableStateOf(emptyList<Entry>()); private set
+    var selection by mutableStateOf(emptySet<String>()); private set
+    var sortKey by mutableStateOf(SortKey.NAME)
+    var ascending by mutableStateOf(true)
+    var thumbnails by mutableStateOf(emptyMap<String, ImageBitmap>()); private set
+    var transfer by mutableStateOf<Transfer?>(null); private set
+    var mirroring by mutableStateOf(false); private set
+
+    private val worker = Executors.newSingleThreadExecutor { Thread(it, "openbridge-work").apply { isDaemon = true } }
+    private val previews = Executors.newFixedThreadPool(3) { Thread(it, "openbridge-previews").apply { isDaemon = true } }
+    private val discovery = Discovery { found -> ui { nearby = found } }
+    @Volatile private var cancelled = false
+    private var connection = 0
+    private var anchor: String? = null
+    private val pendingPreviews = HashSet<String>()
+
+    private fun ui(block: () -> Unit) = SwingUtilities.invokeLater(block)
+
+    fun start() {
+        discovery.start()
+        Thread {
+            while (true) {
+                val found = Usb.phones()
+                ui { usbPhones = found }
+                Thread.sleep(3_000)
+            }
+        }.apply { isDaemon = true }.start()
+    }
+
+    fun show(message: String) {
+        toast = message
+        Thread { Thread.sleep(2_500); ui { if (toast == message) toast = null } }.apply { isDaemon = true }.start()
+    }
+
+    /** Runs blocking work in the background; errors become a readable message. */
+    private fun run(work: () -> Unit) {
+        if (busy) return
+        busy = true; error = null; cancelled = false
+        worker.execute {
+            try { work() }
+            catch (e: InterruptedException) { ui { status = S.cancelled; transfer = null } }
+            catch (e: Exception) { ui { error = e.message ?: e.toString() } }
+            finally { ui { busy = false; pairingCode = null } }
+        }
+    }
+
+    // Connecting
+
+    fun pair(name: String? = null) = run {
+        ui { status = S.pairing }
+        val paired = BridgeClient.pair(host.trim(), port.trim()) { code -> ui { pairingCode = code } }
+        val top = paired.list()
+        ui {
+            client = paired; deviceName = name ?: "${S.phone} ${paired.host}"; connection++
+            path = listOf("" to S.phone); entries = top; selection = emptySet(); status = ""
+            discovery.stop()
+        }
+    }
+
+    fun pairWith(phone: NearbyPhone) { host = phone.host; port = phone.port; pair(phone.name) }
+
+    fun disconnect() {
+        if (busy) return
+        client = null; entries = emptyList(); path = listOf("" to S.phone); selection = emptySet(); thumbnails = emptyMap()
+        discovery.start()
+    }
+
+    fun cancel() { cancelled = true }
+
+    fun mirror() {
+        if (mirroring) return
+        mirroring = true
+        show(S.mirrorStarting)
+        Mirror.start { problem -> ui { mirroring = false; if (problem != null) error = problem } }
+    }
+
+    // Browsing
+
+    val sorted: List<Entry> get() = entries.sortedWith { a, b ->
+        if (a.directory != b.directory) return@sortedWith if (a.directory) -1 else 1
+        val order = when (sortKey) {
+            SortKey.NAME -> a.name.compareTo(b.name, ignoreCase = true)
+            SortKey.SIZE -> a.size.compareTo(b.size).takeIf { it != 0 } ?: a.name.compareTo(b.name, ignoreCase = true)
+            SortKey.KIND -> Kind.of(a).compareTo(Kind.of(b)).takeIf { it != 0 } ?: a.name.compareTo(b.name, ignoreCase = true)
+        }
+        if (ascending) order else -order
+    }
+
+    private val trail get() = path.drop(1).map { it.second }
+
+    fun open(entry: Entry) { if (entry.directory) enter(entry) else download(listOf(entry)) }
+
+    fun enter(entry: Entry) {
+        val phone = client ?: return
+        run { val listed = phone.list(entry.id); ui { display(listed, path + (entry.id to entry.name)) } }
+    }
+
+    fun go(level: Int) {
+        val phone = client ?: return
+        if (level >= path.size - 1) return
+        val target = path.take(level + 1)
+        run { val listed = phone.list(target.last().first); ui { display(listed, target) } }
+    }
+
+    fun up() = go(path.size - 2)
+
+    fun refresh() {
+        val phone = client ?: return
+        run { val listed = phone.list(path.last().first); ui { entries = listed } }
+    }
+
+    private fun display(listed: List<Entry>, at: List<Pair<String, String>>) {
+        entries = listed; path = at; selection = emptySet(); anchor = null
+    }
+
+    /** Click selects, Ctrl-click adds or removes, Shift-click selects a range, like File Explorer. */
+    fun click(entry: Entry, ctrl: Boolean, shift: Boolean) {
+        val list = sorted
+        val from = list.indexOfFirst { it.id == anchor }
+        val to = list.indexOfFirst { it.id == entry.id }
+        selection = when {
+            ctrl -> if (entry.id in selection) selection - entry.id else selection + entry.id
+            shift && from >= 0 && to >= 0 -> list.subList(minOf(from, to), maxOf(from, to) + 1).map { it.id }.toSet()
+            else -> setOf(entry.id)
+        }
+        if (!shift) anchor = entry.id
+    }
+
+    fun selectAll() { selection = entries.map { it.id }.toSet() }
+    val selected: List<Entry> get() = sorted.filter { it.id in selection }
+
+    fun loadThumbnail(entry: Entry) {
+        val phone = client ?: return
+        if (!Kind.of(entry).previewable || entry.id in thumbnails || !pendingPreviews.add(entry.id)) return
+        previews.execute {
+            val image = runCatching { org.jetbrains.skia.Image.makeFromEncoded(phone.thumbnail(entry)).toComposeImageBitmap() }.getOrNull()
+            ui { if (image != null) thumbnails = thumbnails + (entry.id to image) }
+        }
+    }
+
+    // Clipboard and folders
+
+    fun sendClipboard() {
+        val phone = client ?: return
+        val text = runCatching { Toolkit.getDefaultToolkit().systemClipboard.getData(DataFlavor.stringFlavor) as String }.getOrNull()
+        if (text.isNullOrEmpty()) { show(S.emptyClipboard); return }
+        run { phone.setClipboard(text); ui { show(S.sentClipboard) } }
+    }
+
+    fun fetchClipboard() {
+        val phone = client ?: return
+        run {
+            val text = phone.clipboard()
+            ui {
+                if (text.isEmpty()) show(S.emptyClipboard)
+                else { Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(text), null); show(S.gotClipboard) }
+            }
+        }
+    }
+
+    fun newFolder(name: String) {
+        val phone = client ?: return
+        val directory = path.last().first
+        run { phone.makeFolder(name.trim(), directory); val listed = phone.list(directory); ui { entries = listed } }
+    }
+
+    // Transfers
+
+    /** Downloads files and folders into `folder`, keeping folder structure; name clashes get a new name. */
+    fun download(items: List<Entry>, folder: File? = null) {
+        val phone = client ?: return
+        val destination = folder ?: Dialogs.chooseFolder(S.chooseFolder) ?: return
+        val at = trail
+        run {
+            ui { transfer = Transfer("…", upload = false) }
+            perform(planDownloads(phone, items, destination, at), phone, connection)
+        }
+    }
+
+    private fun planDownloads(phone: BridgeClient, items: List<Entry>, folder: File, at: List<String>): List<Job> = items.flatMap { item ->
+        val target = Names.free(File(folder, item.name))
+        if (item.directory) { target.mkdirs(); planDownloads(phone, phone.list(item.id), target, at + item.name) }
+        else listOf(Job.Download(item, target, at))
+    }
+
+    fun upload(files: List<File>) {
+        val phone = client ?: return
+        if (files.isEmpty()) return
+        val directory = path.last().first
+        val at = trail
+        run {
+            ui { transfer = Transfer("…", upload = true) }
+            perform(planUploads(phone, files, directory, at), phone, connection)
+        }
+    }
+
+    private fun planUploads(phone: BridgeClient, files: List<File>, directory: String, at: List<String>): List<Job> {
+        val taken = phone.list(directory).map { it.name.lowercase() }.toMutableSet()
+        return files.filter { !it.isHidden }.flatMap { file ->
+            val name = Names.unique(file.name, taken).also { taken += it.lowercase() }
+            if (file.isDirectory) {
+                val made = phone.makeFolder(name, directory)
+                planUploads(phone, file.listFiles()?.toList().orEmpty(), made.id, at + name)
+            } else listOf(Job.Upload(file, directory, at, name))
+        }
+    }
+
+    private fun perform(jobs: List<Job>, phone: BridgeClient, planned: Int) {
+        if (jobs.isEmpty()) { ui { transfer = null }; return }
+        val upload = jobs[0] is Job.Upload
+        var last: File? = null
+        val folders = HashMap<String, List<Entry>>()
+        jobs.forEachIndexed { index, job ->
+            if (cancelled) throw InterruptedException()
+            ui { transfer = Transfer(job.name, upload, index + 1, jobs.size, 0f, remaining = jobs.drop(index), connection = planned) }
+            val current = if (planned == connection) job else relocate(job, phone, folders)
+            val progress = { done: Long, total: Long -> ui { transfer = transfer?.copy(fraction = if (total == 0L) 1f else done.toFloat() / total) } }
+            when (current) {
+                is Job.Download -> { phone.download(current.entry, current.target, { cancelled }, progress); last = current.target }
+                is Job.Upload -> uploadNamed(phone, current, progress)
+            }
+        }
+        val listed = runCatching { phone.list(path.last().first) }.getOrNull()
+        ui {
+            transfer = transfer?.copy(done = true, fraction = 1f, saved = last, remaining = emptyList())
+            if (upload && listed != null) entries = listed
+        }
+    }
+
+    /** Uploads under the job's name, which may differ from the file's own when the name was taken. */
+    private fun uploadNamed(phone: BridgeClient, job: Job.Upload, progress: (Long, Long) -> Unit) {
+        if (job.name == job.file.name) { phone.upload(job.file, job.into, { cancelled }, progress); return }
+        val staged = File(System.getProperty("java.io.tmpdir"), "OpenBridge Uploads/${System.nanoTime()}").apply { mkdirs() }
+        val renamed = File(staged, job.name)
+        try {
+            runCatching { java.nio.file.Files.createLink(renamed.toPath(), job.file.toPath()) }.onFailure { job.file.copyTo(renamed) }
+            phone.upload(renamed, job.into, { cancelled }, progress)
+        } finally { staged.deleteRecursively() }
+    }
+
+    /** After pairing again, IDs are new: find the job's file or folder by its path. */
+    private fun relocate(job: Job, phone: BridgeClient, cache: HashMap<String, List<Entry>>): Job {
+        fun listing(id: String, names: List<String>) = cache.getOrPut(names.joinToString("/")) { phone.list(id) }
+        fun folder(names: List<String>): Pair<String, List<Entry>> {
+            var id = ""
+            var entries = listing("", emptyList())
+            names.forEachIndexed { depth, name ->
+                val next = entries.firstOrNull { it.directory && it.name == name } ?: throw BridgeException("“${names.joinToString(" › ")}” is no longer on the phone.")
+                id = next.id
+                entries = listing(id, names.take(depth + 1))
+            }
+            return id to entries
+        }
+        return when (job) {
+            is Job.Download -> {
+                val file = folder(job.at).second.firstOrNull { !it.directory && it.name == job.entry.name }
+                    ?: throw BridgeException("“${job.entry.name}” is no longer on the phone.")
+                Job.Download(file, job.target, job.at)
+            }
+            is Job.Upload -> Job.Upload(job.file, folder(job.at).first, job.at, job.name)
+        }
+    }
+
+    fun resume() {
+        val phone = client ?: return
+        val pending = transfer?.takeIf { it.remaining.isNotEmpty() } ?: return
+        run { perform(pending.remaining, phone, pending.connection) }
+    }
+
+    fun dismissTransfer() { transfer = null }
+}
+
+object Names {
+    /** "photo.jpg" becomes "photo 2.jpg", "photo 3.jpg"…, skipping names in `taken` (compared ignoring case). */
+    fun unique(name: String, taken: Set<String>): String {
+        if (name.lowercase() !in taken) return name
+        val base = name.substringBeforeLast('.', name)
+        val ext = if (name.contains('.') && !name.startsWith('.')) "." + name.substringAfterLast('.') else ""
+        val stem = if (ext.isEmpty()) name else base
+        return generateSequence(2) { it + 1 }.map { "$stem $it$ext" }.first { it.lowercase() !in taken }
+    }
+
+    /** A destination that doesn't exist yet: "photo 2.jpg" if "photo.jpg" is there. Never replaces a file. */
+    fun free(file: File): File {
+        if (!file.exists()) return file
+        val taken = file.parentFile.list()?.map { it.lowercase() }?.toSet().orEmpty()
+        return File(file.parentFile, unique(file.name, taken))
+    }
+}
