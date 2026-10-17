@@ -37,6 +37,8 @@ android {
         }
     }
     buildFeatures { compose = true }
+    // The animated sun and the palette are shared with the Windows app.
+    sourceSets["main"].java.srcDir("../../shared/compose")
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

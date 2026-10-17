@@ -6,4 +6,6 @@ dependencyResolutionManagement {
     repositories { google(); mavenCentral() }
 }
 rootProject.name = "OpenBridge"
-include(":protocol", ":android:app")
+include(":protocol", ":windows")
+// The Windows build machine has no Android SDK: `-PdesktopOnly` leaves the Android app out.
+if (!providers.gradleProperty("desktopOnly").isPresent) include(":android:app")

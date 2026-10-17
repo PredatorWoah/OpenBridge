@@ -44,7 +44,7 @@ jobs:
           gradle-version: '8.13'
       - run: bash scripts/test-protocol.sh
       - run: python3 scripts/test-tls.py
-      - run: gradle :protocol:check :android:app:assembleDebug :android:app:lintDebug --stacktrace
+      - run: gradle :protocol:check :android:app:assembleDebug :android:app:lintDebug :windows:test --stacktrace
       - name: Check release signing with a throwaway key
         run: |
           keytool -genkeypair -alias ci -keyalg RSA -keysize 2048 -storetype PKCS12 -keystore "$RUNNER_TEMP/ci.p12" \
@@ -81,6 +81,31 @@ jobs:
         with:
           name: OpenBridge-macOS
           path: macos/build/OpenBridge-macOS.dmg
+  windows:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+      - run: bash scripts/fetch-scrcpy-windows.sh windows/build/app-resources
+      - run: gradle -PdesktopOnly :windows:test :windows:createDistributable --stacktrace
+      - name: Zip the app
+        shell: pwsh
+        run: Compress-Archive -Path windows/build/compose/binaries/main/app/OpenBridge -DestinationPath windows/build/OpenBridge-Windows.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpenBridge-Windows
+          path: windows/build/OpenBridge-Windows.zip
   repository:
     runs-on: ubuntu-latest
     steps:

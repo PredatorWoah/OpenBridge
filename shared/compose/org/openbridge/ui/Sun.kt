@@ -1,4 +1,4 @@
-package org.openbridge.android
+package org.openbridge.ui
 
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset

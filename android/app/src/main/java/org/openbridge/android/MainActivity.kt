@@ -54,6 +54,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import org.openbridge.ui.Palette
+import org.openbridge.ui.SunEngine
+import org.openbridge.ui.drawSunArch
 
 class MainActivity : ComponentActivity() {
     private val model = Sharing
