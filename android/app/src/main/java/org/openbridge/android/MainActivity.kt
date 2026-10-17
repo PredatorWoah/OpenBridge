@@ -2,7 +2,10 @@ package org.openbridge.android
 
 import android.Manifest
 import android.app.Application
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -51,6 +54,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -60,6 +64,8 @@ import java.util.concurrent.TimeUnit
 import org.openbridge.protocol.FileStore
 import org.openbridge.protocol.Pairing
 
+enum class Cable { NONE, CHARGING, FILE_TRANSFER }
+
 class ShareModel(application: Application) : AndroidViewModel(application) {
     /** What tapping the sun shares: the whole phone (needs All files access) or one chosen folder. */
     var wholePhone by mutableStateOf(true); private set
@@ -68,6 +74,8 @@ class ShareModel(application: Application) : AndroidViewModel(application) {
     var busy by mutableStateOf(false); private set
     /** A Mac has paired since sharing started. */
     var paired by mutableStateOf(false); private set
+    /** The USB cable: unplugged, charging only, or in File transfer mode (the Mac can browse the phone). */
+    var cable by mutableStateOf(Cable.NONE)
     /** A problem or hint to show under the status, or null. */
     var note by mutableStateOf<String?>(null); private set
     /** Sharing should start as soon as the needed permission or folder arrives. */
@@ -192,11 +200,26 @@ class ShareModel(application: Application) : AndroidViewModel(application) {
 class MainActivity : ComponentActivity() {
     private lateinit var model: ShareModel
 
+    /** Android's sticky USB state broadcast: whether a computer is attached, and in which mode. */
+    private val usbState = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val extras = intent.extras ?: return
+            val attached = extras.getBoolean("connected") && extras.getBoolean("configured")
+            val transfer = extras.getBoolean("mtp") || extras.getBoolean("ptp")
+            model.cable = when {
+                attached && transfer -> Cable.FILE_TRANSFER
+                extras.getBoolean("connected") -> Cable.CHARGING
+                else -> Cable.NONE
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge(statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
         model = ViewModelProvider(this)[ShareModel::class.java]
+        ContextCompat.registerReceiver(this, usbState, IntentFilter("android.hardware.usb.action.USB_STATE"), ContextCompat.RECEIVER_EXPORTED)
         val picker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             val uri = result.data?.data
             if (result.resultCode == RESULT_OK && uri != null) model.select(uri) else model.folderCancelled()
@@ -242,6 +265,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onDestroy() {
+        unregisterReceiver(usbState)
+        super.onDestroy()
+    }
+
     override fun onResume() {
         super.onResume()
         model.wholePhoneResult()
@@ -256,7 +284,11 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun ShareScreen(model: ShareModel, tapSun: () -> Unit, onWholePhone: () -> Unit, onFolder: () -> Unit) {
     val sharing = model.server
-    val active = sharing != null || model.busy
+    val sharingActive = sharing != null || model.busy
+    val byCable = model.cable == Cable.FILE_TRANSFER
+    // The sun lights up for a paired Mac over Wi-Fi, or for a Mac plugged in by cable in File transfer mode.
+    val active = sharingActive || byCable
+    val connected = model.paired || byCable
     val engine = remember { SunEngine() }
     val view = LocalView.current
     engine.onConnect = { view.performHapticFeedback(if (Build.VERSION.SDK_INT >= 30) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.VIRTUAL_KEY) }
@@ -264,7 +296,7 @@ private fun ShareScreen(model: ShareModel, tapSun: () -> Unit, onWholePhone: () 
         Settings.Global.getFloat(view.context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
     }
     val activeNow by rememberUpdatedState(active)
-    val pairedNow by rememberUpdatedState(model.paired)
+    val connectedNow by rememberUpdatedState(connected)
     var tick by remember { mutableLongStateOf(0L) }
     var frame by remember { mutableStateOf(SunEngine.Frame()) }
     LaunchedEffect(engine) {
@@ -272,7 +304,7 @@ private fun ShareScreen(model: ShareModel, tapSun: () -> Unit, onWholePhone: () 
         while (true) withFrameNanos { now ->
             val dt = if (last == 0L) 0.0 else ((now - last) / 1e9).coerceAtMost(1.0 / 30)
             last = now
-            frame = engine.step(dt, activeNow, pairedNow, reduceMotion)
+            frame = engine.step(dt, activeNow, connectedNow, reduceMotion)
             tick = now
         }
     }
@@ -292,6 +324,7 @@ private fun ShareScreen(model: ShareModel, tapSun: () -> Unit, onWholePhone: () 
             Spacer(Modifier.height(18.dp))
             Text("OpenBridge", color = Palette.fg, fontSize = 26.sp, fontWeight = FontWeight.Bold)
             Text(when {
+                byCable -> "Connected to your Mac by cable"
                 model.paired -> "Your Mac is connected"
                 sharing != null -> "Waiting for your Mac"
                 model.busy -> "Starting…"
@@ -302,7 +335,7 @@ private fun ShareScreen(model: ShareModel, tapSun: () -> Unit, onWholePhone: () 
                 Box(Modifier.size(250.dp).clip(CircleShape)
                     .onGloballyPositioned { anchor = it.boundsInRoot().center }
                     .clickable(remember { MutableInteractionSource() }, indication = null, role = Role.Button, onClick = tapSun)
-                    .semantics { contentDescription = if (active) "Sharing" else "Start sharing" })
+                    .semantics { contentDescription = if (sharingActive) "Sharing" else "Start sharing" })
             }
             StatusPill(model)
             Spacer(Modifier.height(12.dp))
@@ -313,19 +346,25 @@ private fun ShareScreen(model: ShareModel, tapSun: () -> Unit, onWholePhone: () 
                 }
                 Text("port ${sharing.port}", color = Palette.muted, fontSize = 15.sp, fontFamily = FontFamily.Monospace)
             }
+            if (byCable && (sharing == null || model.paired)) {
+                Text("Open OpenBridge on your Mac to browse this phone.", color = Palette.muted, fontSize = 13.sp, textAlign = TextAlign.Center)
+            } else if (model.cable == Cable.CHARGING && sharing == null) {
+                Text("Cable connected, but only charging. Choose File transfer in the USB notification to browse from your Mac.",
+                    color = Palette.muted, fontSize = 13.sp, textAlign = TextAlign.Center)
+            }
             model.note?.let { Text(it, color = Palette.amber, fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp)) }
             Spacer(Modifier.height(16.dp))
-            if (active) {
+            if (sharingActive) {
                 GhostButton("Stop sharing", model::stop, Modifier.fillMaxWidth())
             } else {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    ChoiceTile("Whole phone", "Every folder, like a USB drive", model.wholePhone, onWholePhone, Modifier.weight(1f))
+                Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    ChoiceTile("Whole phone", "Every folder, like a USB drive", model.wholePhone, onWholePhone, Modifier.weight(1f).fillMaxHeight())
                     ChoiceTile("One folder", model.folder?.lastPathSegment?.substringAfterLast(':')?.ifEmpty { "Storage" } ?: "Only the folder you pick",
-                        !model.wholePhone, onFolder, Modifier.weight(1f))
+                        !model.wholePhone, onFolder, Modifier.weight(1f).fillMaxHeight())
                 }
             }
             Spacer(Modifier.height(14.dp))
-            UsbHint()
+            if (model.cable == Cable.NONE) UsbHint()
             Spacer(Modifier.height(14.dp))
         }
         PairingSheet(model)
@@ -341,13 +380,14 @@ private fun Modifier.glass(shape: Shape = glassShape, border: Color = Color.Whit
 
 @Composable
 private fun StatusPill(model: ShareModel) {
-    val on = model.paired
+    val on = model.paired || model.cable == Cable.FILE_TRANSFER
     Row(Modifier.glass(CircleShape, if (on) Palette.ok.copy(alpha = 0.45f) else Color.White.copy(alpha = 0.16f))
         .padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(8.dp).clip(CircleShape).background(if (on) Palette.ok else Color(0xFF8E8E9C)))
         Spacer(Modifier.width(8.dp))
         Text(when {
-            on -> "Connected to your Mac"
+            model.paired -> "Connected to your Mac"
+            on -> "Connected by cable · File transfer"
             model.server != null -> if (model.wholePhone) "Sharing whole phone" else "Sharing one folder"
             model.busy -> "Starting…"
             else -> "Not sharing"

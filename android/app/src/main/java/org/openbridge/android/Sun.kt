@@ -41,8 +41,9 @@ object Palette {
             red = ((a shr 16 and 255) + ((b shr 16 and 255) - (a shr 16 and 255)) * k) / 255f,
             green = ((a shr 8 and 255) + ((b shr 8 and 255) - (a shr 8 and 255)) * k) / 255f,
             blue = ((a and 255) + ((b and 255) - (a and 255)) * k) / 255f)
-        return SunColors(mix(0xF4F4F8, 0xFFFDF0), mix(0xC4C4D0, 0xFFE08A), mix(0x868696, 0xFFB347),
-            mix(0xAAAABE, 0xFFC85A).copy(alpha = 0.55f + 0.4f * k))
+        // Grey is moonlight: bright silver-lavender glass with a soft white glow, never a dark rim.
+        return SunColors(mix(0xFFFFFF, 0xFFFDF0), mix(0xE6E3F2, 0xFFE08A), mix(0xB4B0CC, 0xFFB347),
+            mix(0xF0EEFF, 0xFFC85A).copy(alpha = 0.3f + 0.65f * k))
     }
 }
 
@@ -71,12 +72,14 @@ class SunEngine {
     private var to = 0.0
     private var windup = false
     private var settledAt = 0.0
+    /** Idle but still gliding back to the top. */
+    private var homing = false
 
     /** [active]: sharing has started. [connected]: a Mac has paired. */
     fun step(dt: Double, active: Boolean, connected: Boolean, reduceMotion: Boolean): Frame {
         clock += dt
         when {
-            !active -> if (state != State.IDLE) { normalize(); state = State.IDLE }
+            !active -> if (state != State.IDLE) goHome()
             state == State.IDLE -> spin(windup = true)
             state == State.SCAN && connected -> spin(windup = false)
             state == State.DONE && !connected -> scan()
@@ -84,7 +87,7 @@ class SunEngine {
         if (reduceMotion && state == State.SPIN) finish(connected)
 
         var glow = 0.0; var bloom = 0.0; var pulse = 0.0
-        if (state == State.SPIN || state == State.SCAN) {
+        if (state == State.SPIN || state == State.SCAN || homing) {
             val t = clock - start
             val h = dt / 8
             repeat(8) {
@@ -99,6 +102,7 @@ class SunEngine {
             while (trail.size > length) trail.removeFirst()
             glow = min(abs(velocity) / 700, 1.0) * (if (state == State.SCAN) 0.4 else 1.0)
             if (state == State.SPIN && t > (if (windup) 0.2 else 0.0) + 1.1 && abs(velocity) < 6 && abs(to - angle) < 0.6) finish(connected)
+            if (homing && abs(velocity) < 4 && abs(to - angle) < 0.4) { homing = false; angle = 0.0; velocity = 0.0 }
         } else {
             trail.removeFirstOrNull()
             jellyVelocity += (-320 * jelly - 16 * jellyVelocity) * dt; jelly += jellyVelocity * dt
@@ -120,6 +124,7 @@ class SunEngine {
 
     private fun target(t: Double): Double {
         if (state == State.SCAN) return from + 70 * t
+        if (state == State.IDLE) return to
         val w = if (windup) 0.2 else 0.0
         val f = from - (if (windup) 14 else 0)
         return when {
@@ -131,9 +136,15 @@ class SunEngine {
 
     private fun normalize() { angle = ((angle % 360) + 360) % 360 }
     private fun spin(windup: Boolean) {
-        normalize(); this.windup = windup; from = angle
+        normalize(); homing = false; this.windup = windup; from = angle
         to = kotlin.math.ceil((angle + (if (windup) 1 else 200)) / 360) * 360
         state = State.SPIN; start = clock; trail.clear()
+    }
+    /** Stop: the sun glides on to the top and rests there. */
+    private fun goHome() {
+        normalize(); state = State.IDLE
+        to = if (angle < 0.5) angle else 360.0
+        homing = angle != to
     }
     private fun scan() { normalize(); state = State.SCAN; start = clock; from = angle }
     private fun finish(connected: Boolean) {
@@ -205,7 +216,7 @@ fun DrawScope.drawSunArch(e: SunEngine, f: SunEngine.Frame, c: Offset, r: Float,
     val squash = 1 / sqrt(stretch)
     val direction = if (e.velocity > 0) 1f else if (e.velocity < 0) -1f else 0f
     val lean = -direction * speed * sunR * 0.35f
-    val below = if (cos(Math.toRadians(e.angle)) < 0) 0.6f else 1f
+    val below = 1f   // the sun stays solid; only its tail dims below the horizon
     val reach = sunR * (2.2f + f.glow + f.pulse)
     drawCircle(Brush.radialGradient(0f to sun.glow.copy(alpha = sun.glow.alpha * below), 1f to Color.Transparent, center = p, radius = reach), reach, p)
     withTransform({ translate(p.x, p.y); rotate(e.angle.toFloat(), Offset.Zero) }) {

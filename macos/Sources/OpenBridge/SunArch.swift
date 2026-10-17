@@ -183,7 +183,6 @@ struct SunArch: View {
         var drop = context
         drop.translateBy(x: p.x, y: p.y)
         drop.rotate(by: .degrees(engine.angle))
-        drop.opacity = cos(engine.angle * .pi / 180) < 0 ? 0.6 : 1
         var blob = drop
         blob.addFilter(.shadow(color: sun.glow, radius: 4 + engine.warmth * 7 + frame.glow * 11 + frame.pulse * 11))
         let w = sunR * stretch, h = sunR * squash * (1 + engine.jelly)
@@ -240,7 +239,8 @@ enum Palette {
         func mix(_ a: (Double, Double, Double), _ b: (Double, Double, Double)) -> Color {
             Color(red: (a.0 + (b.0 - a.0) * k) / 255, green: (a.1 + (b.1 - a.1) * k) / 255, blue: (a.2 + (b.2 - a.2) * k) / 255)
         }
-        return Sun(core: mix((244, 244, 248), (255, 253, 240)), middle: mix((196, 196, 208), (255, 224, 138)),
-                   edge: mix((134, 134, 150), (255, 179, 71)), glow: mix((170, 170, 190), (255, 200, 90)).opacity(0.55 + 0.4 * k))
+        // Grey is moonlight: bright silver-lavender glass with a soft white glow, never a dark rim.
+        return Sun(core: mix((255, 255, 255), (255, 253, 240)), middle: mix((230, 227, 242), (255, 224, 138)),
+                   edge: mix((180, 176, 204), (255, 179, 71)), glow: mix((240, 238, 255), (255, 200, 90)).opacity(0.3 + 0.65 * k))
     }
 }

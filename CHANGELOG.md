@@ -4,6 +4,14 @@ All notable changes to OpenBridge are recorded here. Every release has an entry;
 
 ## [Unreleased]
 
+### Added
+- **The phone's sun lights up for the cable too.** Plug the phone into your Mac and choose File transfer: the sun whips around and turns gold, with "Connected to your Mac by cable", no tap needed. If the cable is only charging, the phone tells you to pick File transfer.
+
+### Changed
+- **A prettier grey sun.** While nothing is connected the sun is bright moonlight glass with a soft glow, instead of a dull grey ball, and it stays solid as it passes below the horizon.
+- **Stop sends the sun home.** After Stop sharing the sun glides on to the top of the arch and rests there, instead of freezing wherever it was.
+- The Whole phone and One folder tiles are the same height.
+
 ### Fixed
 - **Mac: folders show their files right away.** Opening the phone or a folder could leave the list blank until you went back and opened it again. Folders now fade in as a whole in a fraction of a second, and rows no longer wait to appear while you scroll.
 
