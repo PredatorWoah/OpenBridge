@@ -24,7 +24,7 @@
 - 🪟 **Now on Windows too (beta).** A Phone Link alternative that works with any Android phone, Xiaomi, OPPO, vivo, OnePlus and Honor included, with no Microsoft account. In English and 简体中文.
 - 🛡️ **Never overwrites.** Existing files are never replaced on either side; copies get a new name like "photo 2.jpg".
 
-**Download:** get the Android APK, the Mac app (`.dmg`) and the Windows app (`-Windows.zip`) from the [latest release](https://github.com/PredatorWoah/OpenBridge/releases/latest). See the [changelog](CHANGELOG.md) for what's new.
+**Download:** get the Android APK, the Mac app (`.dmg`) and the Windows installer (`-Windows-Setup.exe`, or the portable `-Windows.zip`) from the [latest release](https://github.com/PredatorWoah/OpenBridge/releases/latest). See the [changelog](CHANGELOG.md) for what's new.
 
 > **Status: preview, tested on real hardware.** Verified on a vivo X300 Pro and a MacBook Air M1, including a 7.83 GB USB download, plus a full automated test suite with a simulated phone and real Java/Swift TLS interoperability. USB File transfer stays **beta** until more phone brands are tested. See [verification status](docs/verification.md).
 
@@ -68,8 +68,8 @@ Apple and Android don't talk to each other out of the box, so most Mac users end
 
 Microsoft's Phone Link needs a Microsoft account, works best with Samsung and Honor, and often can't connect to phones from Chinese brands or without Google services. OpenBridge for Windows needs none of that: it talks straight to the OpenBridge app on your phone over your own Wi‑Fi.
 
-1. Download `OpenBridge-<version>-Windows.zip`, unzip it anywhere and run `OpenBridge.exe`. The app isn't code-signed yet, so if SmartScreen says *Windows protected your PC*, click **More info › Run anyway**. Allow it on private networks if the firewall asks.
-2. Tap the sun on the phone. It appears under **Phones nearby**; click it, check that both screens show the same 6 digits, and tap **Pair** on the phone.
+1. Download `OpenBridge-<version>-Windows-Setup.exe` and run it. It installs for your account only (no administrator prompt) and adds OpenBridge to the Start menu and desktop. Prefer no installer? Unzip `OpenBridge-<version>-Windows.zip` anywhere and run `OpenBridge.exe`. The app isn't code-signed yet, so if SmartScreen says *Windows protected your PC*, click **More info › Run anyway**. Allow it on private networks if the firewall asks.
+2. Tap the sun on the phone. It appears under **Phones nearby** (if it doesn't, set your Wi‑Fi to *Private* in Windows settings, or type the address the phone shows); click it, check that both screens show the same 6 digits, and tap **Pair** on the phone.
 3. Browse with thumbnails, sort, select with Ctrl and Shift, download files or whole folders, drop files onto the window to upload, and use **⋯** for new folders and the clipboard. Interrupted downloads continue where they stopped.
 
 **By cable:** choose File transfer on the phone and OpenBridge offers **Open in File Explorer**, where Windows shows the phone like a USB drive. **Mirror screen** shows and controls the phone in a window with the built-in scrcpy, after you turn on USB debugging (see [Screen mirroring](#screen-mirroring-beta)).

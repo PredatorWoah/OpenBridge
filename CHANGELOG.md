@@ -4,6 +4,27 @@ All notable changes to OpenBridge are recorded here. Every release has an entry;
 
 ## [Unreleased]
 
+## [0.9.9] - 2026-10-17
+
+A proper Windows installer, and sturdier connections on Windows and with every computer.
+
+### Added
+- **Windows installer.** `OpenBridge-0.9.9-Windows-Setup.exe` installs OpenBridge for your user account, with no administrator prompt, and adds it to the Start menu and the desktop. Later versions install over it. The portable zip is still there if you prefer it.
+- **Cancel pairing on Windows.** A Cancel button appears while connecting or waiting for you to tap Pair on the phone, instead of waiting a minute for it to time out.
+- **Help when no phone shows up.** After a few seconds without finding a phone, the Windows app explains the usual cause: Windows hides phones on a Wi‑Fi set to *Public*, and how to switch it to *Private*. Connection errors mention VPNs and proxies that block local network traffic, a common cause in China.
+- Pasting the address as `192.168.1.23:41987` fills in the port too.
+
+### Fixed
+- **"Couldn't reach the phone" while browsing photos.** The phone served only two requests at a time and dropped the rest, so opening a folder or starting a download while previews were loading could fail at random, and some previews never appeared. The phone now serves four at once with a short queue, and the Windows app loads one preview at a time and retries a connection the phone was too busy to take.
+- **Windows: phones nearby stopped appearing after disconnecting** until the app was restarted. Discovery now keeps running for the whole session.
+- **Windows: when the phone stops sharing or leaves the Wi‑Fi**, the app returns to pairing with a clear message, instead of staying in a folder that only shows errors like "Connection reset". Unfinished transfers continue by themselves after pairing again.
+- Windows error messages are now translated into Simplified Chinese too.
+- The Windows app looks for USB phones only while the pairing screen is open, using less CPU while you browse.
+
+### Notes
+- Update the phone app too, to get the connection fix on the phone's side. Installs over 0.9.8.
+- The installer isn't code-signed yet, so SmartScreen may show "Windows protected your PC": click More info, then Run anyway.
+
 ## [0.9.8] - 2026-10-17
 
 OpenBridge comes to Windows: a fast, private alternative to Phone Link that works with any Android phone, in English and Simplified Chinese.

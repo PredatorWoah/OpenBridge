@@ -150,7 +150,7 @@ private fun ConnectScreen(state: AppState) {
         Column(Modifier.width(420.dp).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Column(Modifier.fillMaxWidth().glass().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Label(S.nearby)
-                if (state.nearby.isEmpty()) Text(S.looking, color = Palette.muted, fontSize = 12.5.sp)
+                if (state.nearby.isEmpty()) Text(if (state.searchedLong) S.notFound else S.looking, color = Palette.muted, fontSize = 12.5.sp)
                 state.nearby.forEach { phone ->
                     Row(Modifier.fillMaxWidth().glass(RoundedCornerShape(12.dp)).clickable(enabled = !state.busy) { state.pairWith(phone) }.padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically) {
@@ -181,6 +181,7 @@ private fun ConnectScreen(state: AppState) {
                     }
                 }
                 if (state.busy && state.pairingCode == null && state.status.isNotEmpty()) Text(state.status, color = Palette.muted, fontSize = 12.5.sp)
+                if (state.busy) GhostButton(S.cancel) { state.cancel() }
                 state.error?.let { Text(it, color = Palette.amber, fontSize = 12.5.sp) }
             }
             UsbCard(state)

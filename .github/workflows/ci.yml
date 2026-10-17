@@ -98,7 +98,7 @@ jobs:
         with:
           gradle-version: '8.13'
       - run: bash scripts/fetch-scrcpy-windows.sh windows/build/app-resources
-      - run: gradle -PdesktopOnly :windows:test :windows:createDistributable --stacktrace
+      - run: gradle -PdesktopOnly :windows:test :windows:createDistributable :windows:packageExe --stacktrace
       - name: Check the app carries screen mirroring
         run: |
           app=windows/build/compose/binaries/main/app/OpenBridge
@@ -114,10 +114,14 @@ jobs:
       - name: Zip the app
         shell: pwsh
         run: Compress-Archive -Path windows/build/compose/binaries/main/app/OpenBridge -DestinationPath windows/build/OpenBridge-Windows.zip
+      - name: Check the installer was built
+        run: ls -l windows/build/compose/binaries/main/exe/OpenBridge-*.exe
       - uses: actions/upload-artifact@v4
         with:
           name: OpenBridge-Windows
-          path: windows/build/OpenBridge-Windows.zip
+          path: |
+            windows/build/OpenBridge-Windows.zip
+            windows/build/compose/binaries/main/exe/OpenBridge-*.exe
   repository:
     runs-on: ubuntu-latest
     steps:

@@ -27,7 +27,7 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.Date
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.SynchronousQueue
+import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -47,7 +47,9 @@ class SharingServer(context: Context, private val store: Store, private val appr
     private var announcement: NsdManager.RegistrationListener? = null
     private val closed = AtomicBoolean(false)
     private val sockets = ConcurrentHashMap.newKeySet<SSLSocket>()
-    private val workers = ThreadPoolExecutor(0, 2, 10, TimeUnit.SECONDS, SynchronousQueue())
+    // Four requests at a time (a transfer, browsing and previews together), and a few more wait their turn instead of
+    // being dropped. Anything beyond that is refused, so a misbehaving client can't pile up threads.
+    private val workers = ThreadPoolExecutor(4, 4, 10, TimeUnit.SECONDS, ArrayBlockingQueue(8)).apply { allowCoreThreadTimeOut(true) }
     private val secret = ByteArray(32).also { SecureRandom().nextBytes(it) }
     /** Serves paired Macs, and pairs new ones by 6-digit comparison (see Pairing). */
     private val session: Session
@@ -107,7 +109,7 @@ class SharingServer(context: Context, private val store: Store, private val appr
         }
         try {
             // Never bind 0.0.0.0, cellular, or a public interface. No discovery or port mapping.
-            listener.bind(InetSocketAddress(address, 0), 2)
+            listener.bind(InetSocketAddress(address, 0), 8)
             if (network != null) {
                 connectivity.registerNetworkCallback(NetworkRequest.Builder()
                     .addTransportType(NetworkCapabilities.TRANSPORT_WIFI).build(), callback)

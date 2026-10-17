@@ -2,6 +2,7 @@ package org.openbridge.windows
 
 import org.openbridge.protocol.Pairing
 import org.openbridge.protocol.Wire
+import java.io.Closeable
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.File
@@ -20,8 +21,8 @@ import javax.net.ssl.X509TrustManager
 
 data class Entry(val id: String, val name: String, val directory: Boolean, val size: Long)
 
-/** A problem to show the user as is. */
-class BridgeException(message: String) : IOException(message)
+/** A problem to show the user as is. `lost` means the phone can't be reached any more (stopped sharing, left the Wi‑Fi). */
+class BridgeException(message: String, val lost: Boolean = false) : IOException(message)
 
 /**
  * The OB01 client (see docs/protocol.md): one authenticated request per TLS connection, pinned to the phone's
@@ -33,14 +34,29 @@ class BridgeClient internal constructor(
     companion object {
         private const val TIMEOUT = 30_000
 
-        /** Opens TLS to the phone. With a pin, any other certificate fails before anything is sent. */
+        /**
+         * Opens TLS to the phone. With a pin, any other certificate fails before anything is sent.
+         * A phone that is busy with other requests drops the extra connection during the handshake, before any
+         * request is sent, so that is retried a few times.
+         */
         private fun connect(host: String, port: Int, pin: ByteArray?, seen: (ByteArray) -> Unit = {}): SSLSocket {
+            var attempt = 0
+            while (true) {
+                try { return open(host, port, pin, seen) }
+                catch (e: BridgeException) {
+                    if (e.message == S.certificateChanged || ++attempt >= 4) throw e
+                    Thread.sleep(250L * attempt)
+                }
+            }
+        }
+
+        private fun open(host: String, port: Int, pin: ByteArray?, seen: (ByteArray) -> Unit): SSLSocket {
             val trust = object : X509TrustManager {
                 override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) = throw CertificateException()
                 override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {
                     val digest = MessageDigest.getInstance("SHA-256").digest(chain[0].encoded)
                     seen(digest)
-                    if (pin != null && !MessageDigest.isEqual(pin, digest)) throw CertificateException("The phone's certificate changed. Pair again.")
+                    if (pin != null && !MessageDigest.isEqual(pin, digest)) throw CertificateException(S.certificateChanged)
                 }
                 override fun getAcceptedIssuers() = arrayOf<X509Certificate>()
             }
@@ -53,8 +69,8 @@ class BridgeClient internal constructor(
                 socket.startHandshake()
             } catch (e: Exception) {
                 socket.close()
-                throw if (e is javax.net.ssl.SSLHandshakeException && e.cause is CertificateException) BridgeException(e.cause!!.message ?: "Pair again.")
-                else BridgeException("Couldn't reach the phone at $host:$port. Check that both are on the same Wi‑Fi and sharing is on.")
+                throw if (e is javax.net.ssl.SSLHandshakeException && e.cause is CertificateException) BridgeException(S.certificateChanged, lost = true)
+                else BridgeException(S.unreachable("$host:$port"), lost = true)
             }
             return socket
         }
@@ -63,20 +79,21 @@ class BridgeClient internal constructor(
         fun checkAddress(host: String, port: String): Int {
             val parts = host.split(".")
             val valid = parts.size == 4 && parts.all { it.isNotEmpty() && it.all(Char::isDigit) && it.toInt() in 0..255 && it == it.toInt().toString() }
-            if (!valid || !Wire.isPrivateIPv4(InetAddress.getByName(host))) throw BridgeException("Enter the phone's Wi‑Fi address, like 192.168.1.23.")
-            return port.toIntOrNull()?.takeIf { it in 1..65535 } ?: throw BridgeException("Enter the port the phone shows (1–65535).")
+            if (!valid || !Wire.isPrivateIPv4(InetAddress.getByName(host))) throw BridgeException(S.badAddress)
+            return port.toIntOrNull()?.takeIf { it in 1..65535 } ?: throw BridgeException(S.badPort)
         }
 
         /**
          * OBP1 numeric-comparison pairing: `show` displays the 6-digit code; the phone's user taps Pair if it matches.
          * Returns a client pinned to the certificate that the code covered.
          */
-        fun pair(host: String, portText: String, show: (String) -> Unit): BridgeClient = pairAt(host, checkAddress(host, portText), show)
+        fun pair(host: String, portText: String, opened: (Closeable) -> Unit = {}, show: (String) -> Unit): BridgeClient =
+            pairAt(host, checkAddress(host, portText), opened, show)
 
-        /** Pairing without the address check, for loopback tests. */
-        internal fun pairAt(host: String, port: Int, show: (String) -> Unit): BridgeClient {
+        /** Pairing without the address check, for loopback tests. `opened` gets the connection, so Cancel can close it. */
+        internal fun pairAt(host: String, port: Int, opened: (Closeable) -> Unit = {}, show: (String) -> Unit): BridgeClient {
             var fingerprint: ByteArray? = null
-            connect(host, port, null) { fingerprint = it }.use { socket ->
+            connect(host, port, null) { fingerprint = it }.also(opened).use { socket ->
                 val f = fingerprint ?: throw BridgeException("The phone sent no certificate.")
                 val input = DataInputStream(socket.inputStream.buffered())
                 val output = DataOutputStream(socket.outputStream.buffered())
@@ -87,7 +104,7 @@ class BridgeClient internal constructor(
                 output.write(macNonce); output.flush()
                 val phoneNonce = ByteArray(Pairing.NONCE).also(input::readFully)
                 if (!MessageDigest.isEqual(commitment, Pairing.commitment(f, phoneNonce)))
-                    throw BridgeException("Pairing failed a security check. Someone may be interfering with the connection.")
+                    throw BridgeException(S.pairingTampered)
                 show(Pairing.code(f, macNonce, phoneNonce))
                 socket.soTimeout = 75_000   // the phone's user has about a minute to compare and tap Pair
                 status(input)
@@ -107,12 +124,16 @@ class BridgeClient internal constructor(
 
     private fun <T> request(operation: Int, id: String, extra: (DataOutputStream) -> Unit = {}, body: (DataInputStream, DataOutputStream) -> T): T =
         connect(host, port, fingerprint).use { socket ->
-            val input = DataInputStream(socket.inputStream.buffered(1 shl 16))
-            val output = DataOutputStream(socket.outputStream.buffered(1 shl 16))
-            output.write(Wire.MAGIC); output.write(secret); output.writeByte(operation); Wire.writeString(output, id)
-            extra(output)
-            output.flush()
-            body(input, output)
+            try {
+                val input = DataInputStream(socket.inputStream.buffered(1 shl 16))
+                val output = DataOutputStream(socket.outputStream.buffered(1 shl 16))
+                output.write(Wire.MAGIC); output.write(secret); output.writeByte(operation); Wire.writeString(output, id)
+                extra(output)
+                output.flush()
+                body(input, output)
+            } catch (e: BridgeException) { throw e }
+            // Reset, timed out or closed mid-request: the phone stopped sharing or left the network.
+            catch (e: IOException) { throw BridgeException(S.dropped, lost = true) }
         }
 
     fun list(id: String = ""): List<Entry> = request(1, id) { input, _ ->
@@ -155,7 +176,7 @@ class BridgeClient internal constructor(
                     while (received < total) {
                         if (cancelled()) throw InterruptedException()
                         val read = input.read(buffer, 0, minOf(buffer.size.toLong(), total - received).toInt())
-                        if (read < 0) throw BridgeException("The phone disconnected before the download finished.")
+                        if (read < 0) throw BridgeException(S.dropped, lost = true)
                         file.write(buffer, 0, read)
                         received += read
                         if (received - reported >= 1 shl 20 || received == total) { reported = received; progress(received, total) }

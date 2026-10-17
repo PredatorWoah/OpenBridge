@@ -124,4 +124,13 @@ class BridgeClientTest {
         val wrongSecret = BridgeClient("127.0.0.1", server.localPort, fingerprint, ByteArray(32))
         assertFailsWith<BridgeException> { wrongSecret.list() }
     }
+
+    @Test
+    fun aPhoneThatStoppedSharingIsReportedAsLost() {
+        val client = client()
+        assertFalse(assertFailsWith<BridgeException> { client.list("no-such-id") }.lost)   // the phone answered: not lost
+        // Nothing listens on that port any more, as when the phone stopped sharing.
+        val stopped = java.net.ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")).use { it.localPort }
+        assertTrue(assertFailsWith<BridgeException> { BridgeClient("127.0.0.1", stopped, fingerprint, secret).list() }.lost)
+    }
 }
