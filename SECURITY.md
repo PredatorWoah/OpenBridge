@@ -22,6 +22,16 @@ The Mac app's **Connect over USB** does not use the protocol above. It talks to 
 
 Choose File transfer only on a Mac you trust, and switch the phone back to *No data transfer* afterwards. This mode is **beta** until verified on physical phones.
 
+## Verifying downloads
+
+From 1.0.0, every Android APK is signed with the OpenBridge release key, whose certificate SHA-256 fingerprint is:
+
+```
+4E:41:B5:C8:0D:00:E4:0B:26:4A:BF:E6:5C:98:6A:8B:6D:1F:4F:DF:F7:E6:D1:7E:EB:66:10:5A:E4:BB:16:85
+```
+
+Check an APK with `apksigner verify --print-certs OpenBridge-<version>.apk` (Android SDK build tools). Do not install an APK signed with a different key. Each release also lists its files' SHA-256 checksums in `SHA256SUMS.txt`.
+
 No real-device test, penetration test, or third-party security audit is claimed. Validate the [device checklist](docs/verification.md) before relying on the app for sensitive data.
 
 Please avoid posting credentials or sensitive files in public bug reports. Report a vulnerability privately to the repository owner through GitHub's private vulnerability reporting if enabled, or request a private contact without posting exploit details.
