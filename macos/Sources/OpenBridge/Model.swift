@@ -82,18 +82,31 @@ final class BrowserModel: ObservableObject {
         var saved: URL?
         /// Jobs not finished yet (including the one that failed), for Resume.
         var remaining: [Job] = []
+        /// The connection the jobs' IDs belong to. Phones hand out new IDs on every connection.
+        var connection = 0
+        /// The phone the transfer was for, to continue it automatically when that phone comes back.
+        var phone = ""
     }
 
+    /// One transfer. `at` is the phone folder by name (from the top), so the job can be found again after
+    /// a reconnect, when the old IDs no longer mean anything.
     enum Job {
-        case download(Entry, to: URL)
-        case upload(URL, into: String)
+        case download(Entry, to: URL, at: [String])
+        case upload(URL, into: String, at: [String])
         var name: String {
             switch self {
-            case .download(let entry, _): return entry.name
-            case .upload(let url, _): return url.lastPathComponent
+            case .download(let entry, _, _): return entry.name
+            case .upload(let url, _, _): return url.lastPathComponent
             }
         }
     }
+
+    /// Bumped on every new connection: IDs from an older one must be looked up again by name.
+    private var connection = 0
+    /// A transfer cut off by unplugging or disconnecting, continued when the same phone reconnects.
+    private var interrupted: Transfer?
+    /// The open folder by name, from the top (without the phone itself).
+    private var trail: [String] { path.dropFirst().map(\.name) }
 
     private func run(_ work: @escaping () async throws -> Void) {
         guard !busy else { return }
@@ -155,6 +168,7 @@ final class BrowserModel: ObservableObject {
                 self.client = usb; self.deviceName = usb.name
                 self.path = [("", usb.name)]; self.entries = storages
                 self.connected = true; self.status = ""
+                self.didConnect(to: usb.name)
             } catch {
                 self.skipped = attached   // don't retry in a loop; replugging or Try again does
                 throw error
@@ -178,6 +192,7 @@ final class BrowserModel: ObservableObject {
             self.client = paired; self.deviceName = name ?? "Phone at \(self.host)"
             self.path = [("", "Phone")]; self.entries = entries
             self.connected = true; self.status = ""
+            self.didConnect(to: self.deviceName)
         }
     }
 
@@ -187,7 +202,19 @@ final class BrowserModel: ObservableObject {
         drop("")
     }
 
+    /// A new connection: old IDs are stale. If this phone had a transfer cut off, continue it.
+    private func didConnect(to phone: String) {
+        connection += 1
+        guard let pending = interrupted, pending.phone == phone, !pending.remaining.isEmpty else { return }
+        interrupted = nil
+        showBrowser = true
+        show("Continuing “\(pending.remaining[0].name)”")
+        // Starts once this connection's task has finished.
+        DispatchQueue.main.async { self.start(pending.remaining, connection: pending.connection) }
+    }
+
     private func drop(_ reason: String) {
+        if let cut = transfer, !cut.done, !cut.remaining.isEmpty { interrupted = cut }
         if let old = client { Task { await old.disconnect() } }
         client = nil; connected = false; showBrowser = false; entries = []; path = [("", "Phone")]
         selection = []; transfer = nil; error = nil; status = reason
@@ -390,7 +417,7 @@ final class BrowserModel: ObservableObject {
             panel.directoryURL = downloads
             panel.message = "Choose where to save. OpenBridge never replaces existing files."
             guard panel.runModal() == .OK, let target = panel.url else { return }
-            start([.download(file, to: target)])
+            start([.download(file, to: target, at: trail)])
             return
         }
         let panel = NSOpenPanel()
@@ -400,21 +427,21 @@ final class BrowserModel: ObservableObject {
         guard panel.runModal() == .OK, let folder = panel.url else { return }
         run {
             self.transfer = Transfer(name: "Preparing…", upload: false)
-            try await self.perform(try await self.plan(items, into: folder, client: client), client: client)
+            try await self.perform(try await self.plan(items, into: folder, at: self.trail, client: client), client: client)
         }
     }
 
     /// Expands folders into individual downloads, creating the folders on the Mac.
-    private func plan(_ items: [Entry], into folder: URL, client: any FileSource) async throws -> [Job] {
+    private func plan(_ items: [Entry], into folder: URL, at location: [String], client: any FileSource) async throws -> [Job] {
         var jobs: [Job] = []
         for item in items {
             try Task.checkCancellation()
             let target = Self.free(folder.appendingPathComponent(item.name))
             if item.directory {
                 try FileManager.default.createDirectory(at: target, withIntermediateDirectories: false)
-                jobs += try await plan(try await client.list(id: item.id), into: target, client: client)
+                jobs += try await plan(try await client.list(id: item.id), into: target, at: location + [item.name], client: client)
             } else {
-                jobs.append(.download(item, to: target))
+                jobs.append(.download(item, to: target, at: location))
             }
         }
         return jobs
@@ -427,7 +454,7 @@ final class BrowserModel: ObservableObject {
         let directory = path.last!.id
         run {
             self.transfer = Transfer(name: "Preparing…", upload: true)
-            try await self.perform(try await self.plan(urls, into: directory, client: client), client: client)
+            try await self.perform(try await self.plan(urls, into: directory, at: self.trail, client: client), client: client)
         }
     }
 
@@ -440,7 +467,7 @@ final class BrowserModel: ObservableObject {
     }
 
     /// Expands Mac folders into uploads, creating the folders on the phone. Names already taken get a new name.
-    private func plan(_ urls: [URL], into directory: String, client: any FileSource) async throws -> [Job] {
+    private func plan(_ urls: [URL], into directory: String, at location: [String], client: any FileSource) async throws -> [Job] {
         var taken = Set(try await client.list(id: directory).map { $0.name.lowercased() })
         var jobs: [Job] = []
         for url in urls {
@@ -452,12 +479,12 @@ final class BrowserModel: ObservableObject {
                 taken.insert(name.lowercased())
                 let folder = try await client.makeFolder(named: name, in: directory)
                 let children = try FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])
-                jobs += try await plan(children, into: folder.id, client: client)
+                jobs += try await plan(children, into: folder.id, at: location + [name], client: client)
             } else {
                 let name = Self.unique(url.lastPathComponent, taken: taken)
                 taken.insert(name.lowercased())
                 if name == url.lastPathComponent {
-                    jobs.append(.upload(url, into: directory))
+                    jobs.append(.upload(url, into: directory, at: location))
                 } else {
                     // Upload under the new name by way of a temporary link with that name.
                     let staged = FileManager.default.temporaryDirectory.appendingPathComponent("OpenBridge Uploads/\(UUID().uuidString)", isDirectory: true)
@@ -465,7 +492,7 @@ final class BrowserModel: ObservableObject {
                     let renamed = staged.appendingPathComponent(name)
                     do { try FileManager.default.linkItem(at: url, to: renamed) }
                     catch { try FileManager.default.copyItem(at: url, to: renamed) }   // another volume
-                    jobs.append(.upload(renamed, into: directory))
+                    jobs.append(.upload(renamed, into: directory, at: location))
                 }
             }
         }
@@ -474,16 +501,18 @@ final class BrowserModel: ObservableObject {
 
     /// Runs transfers one after another. On a failure the rest stay queued, and Resume continues them;
     /// an interrupted download picks up where it stopped.
-    func start(_ jobs: [Job]) {
+    func start(_ jobs: [Job], connection planned: Int? = nil) {
         guard let client, !jobs.isEmpty else { return }
-        run { try await self.perform(jobs, client: client) }
+        run { try await self.perform(jobs, client: client, connection: planned) }
     }
 
-    private func perform(_ jobs: [Job], client: any FileSource) async throws {
+    private func perform(_ jobs: [Job], client: any FileSource, connection planned: Int? = nil) async throws {
         guard !jobs.isEmpty else { transfer = nil; show("Nothing to transfer."); return }
         let upload: Bool
         if case .upload = jobs[0] { upload = true } else { upload = false }
-        transfer = Transfer(name: jobs[0].name, upload: upload, count: jobs.count, remaining: jobs)
+        let planned = planned ?? connection
+        transfer = Transfer(name: jobs[0].name, upload: upload, count: jobs.count, remaining: jobs, connection: planned, phone: deviceName)
+        let folders = FolderCache()   // phone folders looked up again by name, for this run
         do {
             var lastSaved: URL?
             var touchedFolder = false
@@ -491,11 +520,13 @@ final class BrowserModel: ObservableObject {
                 try Task.checkCancellation()
                 self.transfer?.name = job.name; self.transfer?.index = index + 1; self.transfer?.fraction = 0
                 self.transfer?.remaining = Array(jobs[index...])
-                switch job {
-                case .download(let entry, let target):
+                // IDs from an earlier connection are stale: find the file or folder again by its path.
+                let current = planned == connection ? job : try await relocate(job, client: client, cache: folders)
+                switch current {
+                case .download(let entry, let target, _):
                     try await client.download(entry, to: target) { done, total in self.update(done, total) }
                     lastSaved = target
-                case .upload(let url, let directory):
+                case .upload(let url, let directory, _):
                     try await client.upload(url, directoryID: directory) { done, total in self.update(done, total) }
                     touchedFolder = touchedFolder || directory == self.path.last?.id
                 }
@@ -512,8 +543,43 @@ final class BrowserModel: ObservableObject {
     }
 
     func resume() {
-        guard let remaining = transfer?.remaining, !remaining.isEmpty else { return }
-        start(remaining)
+        guard let transfer, !transfer.remaining.isEmpty else { return }
+        start(transfer.remaining, connection: transfer.connection)
+    }
+
+    /// Finds a job's file or folder on the current connection by the names in its path.
+    private final class FolderCache { var listings: [String: [Entry]] = [:] }
+
+    private func relocate(_ job: Job, client: any FileSource, cache: FolderCache) async throws -> Job {
+        func folder(_ names: [String]) async throws -> (id: String, entries: [Entry]) {
+            var id = "", entries = try await cached("", names: [])
+            for (depth, name) in names.enumerated() {
+                guard let next = entries.first(where: { $0.directory && $0.name == name })
+                        ?? entries.first(where: { $0.directory && $0.name.caseInsensitiveCompare(name) == .orderedSame }) else {
+                    throw BridgeError.message("“\(names.joined(separator: " › "))” is no longer on the phone.")
+                }
+                id = next.id
+                entries = try await cached(id, names: Array(names.prefix(depth + 1)))
+            }
+            return (id, entries)
+        }
+        func cached(_ id: String, names: [String]) async throws -> [Entry] {
+            let key = names.joined(separator: "/")
+            if let hit = cache.listings[key] { return hit }
+            let entries = try await client.list(id: id)
+            cache.listings[key] = entries
+            return entries
+        }
+        switch job {
+        case .download(let entry, let target, let location):
+            let (_, entries) = try await folder(location)
+            guard let file = entries.first(where: { !$0.directory && $0.name == entry.name }) else {
+                throw BridgeError.message("“\(entry.name)” is no longer on the phone.")
+            }
+            return .download(file, to: target, at: location)
+        case .upload(let url, _, let location):
+            return .upload(url, into: try await folder(location).id, at: location)
+        }
     }
 
     /// Drag a file from the list to Finder: it downloads to a temporary place, and Finder copies it.

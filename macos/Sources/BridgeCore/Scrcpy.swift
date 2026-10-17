@@ -102,6 +102,9 @@ public enum Scrcpy {
 
     public static func rotate() -> Data { Writer(11).data }
 
+    /// Asks the phone to restart its encoder: a new session, SPS/PPS and keyframe follow at once.
+    public static func resetVideo() -> Data { Writer(17).data }
+
     // Android key codes used by the mirror window.
     public enum Key {
         public static let home: Int32 = 3, back: Int32 = 4, enter: Int32 = 66, delete: Int32 = 67, tab: Int32 = 61
