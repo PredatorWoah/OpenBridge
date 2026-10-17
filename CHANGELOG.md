@@ -4,6 +4,21 @@ All notable changes to OpenBridge are recorded here. Every release has an entry;
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-10-17
+
+Fixes the Mac app crashing on **Connect over USB**.
+
+### Fixed
+- **No more crash when connecting over USB.** Choosing File transfer on the phone and pressing Connect over USB closed the Mac app. The cause was the way the app prepared memory for USB transfers; it now uses ordinary memory, which macOS accepts on every Mac.
+- **Errors instead of crashes.** Any unexpected failure inside macOS's USB framework is now caught and shown as a message you can screenshot, rather than closing the app.
+- If the phone is connected but does not answer, the message now includes the underlying reason.
+
+### Changed
+- If the phone is in USB tethering mode, the Mac now says so and explains how to switch to File transfer. macOS cannot use Android's USB tethering.
+
+### Notes
+- Installs over 0.9.2 without uninstalling. USB File transfer remains beta.
+
 ## [0.9.2] - 2026-10-17
 
 Share your whole phone over Wi-Fi, not just one folder.
@@ -65,6 +80,7 @@ The first public preview: move files between an Android phone and a Mac, private
 - Pairing over Wi-Fi requires typing the address, port, fingerprint and secret.
 - The APK is signed with a build-machine key and the Mac app is not notarized; see the README for how to install and open them. If you installed an earlier test build, uninstall it first.
 
+[0.9.3]: https://github.com/PredatorWoah/OpenBridge/releases/tag/v0.9.3
 [0.9.2]: https://github.com/PredatorWoah/OpenBridge/releases/tag/v0.9.2
 [0.9.1]: https://github.com/PredatorWoah/OpenBridge/releases/tag/v0.9.1
 [0.9.0]: https://github.com/PredatorWoah/OpenBridge/releases/tag/v0.9.0

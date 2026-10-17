@@ -2,6 +2,7 @@
 import Foundation
 import IOKit
 import IOUSBHost
+import ObjCSupport
 
 /// Bulk pipes of a phone's MTP interface, opened directly with IOUSBHost. No driver or library is installed.
 public final class USBTransport: MTPTransport {
@@ -14,7 +15,7 @@ public final class USBTransport: MTPTransport {
     private static let exclusiveAccess: UInt32 = 0xE000_02C5
 
     private init(service: io_service_t) throws {
-        interface = try IOUSBHostInterface(__ioService: service, options: [], queue: nil, interestHandler: nil)
+        interface = try guarded { try IOUSBHostInterface(__ioService: service, options: [], queue: nil, interestHandler: nil) }
         var bulkIn: UInt8?, bulkOut: UInt8?, packet = 512
         let configuration = interface.configurationDescriptor
         let descriptor = interface.interfaceDescriptor
@@ -33,42 +34,47 @@ public final class USBTransport: MTPTransport {
             throw MTPError.transport("This USB device has no MTP data endpoints.")
         }
         maxPacketSize = packet
-        input = try interface.copyPipe(withAddress: Int(bulkIn))
-        output = try interface.copyPipe(withAddress: Int(bulkOut))
+        let interface = interface
+        do {
+            input = try guarded { try interface.copyPipe(withAddress: Int(bulkIn)) }
+            output = try guarded { try interface.copyPipe(withAddress: Int(bulkOut)) }
+        } catch {
+            _ = try? guarded { interface.destroy() }
+            throw error
+        }
     }
 
     deinit { close() }
 
+    // Plain memory buffers: IOUSBHost's own ioData buffers are only an optimization, and resizing one
+    // raises an Objective-C exception on some Macs.
     public func write(_ data: Data) throws {
-        let buffer = try interface.ioData(withCapacity: data.count)
-        buffer.length = data.count
-        data.withUnsafeBytes { buffer.replaceBytes(in: NSRange(location: 0, length: data.count), withBytes: $0.baseAddress!) }
+        let buffer = NSMutableData(data: data)   // empty for a zero-length packet
         var transferred = 0
-        try output.__sendIORequest(with: buffer, bytesTransferred: &transferred, completionTimeout: USBTransport.timeout)
+        try guarded { try output.__sendIORequest(with: buffer, bytesTransferred: &transferred, completionTimeout: USBTransport.timeout) }
         guard transferred == data.count else { throw MTPError.transport("The phone stopped receiving data. Unplug it and try again.") }
     }
 
     public func read(maximum: Int) throws -> Data {
-        let buffer = try interface.ioData(withCapacity: maximum)
-        buffer.length = maximum
+        guard let buffer = NSMutableData(length: maximum) else { throw MTPError.transport("Not enough memory to read from the phone.") }
         var transferred = 0
-        try input.__sendIORequest(with: buffer, bytesTransferred: &transferred, completionTimeout: USBTransport.timeout)
-        return Data(bytes: buffer.bytes, count: transferred)
+        try guarded { try input.__sendIORequest(with: buffer, bytesTransferred: &transferred, completionTimeout: USBTransport.timeout) }
+        return Data(bytes: buffer.bytes, count: min(transferred, maximum))
     }
 
     /// PTP class "Device Reset" request: abandons a half-finished transfer on the phone.
     public func abort() {
         let request = IOUSBDeviceRequest(bmRequestType: 0x21, bRequest: 0x66, wValue: 0,
                                          wIndex: UInt16(interface.interfaceDescriptor.pointee.bInterfaceNumber), wLength: 0)
-        _ = try? interface.__send(request, data: nil, bytesTransferred: nil, completionTimeout: 5)
-        _ = try? input.clearStall()
-        _ = try? output.clearStall()
+        _ = try? guarded { try interface.__send(request, data: nil, bytesTransferred: nil, completionTimeout: 5) }
+        _ = try? guarded { try input.clearStall() }
+        _ = try? guarded { try output.clearStall() }
     }
 
     public func close() {
         guard !closed else { return }
         closed = true
-        interface.destroy()
+        _ = try? guarded { interface.destroy() }
     }
 
     // MARK: Discovery
@@ -76,7 +82,7 @@ public final class USBTransport: MTPTransport {
     /// Finds a USB-connected phone in File transfer (MTP) or PTP mode and opens a session.
     /// With `identity`, only that phone is accepted, so a reconnect never switches devices.
     public static func openSession(matching identity: MTPDeviceIdentity? = nil) throws -> (MTPSession, MTPDeviceInfo) {
-        var busy = false, other = false, silent: Set<String> = [], seen: [String: Set<String>] = [:]
+        var busy = false, other = false, silent: Set<String> = [], seen: [String: Set<String>] = [:], reason: Error?
         for attempt in 0..<2 {
             let interfaces = usbInterfaces()
             defer { interfaces.forEach { IOObjectRelease($0.service) } }
@@ -92,10 +98,10 @@ public final class USBTransport: MTPTransport {
                         if let identity, info.identity != identity { other = true; transport.close(); continue }
                         try session.open()
                         return (session, info)
-                    } catch { transport.close(); silent.insert(candidate.device) }
+                    } catch { transport.close(); silent.insert(candidate.device); reason = error }
                 } catch let error as NSError where UInt32(truncatingIfNeeded: error.code) == exclusiveAccess {
                     busy = true
-                } catch { silent.insert(candidate.device) }
+                } catch { silent.insert(candidate.device); reason = error }
             }
             // macOS's photo import service claims phones for Photos and Image Capture. It restarts on demand,
             // so stopping it only lets this app open the phone; nothing is lost.
@@ -109,7 +115,11 @@ public final class USBTransport: MTPTransport {
             throw MTPError.transport("Another app (Photos, Image Capture or a file transfer app) is using the phone. Quit it and try again.")
         }
         if !silent.isEmpty {
-            throw MTPError.transport("\(silent.sorted().joined(separator: ", ")) is connected but did not answer. Unlock the phone, choose File transfer again in its USB notification, and retry.")
+            throw MTPError.transport("\(silent.sorted().joined(separator: ", ")) is connected but did not answer. Unlock the phone, choose File transfer again in its USB notification, and retry."
+                + (reason.map { " Details: \($0.localizedDescription)" } ?? ""))
+        }
+        if seen.values.contains(where: { $0.contains(InterfaceCode.tethering) }) {
+            throw MTPError.transport("The phone is in USB tethering mode, which macOS does not support. Turn off USB tethering, then choose File transfer in the phone's USB notification.")
         }
         // Name what the Mac does see, so a report shows whether the phone is attached and in which USB mode.
         let summary = seen.keys.sorted().map { "\($0) [\(seen[$0]!.sorted().joined(separator: " "))]" }.joined(separator: "; ")
@@ -121,6 +131,8 @@ public final class USBTransport: MTPTransport {
         let interfaceClass: Int, subclass: Int, interfaceProtocol: Int
         var isMTP: Bool { interfaceClass == 0xFF && subclass == 0xFF && interfaceProtocol == 0x00 }
         var isPTP: Bool { interfaceClass == 0x06 && subclass == 0x01 && interfaceProtocol == 0x01 }
+        /// Android's USB tethering (RNDIS) control interface, as listed in the "devices seen" summary.
+        static let tethering = "e0/01/03"
         var description: String { String(format: "%02x/%02x/%02x", interfaceClass, subclass, interfaceProtocol) }
     }
 
@@ -155,5 +167,16 @@ public final class USBTransport: MTPTransport {
         process.waitUntilExit()
         Thread.sleep(forTimeInterval: 0.5)
     }
+}
+
+/// Runs `body`, turning an Objective-C exception from IOUSBHost into a readable error instead of a crash.
+private func guarded<T>(_ body: () throws -> T) throws -> T {
+    var result: Result<T, Error>?
+    var exception: NSError?
+    let finished = OBCatchException({ result = Result { try body() } }, &exception)
+    guard finished, let result else {
+        throw MTPError.transport("macOS's USB framework failed (\(exception?.localizedDescription ?? "unknown error")). Unplug the phone and try again.")
+    }
+    return try result.get()
 }
 #endif
