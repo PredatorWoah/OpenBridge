@@ -226,7 +226,7 @@ private fun BrowserScreen(state: AppState, dropping: Boolean) {
                         .background(if (entry.id in state.selection) Brush.horizontalGradient(listOf(Palette.violet.copy(alpha = 0.55f), Palette.pink.copy(alpha = 0.35f)))
                             else SolidColor(Color.Transparent))
                         .onPointerEvent(PointerEventType.Press) { event ->
-                            val awt = event.awtEventOrNull
+                            val awt = event.nativeEvent as? java.awt.event.MouseEvent
                             if ((awt?.clickCount ?: 1) >= 2) state.open(entry)
                             else state.click(entry, ctrl = awt?.isControlDown == true, shift = awt?.isShiftDown == true)
                         }
