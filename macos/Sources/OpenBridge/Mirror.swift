@@ -287,8 +287,8 @@ private final class MirrorNSView: NSView {
         NSWorkspace.shared.notificationCenter.removeObserver(self)
         guard let window else { observers = []; return }
         observers = [
-            NotificationCenter.default.addObserver(forName: NSWindow.didChangeOcclusionStateNotification, object: window, queue: .main) { [weak self] _ in
-                if window.occlusionState.contains(.visible) { self?.session?.refresh() }
+            NotificationCenter.default.addObserver(forName: NSWindow.didChangeOcclusionStateNotification, object: window, queue: .main) { [weak self, weak window] _ in
+                if window?.occlusionState.contains(.visible) == true { self?.session?.refresh() }
             },
             NotificationCenter.default.addObserver(forName: NSWindow.didDeminiaturizeNotification, object: window, queue: .main) { [weak self] _ in
                 self?.session?.refresh()
