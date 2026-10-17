@@ -19,6 +19,9 @@ final class BrowserModel: ObservableObject {
     private var client: (any FileSource)?
     private var task: Task<Void, Never>?
 
+    /// Whether the current (or attempted) connection is USB File transfer, which has no Wi-Fi pairing.
+    private var usb = false
+
     private func run(_ work: @escaping () async throws -> Void) {
         guard !busy else { return }
         busy = true; error = nil; fraction = 0
@@ -28,12 +31,15 @@ final class BrowserModel: ObservableObject {
             catch is CancellationError { status = "Operation cancelled. Refresh to check the phone's folder." }
             catch {
                 self.error = error.localizedDescription
-                status = "Operation failed. Check Wi-Fi or the USB cable, sharing status, and the fingerprint on the phone."
+                status = usb
+                    ? "Couldn't reach the phone over USB. Keep it unlocked, plugged in, and in File transfer mode."
+                    : "Operation failed. Check Wi-Fi, that sharing is still on, and the fingerprint on the phone."
             }
         }
     }
 
     func connect() {
+        usb = false
         run {
             let candidate = try BridgeClient(host: self.host.trimmingCharacters(in: .whitespacesAndNewlines),
                 port: self.port, fingerprint: self.fingerprint, secret: self.secret)
@@ -47,6 +53,7 @@ final class BrowserModel: ObservableObject {
 
     /// USB cable in File transfer (MTP) mode: no app or pairing needed on the phone.
     func connectUSB() {
+        usb = true
         run {
             self.status = "Looking for a phone on USB…"
             let usb = try await MTPClient.connectUSB()
@@ -130,7 +137,8 @@ struct BrowserView: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("OpenBridge").font(.largeTitle)
             if !model.connected {
-                Text("Connect both devices to the same trusted local network, or plug in the phone with USB tethering on. Copy the fingerprint directly from your phone before pairing.")
+                Text("Wi-Fi (with the OpenBridge Android app)").font(.headline)
+                Text("Connect both devices to the same trusted local network, or plug in the phone with USB tethering on. Start sharing in the Android app and copy its four values here.")
                 HStack {
                     TextField("Phone IPv4 address", text: $model.host)
                     TextField("Port", text: $model.port).frame(width: 90)
@@ -140,7 +148,7 @@ struct BrowserView: View {
                 Button("Pair and browse", action: model.connect).disabled(model.busy)
                 Divider().padding(.vertical, 6)
                 Text("USB cable (beta)").font(.headline)
-                Text("Plug in your phone, unlock it, and choose File transfer in its USB notification. Nothing needs to be installed on the phone. The Mac can then see everything File transfer shares, not one folder, and the connection is not encrypted: use it only on a Mac you trust.")
+                Text("Plug in your phone, unlock it, and choose File transfer in its USB notification. No pairing and nothing to install on the phone.")
                 Button("Connect over USB", action: model.connectUSB).disabled(model.busy)
             } else {
                 HStack {

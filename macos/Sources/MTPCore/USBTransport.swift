@@ -76,25 +76,26 @@ public final class USBTransport: MTPTransport {
     /// Finds a USB-connected phone in File transfer (MTP) or PTP mode and opens a session.
     /// With `identity`, only that phone is accepted, so a reconnect never switches devices.
     public static func openSession(matching identity: MTPDeviceIdentity? = nil) throws -> (MTPSession, MTPDeviceInfo) {
-        var busy = false, other = false
+        var busy = false, other = false, silent: Set<String> = [], seen: [String: Set<String>] = [:]
         for attempt in 0..<2 {
-            // Android's MTP interface is vendor class 0xFF/0xFF/0; PTP mode uses the still-image class 6/1/1.
-            for (interfaceClass, subclass, interfaceProtocol) in [(0xFF, 0xFF, 0x00), (0x06, 0x01, 0x01)] {
-                for service in services(interfaceClass, subclass, interfaceProtocol) {
-                    defer { IOObjectRelease(service) }
+            let interfaces = usbInterfaces()
+            defer { interfaces.forEach { IOObjectRelease($0.service) } }
+            for item in interfaces { seen[item.device, default: []].insert(item.code.description) }
+            // Android's MTP interface is vendor class ff/ff/00; PTP mode uses the still-image class 06/01/01.
+            let candidates = interfaces.filter { $0.code.isMTP || $0.code.isPTP }.sorted { $0.code.isMTP && !$1.code.isMTP }
+            for candidate in candidates {
+                do {
+                    let transport = try USBTransport(service: candidate.service)
+                    let session = MTPSession(transport: transport)
                     do {
-                        let transport = try USBTransport(service: service)
-                        let session = MTPSession(transport: transport)
-                        do {
-                            let info = try session.deviceInfo()
-                            if let identity, info.identity != identity { other = true; transport.close(); continue }
-                            try session.open()
-                            return (session, info)
-                        } catch { transport.close() }
-                    } catch let error as NSError where UInt32(truncatingIfNeeded: error.code) == exclusiveAccess {
-                        busy = true
-                    } catch {}
-                }
+                        let info = try session.deviceInfo()
+                        if let identity, info.identity != identity { other = true; transport.close(); continue }
+                        try session.open()
+                        return (session, info)
+                    } catch { transport.close(); silent.insert(candidate.device) }
+                } catch let error as NSError where UInt32(truncatingIfNeeded: error.code) == exclusiveAccess {
+                    busy = true
+                } catch { silent.insert(candidate.device) }
             }
             // macOS's photo import service claims phones for Photos and Image Capture. It restarts on demand,
             // so stopping it only lets this app open the phone; nothing is lost.
@@ -107,19 +108,40 @@ public final class USBTransport: MTPTransport {
         if busy {
             throw MTPError.transport("Another app (Photos, Image Capture or a file transfer app) is using the phone. Quit it and try again.")
         }
-        throw MTPError.transport("No phone found. Connect it with a USB cable, unlock it, and choose File transfer in the USB notification.")
+        if !silent.isEmpty {
+            throw MTPError.transport("\(silent.sorted().joined(separator: ", ")) is connected but did not answer. Unlock the phone, choose File transfer again in its USB notification, and retry.")
+        }
+        // Name what the Mac does see, so a report shows whether the phone is attached and in which USB mode.
+        let summary = seen.keys.sorted().map { "\($0) [\(seen[$0]!.sorted().joined(separator: " "))]" }.joined(separator: "; ")
+        throw MTPError.transport("No phone in File transfer mode found. Connect it with a data cable, unlock it, and choose File transfer in the USB notification."
+            + (summary.isEmpty ? " The Mac sees no USB devices with interfaces." : " USB devices seen: \(summary)."))
     }
 
-    private static func services(_ interfaceClass: Int, _ subclass: Int, _ interfaceProtocol: Int) -> [io_service_t] {
-        let matching = IOServiceMatching("IOUSBHostInterface") as NSMutableDictionary
-        matching["bInterfaceClass"] = interfaceClass
-        matching["bInterfaceSubClass"] = subclass
-        matching["bInterfaceProtocol"] = interfaceProtocol
+    struct InterfaceCode: CustomStringConvertible {
+        let interfaceClass: Int, subclass: Int, interfaceProtocol: Int
+        var isMTP: Bool { interfaceClass == 0xFF && subclass == 0xFF && interfaceProtocol == 0x00 }
+        var isPTP: Bool { interfaceClass == 0x06 && subclass == 0x01 && interfaceProtocol == 0x01 }
+        var description: String { String(format: "%02x/%02x/%02x", interfaceClass, subclass, interfaceProtocol) }
+    }
+
+    /// Every USB interface on the Mac with its class codes and device name. IOKit matching dictionaries cannot
+    /// match the vendor-specific class (0xff) without a vendor ID, so the codes are compared here instead.
+    private static func usbInterfaces() -> [(service: io_service_t, code: InterfaceCode, device: String)] {
         var iterator: io_iterator_t = 0
-        guard IOServiceGetMatchingServices(kIOMainPortDefault, matching, &iterator) == KERN_SUCCESS else { return [] }
+        guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("IOUSBHostInterface"), &iterator) == KERN_SUCCESS else { return [] }
         defer { IOObjectRelease(iterator) }
-        var result: [io_service_t] = []
-        while case let service = IOIteratorNext(iterator), service != 0 { result.append(service) }
+        var result: [(service: io_service_t, code: InterfaceCode, device: String)] = []
+        while case let service = IOIteratorNext(iterator), service != 0 {
+            func number(_ key: String) -> Int? {
+                (IORegistryEntryCreateCFProperty(service, key as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? NSNumber)?.intValue
+            }
+            guard let interfaceClass = number("bInterfaceClass"), let subclass = number("bInterfaceSubClass"),
+                  let interfaceProtocol = number("bInterfaceProtocol") else { IOObjectRelease(service); continue }
+            let name = IORegistryEntrySearchCFProperty(service, kIOServicePlane, "USB Product Name" as CFString, kCFAllocatorDefault,
+                                                       IOOptionBits(kIORegistryIterateRecursively | kIORegistryIterateParents)) as? String
+            result.append((service, InterfaceCode(interfaceClass: interfaceClass, subclass: subclass, interfaceProtocol: interfaceProtocol),
+                           name ?? "USB device"))
+        }
         return result
     }
 
