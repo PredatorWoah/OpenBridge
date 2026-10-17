@@ -5,6 +5,7 @@ Test-only certificate trust: authenticate the exact DER pin before sending the s
 The fixture listens on loopback and is never shipped in either application.
 """
 import hashlib
+import os
 from pathlib import Path
 import shutil
 import socket
@@ -43,6 +44,11 @@ def status(connection):
     if code == b"\1":
         raise ValueError(text(connection))
     assert code == b"\0"
+
+
+def pairing_vector():
+    digest = hashlib.sha256(b"OpenBridge pairing code" + bytes([1]) * 32 + bytes([2]) * 32 + bytes([3]) * 32).digest()
+    return "%06d" % (int.from_bytes(digest[:4], "big") % 1000000)
 
 
 def run():
@@ -89,6 +95,25 @@ def run():
                         entries.append((identifier, name, directory, size))
                     return entries
 
+            # Pairing (OBP1): no pin yet. Learn the certificate, check the phone's commitment, derive the code,
+            # and receive the secret; the learned pin and secret must then work for normal requests.
+            with context.wrap_socket(socket.create_connection(("127.0.0.1", int(port)), timeout=5), server_hostname="OpenBridge-CI") as connection:
+                learned = hashlib.sha256(connection.getpeercert(binary_form=True)).digest()
+                connection.sendall(b"OBP1")
+                status(connection)
+                commitment = read(connection, 32)
+                mac_nonce = os.urandom(32)
+                connection.sendall(mac_nonce)
+                phone_nonce = read(connection, 32)
+                assert hashlib.sha256(b"OpenBridge pairing commit" + learned + phone_nonce).digest() == commitment, "commitment"
+                digest = hashlib.sha256(b"OpenBridge pairing code" + learned + mac_nonce + phone_nonce).digest()
+                code = "%06d" % (int.from_bytes(digest[:4], "big") % 1000000)
+                assert len(code) == 6 and code.isdigit()
+                status(connection)
+                paired_secret = read(connection, 32)
+            assert learned.hex() == fingerprint and paired_secret == SECRET, "pairing delivered the pin and secret"
+            assert pairing_vector() == "520380", "code derivation matches the Java and Swift implementations"
+
             assert [entry[1] for entry in listing()] == ["Nested", "hello.txt"]
             assert listing("folder-id") == []
             body = bytes(range(256)) * 1000
@@ -132,7 +157,7 @@ def run():
                 status(connection)
                 size, = struct.unpack(">q", read(connection, 8))
                 assert read(connection, size) == b"Hello from Android\n"
-            print("TLS integration passed: pin/auth rejection, browse, binary/Unicode/empty transfers, collision and disconnect cleanup.")
+            print("TLS integration passed: 6-digit pairing, pin/auth rejection, browse, binary/Unicode/empty transfers, collision and disconnect cleanup.")
         finally:
             process.terminate()
             process.wait(timeout=10)

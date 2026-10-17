@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 520" width="1200" height="520" role="img" aria-labelledby="t d">
   <title id="t">How OpenBridge works</title>
-  <desc id="d">You choose one folder on Android and start sharing. The phone shows its address, port, certificate fingerprint and a pairing secret. You enter them on the Mac, which verifies the certificate before sending the secret. Then you browse, download and upload over one TLS connection per request.</desc>
+  <desc id="d">You choose one folder on Android and start sharing. The phone shows its address and port. You enter them on the Mac, both screens show the same 6-digit code, and you tap Pair on the phone. Then you browse, download and upload over one TLS connection per request.</desc>
   <style>
     .bg { fill: #f6f8fb; }
     .card { fill: #ffffff; stroke: #d0d7e2; }
@@ -51,19 +51,19 @@
   <text class="ink" x="184" y="293" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">192.168.1.23</text>
   <text class="muted" x="112" y="312" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">Port</text>
   <text class="ink" x="184" y="312" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">41987</text>
-  <text class="muted" x="112" y="331" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">SHA-256</text>
-  <text class="ink" x="184" y="331" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">9f3c…e1a0</text>
-  <text class="muted" x="112" y="350" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">Secret</text>
+  <text class="muted" x="112" y="331" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">Pair</text>
+  <text class="ink" x="184" y="331" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">482 913 ✓</text>
+  <text class="muted" x="112" y="350" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">Key</text>
   <text class="ink" x="184" y="350" font-size="13" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">new every start</text>
 
   <!-- Step 3 -->
   <rect class="card" x="840" y="222" width="320" height="150" rx="14" stroke-width="1.5"/>
   <circle class="accent" cx="872" cy="254" r="16"/><text x="872" y="260" font-size="16" font-weight="700" fill="#fff" text-anchor="middle">3</text>
   <text class="ink" x="900" y="258" font-size="18" font-weight="600">Pair</text>
-  <text class="muted" x="900" y="288" font-size="14">Type the four values shown</text>
-  <text class="muted" x="900" y="308" font-size="14">on the phone. The Mac checks</text>
-  <text class="muted" x="900" y="328" font-size="14">the certificate fingerprint</text>
-  <text class="muted" x="900" y="348" font-size="14">before it sends the secret.</text>
+  <text class="muted" x="900" y="288" font-size="14">Enter the IP and port, then</text>
+  <text class="muted" x="900" y="308" font-size="14">check both screens show the</text>
+  <text class="muted" x="900" y="328" font-size="14">same 6-digit code and tap</text>
+  <text class="muted" x="900" y="348" font-size="14">Pair on the phone.</text>
 
   <!-- Step 4 -->
   <rect class="card" x="840" y="390" width="320" height="96" rx="14" stroke-width="1.5"/>

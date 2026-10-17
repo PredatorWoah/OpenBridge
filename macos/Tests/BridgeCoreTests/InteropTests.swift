@@ -25,6 +25,13 @@ final class InteropTests: XCTestCase {
         let fingerprint = try Wire.hex(String(pieces[1]))
         let secret = Data(repeating: 0x5a, count: 32)
         let client = BridgeClient(testHost: "127.0.0.1", port: port, fingerprint: fingerprint, secret: secret)
+        // 6-digit pairing against the real Java server learns the same pin and secret.
+        var shown = ""
+        let paired = try await BridgeClient.pair(address: "127.0.0.1", port: port) { code in shown = code }
+        XCTAssertEqual(shown.count, 6)
+        XCTAssertTrue(shown.allSatisfy(\.isNumber))
+        let pairedRoot = try await paired.list()
+        XCTAssertEqual(pairedRoot.map(\.name), ["Nested", "hello.txt"])
         let root = try await client.list()
         XCTAssertEqual(root.map(\.name), ["Nested", "hello.txt"])
         let nested = try await client.list(id: "folder-id")

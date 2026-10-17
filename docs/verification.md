@@ -28,7 +28,7 @@ Record device model, Android/API version, storage/provider, macOS version, netwo
 - [ ] Build/install the APK and Mac bundle; confirm local-network prompt/allow behavior on supported macOS versions.
 - [ ] Choose an internal-storage subfolder and an SD-card subfolder; reject cloud providers and unsupported roots. Confirm access outside the chosen tree is impossible. Confirm revoked grants produce a clear error.
 - [ ] Verify AndroidKeyStore certificate generation and TLS handshakes on Android 8/API 26 and current Android, including TLS 1.2/1.3 compatibility and screen rotation.
-- [ ] Pair by copying the phone's fingerprint and secret. Wrong fingerprint, wrong secret, old credentials and a public endpoint must fail without file access. A plaintext client must not obtain metadata.
+- [ ] Pair by entering the IP and port and comparing the 6-digit codes. Cancel on the phone must fail the pairing; letting it time out must fail; a second Mac pairing at the same time must be refused; old credentials after restarting sharing and a public endpoint must fail without file access. A plaintext client must not obtain metadata.
 - [ ] Browse empty, nested, Unicode and large folders. Deleted/stale IDs should fail safely; refresh should recover.
 - [ ] Transfer empty files, Unicode filenames, random binary files, files larger than 64 KiB, and a multi-gigabyte file both ways. Compare SHA-256 locally on both devices. Confirm progress, bounded memory, and useful errors.
 - [ ] Upload/download a duplicate name and simultaneous same-name uploads. Verify original bytes remain intact. Test built-in SAF provider rename behavior and a competing external writer. Stop release if exclusive collision behavior is not reliable under the supported usage model.

@@ -1,20 +1,44 @@
 package org.openbridge.protocol;
 
 import java.io.*;
+import java.security.SecureRandom;
+import java.util.Arrays;
 import java.util.List;
 
 /** Blocking streaming handler, independent of Android and TLS implementation. */
 public final class Session {
     private final Store store;
     private final byte[] secret;
-    public Session(Store store, byte[] secret) { this.store = store; this.secret = secret.clone(); }
+    private final byte[] fingerprint;
+    private final Pairing.Approver approver;
+    private final SecureRandom random = new SecureRandom();
+
+    /** A session that only accepts clients that already hold the secret. */
+    public Session(Store store, byte[] secret) { this(store, secret, null, null); }
+
+    /**
+     * A session that can also pair new clients (OBP1): `fingerprint` is the SHA-256 of this server's TLS
+     * certificate, and `approver` shows the 6-digit code to the user.
+     */
+    public Session(Store store, byte[] secret, byte[] fingerprint, Pairing.Approver approver) {
+        this.store = store; this.secret = secret.clone(); this.approver = approver;
+        this.fingerprint = fingerprint == null ? null : fingerprint.clone();
+    }
 
     public void serve(InputStream input, OutputStream output) throws IOException {
         DataInputStream in = new DataInputStream(new BufferedInputStream(input));
         DataOutputStream out = new DataOutputStream(new BufferedOutputStream(output));
         boolean responseStarted = false;
         try {
-            Wire.authenticate(in, secret);
+            byte[] magic = new byte[4];
+            in.readFully(magic);
+            if (Arrays.equals(magic, Pairing.MAGIC)) {
+                if (approver == null || fingerprint == null) throw new IOException("Pairing is not available");
+                responseStarted = true;   // pairing reports its own errors after the exchange begins
+                Pairing.serve(in, out, fingerprint, secret, approver, random);
+                return;
+            }
+            Wire.authenticate(in, magic, secret);
             int operation = in.readUnsignedByte();
             String id = Wire.readString(in, 128);
             switch (operation) {

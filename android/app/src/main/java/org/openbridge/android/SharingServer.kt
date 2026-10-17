@@ -8,6 +8,7 @@ import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
+import org.openbridge.protocol.Pairing
 import org.openbridge.protocol.Session
 import org.openbridge.protocol.Store
 import org.openbridge.protocol.Wire
@@ -32,13 +33,15 @@ import javax.net.ssl.SSLServerSocket
 import javax.net.ssl.SSLSocket
 import javax.security.auth.x500.X500Principal
 
-class SharingServer(context: Context, store: Store, private val stopped: (String) -> Unit) : Closeable {
+class SharingServer(context: Context, private val store: Store, private val approver: Pairing.Approver,
+                    private val stopped: (String) -> Unit) : Closeable {
     private val connectivity = context.getSystemService(ConnectivityManager::class.java)
     private val closed = AtomicBoolean(false)
     private val sockets = ConcurrentHashMap.newKeySet<SSLSocket>()
     private val workers = ThreadPoolExecutor(0, 2, 10, TimeUnit.SECONDS, SynchronousQueue())
     private val secret = ByteArray(32).also { SecureRandom().nextBytes(it) }
-    private val session = Session(store, secret)
+    /** Serves paired Macs, and pairs new ones by 6-digit comparison (see Pairing). */
+    private val session: Session
     private var callbackRegistered = false
     /** Wi-Fi network being served, or null when serving over a USB tethering cable. */
     private val network: Network?
@@ -47,8 +50,6 @@ class SharingServer(context: Context, store: Store, private val stopped: (String
     val usb: Boolean get() = network == null
     val host: String get() = address.hostAddress!!
     val port: Int get() = listener.localPort
-    val pairingSecret: String = secret.hex()
-    val fingerprint: String
 
     private val callback = object : ConnectivityManager.NetworkCallback() {
         override fun onLost(lost: Network) { if (lost == network) stop("Wi-Fi disconnected") }
@@ -87,7 +88,8 @@ class SharingServer(context: Context, store: Store, private val stopped: (String
                 .build())
             generateKeyPair()
         }
-        fingerprint = MessageDigest.getInstance("SHA-256").digest(keyStore.getCertificate(alias).encoded).hex()
+        val fingerprint = MessageDigest.getInstance("SHA-256").digest(keyStore.getCertificate(alias).encoded)
+        session = Session(store, secret, fingerprint, approver)
         val managers = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm()).apply { init(keyStore, null) }
         val tls = SSLContext.getInstance("TLS").apply { init(managers.keyManagers, null, SecureRandom()) }
         listener = (tls.serverSocketFactory.createServerSocket() as SSLServerSocket).apply {
@@ -162,5 +164,3 @@ private fun usbTetherAddress(): InetAddress? = runCatching {
         .flatMap { it.inetAddresses.toList() }
         .firstOrNull { it is Inet4Address && Wire.isPrivateIPv4(it) }
 }.getOrNull()
-
-private fun ByteArray.hex() = joinToString("") { "%02x".format(it.toInt() and 255) }

@@ -16,9 +16,11 @@ public final class TLSFixture {
         managers.init(keys, "test-only".toCharArray());
         SSLContext context = SSLContext.getInstance("TLS");
         context.init(managers.getKeyManagers(), null, null);
-        String fingerprint = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(keys.getCertificate("fixture").getEncoded()));
+        byte[] digest = MessageDigest.getInstance("SHA-256").digest(keys.getCertificate("fixture").getEncoded());
+        String fingerprint = HexFormat.of().formatHex(digest);
         MemoryStore store = new MemoryStore();
-        Session session = new Session(store, ProtocolTest.SECRET);
+        // Approves every pairing request, as if the user tapped Pair after comparing the codes.
+        Session session = new Session(store, ProtocolTest.SECRET, digest, code -> true);
         try (SSLServerSocket server = (SSLServerSocket) context.getServerSocketFactory().createServerSocket(0, 8, InetAddress.getByName("127.0.0.1"))) {
             System.out.println(server.getLocalPort() + " " + fingerprint); System.out.flush();
             while (true) {

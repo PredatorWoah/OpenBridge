@@ -4,6 +4,7 @@ import java.io.*;
 import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.HexFormat;
 
 /** Dependency-free executable tests. Run with scripts/test-protocol.sh. */
 public final class ProtocolTest {
@@ -98,6 +99,50 @@ public final class ProtocolTest {
             check(Wire.isUsbTetherInterface(name), "USB tether interface " + name);
         for (String name : new String[] {"wlan0", "rmnet_data0", "tun0", "lo", "ncm", "usb", "rndis0x", "eth0", null})
             check(!Wire.isUsbTetherInterface(name), "Not a USB tether interface " + name);
+        pairingTests(store);
         System.out.println("Protocol tests passed: " + checks + " assertions");
+    }
+
+    private static void pairingTests(MemoryStore store) throws Exception {
+        byte[] fingerprint = new byte[32]; Arrays.fill(fingerprint, (byte) 1);
+        byte[] macNonce = new byte[32]; Arrays.fill(macNonce, (byte) 2);
+        byte[] phoneNonce = new byte[32]; Arrays.fill(phoneNonce, (byte) 3);
+        // Reference vector shared with the Swift and Python implementations.
+        check(Pairing.code(fingerprint, macNonce, phoneNonce).equals("520380"), "Pairing code vector");
+        check(HexFormat.of().formatHex(Pairing.commitment(fingerprint, phoneNonce))
+            .equals("8ef8a25a4293066adbb289a0cff4a91b7e65d0db9811cd15d30f14d2c0a9b356"), "Commitment vector");
+        byte[] otherFingerprint = fingerprint.clone(); otherFingerprint[0] ^= 1;
+        check(!Pairing.code(otherFingerprint, macNonce, phoneNonce).equals("520380"), "Code depends on the certificate");
+        for (int round = 0; round < 50; round++) {
+            byte[] n = new byte[32]; new Random(round).nextBytes(n);
+            check(Pairing.code(fingerprint, n, phoneNonce).matches("[0-9]{6}"), "Six digits");
+        }
+
+        ByteArrayOutputStream request = new ByteArrayOutputStream();
+        request.write(Pairing.MAGIC); request.write(macNonce);
+        for (boolean approve : new boolean[] {true, false}) {
+            String[] shown = new String[1];
+            Session pairing = new Session(store, SECRET, fingerprint, code -> { shown[0] = code; return approve; });
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            pairing.serve(new ByteArrayInputStream(request.toByteArray()), output);
+            DataInputStream reply = new DataInputStream(new ByteArrayInputStream(output.toByteArray()));
+            check(reply.readByte() == 0, "Pairing starts");
+            byte[] commitment = new byte[32]; reply.readFully(commitment);
+            byte[] revealed = new byte[32]; reply.readFully(revealed);
+            check(Arrays.equals(commitment, Pairing.commitment(fingerprint, revealed)), "Phone nonce matches its commitment");
+            check(Pairing.code(fingerprint, macNonce, revealed).equals(shown[0]), "Phone shows the code the Mac computes");
+            if (approve) {
+                check(reply.readByte() == 0, "Approved");
+                byte[] secret = new byte[32]; reply.readFully(secret);
+                check(Arrays.equals(secret, SECRET), "Secret released only after approval");
+            } else {
+                check(reply.readByte() == 1 && Wire.readString(reply, 512).contains("declined"), "Declined pairing reports it");
+                check(reply.available() == 0, "No secret after a decline");
+            }
+        }
+        // A server without pairing refuses before revealing anything.
+        DataInputStream refused = serve(store, request.toByteArray());
+        check(refused.readByte() == 1 && Wire.readString(refused, 512).contains("not available"), "Pairing unavailable");
+        check(refused.available() == 0, "Nothing else sent");
     }
 }
