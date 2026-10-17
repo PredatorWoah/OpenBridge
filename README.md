@@ -13,9 +13,13 @@
 - 🔌 **Plug in and it opens.** Choose File transfer on the phone and the Mac app finds it by itself, with shortcuts straight to Camera, Download, Screenshots, WhatsApp or Documents. No driver, no kernel extension, no macFUSE.
 - ☀️ **Tap the sun to share over Wi‑Fi.** The arch from the icon is the button. It turns gold when your Mac connects, by Wi‑Fi or by cable.
 - 🔒 **Encrypted, with 6-digit pairing.** Every Wi‑Fi request uses TLS. To pair, check that both screens show the same 6-digit code and tap Pair on the phone, like Bluetooth.
-- 📁 **One folder or the whole phone**, your choice, and only while the app is open.
-- 🐘 **Big files are fine.** Files of 4 GB and more work both ways; a 7.83 GB file has been copied from a real phone.
-- 🛡️ **Never overwrites.** Existing files are never replaced on either side, and interrupted transfers clean up after themselves.
+- 📁 **One folder or the whole phone**, your choice. Sharing can keep running in the background, with a notification to stop it.
+- 📶 **No addresses to type.** Phones sharing on your Wi‑Fi show up on the Mac; click one and compare the code.
+- 🗂️ **A real file browser.** Thumbnails and a grid view, Quick Look with the space bar, sorting, multi-select, whole folders both ways, drag and drop from Finder, and new folders.
+- 📋 **Shared clipboard.** Send text from Mac to phone and back.
+- 📺 **Screen mirroring (beta).** See and control your phone in a window on the Mac, over the cable, powered by [scrcpy](https://github.com/Genymobile/scrcpy).
+- 🐘 **Big files are fine.** Files of 4 GB and more work both ways, and an interrupted download continues where it stopped. A 7.83 GB file has been copied from a real phone.
+- 🛡️ **Never overwrites.** Existing files are never replaced on either side; copies get a new name like "photo 2.jpg".
 
 **Download:** get the Android APK and the Mac app (`.dmg`) from the [latest release](https://github.com/PredatorWoah/OpenBridge/releases/latest). See the [changelog](CHANGELOG.md) for what's new.
 
@@ -42,18 +46,18 @@ Apple and Android don't talk to each other out of the box, so most Mac users end
 | System changes | None: no drivers, kernel extensions or macFUSE | Some mounters need extra system components |
 | Safety | Never overwrites a file; partial uploads are removed | Varies; overwrite prompts are easy to click through |
 | Trust | Every line is public and reviewable | Closed source |
-| Size | About 1.4 MB, native Apple Silicon | Often much larger |
+| Extras | Clipboard sharing and screen mirroring included | Often separate apps or paid add-ons |
+| Size | A few MB, native Apple Silicon | Often much larger |
 
 **What it lacks compared with paid apps (stated plainly):**
 
 - **No Finder drive.** Your phone opens in OpenBridge's own window, not as a disk in Finder's sidebar. That needs Apple's File Provider system and a paid Apple developer account; it is on the list after 1.0.
-- **One file at a time.** No multi-select, whole-folder copies or drag and drop yet.
-- **No previews.** No thumbnails or Quick Look of photos and videos on the phone.
 - **No sync or backup.** It moves files you choose; it doesn't mirror folders or back up the phone.
-- **No extras.** No clipboard sharing, notifications, SMS or screen mirroring.
+- **No notifications or SMS on the Mac.** Clipboard and mirroring are in; messages are deliberately out.
+- **Mirroring needs USB debugging** turned on in the phone's Developer options, and works over the cable only.
 - **Not notarized and not on Google Play (yet).** macOS asks you to confirm the first launch, and Android asks you to allow installing the APK.
-- **Wi‑Fi needs the phone app open**, and you type the phone's address on the Mac; there is no automatic discovery.
-- **Interrupted transfers start over** rather than resuming.
+- **Uploads don't resume.** An interrupted download continues; an interrupted upload starts that file over.
+- **Dragging files out to Finder** downloads them first, so large files take a moment before they appear.
 - **Apple Silicon Macs only, for now.** The release is built for M-series Macs; Intel Macs need a universal build, which is planned.
 - **Young.** Tested on one phone and one Mac so far. Reports from other phones are very welcome.
 
@@ -96,10 +100,16 @@ The script makes an application bundle with a **local ad-hoc signature**. It doe
 1. Put both devices on the same trusted LAN. Open Android OpenBridge and pick what to share:
    - **Whole phone** (the default): allow *All files access* for OpenBridge when Android asks (Settings → Apps → Special app access → All files access). The Mac then sees all of internal storage and any SD card. Android keeps `Android/data` and `Android/obb` private to each app.
    - **One folder**: select a folder under internal storage or the SD card in the system picker. Android disallows some roots; use a subfolder such as `Documents/OpenBridge`. Cloud providers are rejected.
-2. **Tap the sun.** It circles the arch while sharing starts, then the phone shows its address and port. Keep the Android app visible; the screen stays on while sharing.
-3. On the Mac, click **Pair over Wi‑Fi**, enter the address and port, and press **Pair**. Both screens show a 6-digit code: tap **Pair** on the phone **only if they match**. If they differ, tap Cancel; another device may be trying to connect. When pairing succeeds the sun lights up gold on both devices.
-4. Click **Open phone** to browse. Double-click a folder to open it, select a file and press **Download** to save it on the Mac, or **Upload…** to send a file into the current folder. Progress shows in the bar at the bottom, with **Show in Finder** when a download finishes. Empty files are supported; the per-file limit is 64 GiB.
-5. Press **Stop sharing** on Android when finished. Leaving the Android app, losing or changing Wi-Fi, or unplugging a USB tethering cable also stops sharing. Restarting creates new credentials; pair again on the Mac.
+2. **Tap the sun.** It circles the arch while sharing starts, then the phone shows its address and port. With **Keep sharing in the background** on (the default), you can leave the app: a notification shows that sharing is on and has a Stop button.
+3. On the Mac, click **Pair over Wi‑Fi**. Your phone appears under **Phones nearby**; click it (or type the address and port) and press **Pair**. Both screens show a 6-digit code: tap **Pair** on the phone **only if they match**. If they differ, tap Cancel; another device may be trying to connect. When pairing succeeds the sun lights up gold on both devices.
+4. Click **Open phone** to browse:
+   - Double-click a folder to open it; click the path to go back. Switch between list and grid, and sort by name, size or kind.
+   - Select files (⌘-click and ⇧-click work like Finder, ⌘A selects all) and press **Download**. Several files or folders go into a folder you choose, keeping the folder structure.
+   - Drop files or folders from Finder onto the window to upload them, or use **⋯ › Upload…**. Drag a file out to Finder to copy it.
+   - Press the space bar to Quick Look a photo, video or document.
+   - **⋯ › New Folder…**, and **⋯ › Send Mac clipboard to phone / Copy phone clipboard to Mac** (over Wi‑Fi; reading the phone's clipboard needs OpenBridge on screen on the phone).
+   - Progress shows in the bar at the bottom. If a transfer is interrupted, **Resume** continues it, picking up a download where it stopped.
+5. Press **Stop sharing** on Android (in the app or the notification) when finished. Losing or changing Wi-Fi, or unplugging a USB tethering cable, also stops sharing. Restarting creates new credentials; pair again on the Mac.
 
 Existing filenames are rejected on both sides, before any data is transferred. On Android, names are compared ignoring case (`Photo.JPG` collides with `photo.jpg`), and the characters `" * : < > ? |` are not allowed. Choose another name (rename the source before upload). Downloads use temporary sibling files; uploads use temporary SAF documents and publish only after the declared body is received. On a normal disconnection/cancellation, partial files are removed. After a process kill or power loss, remove any leftover `.openbridge-part-*` Android documents (hidden from the Mac's file list) or `.openbridge-*.part` Mac files manually. A cancellation exactly at upload completion can mean the phone committed the file before the Mac received its acknowledgement; refresh before retrying.
 
@@ -118,6 +128,16 @@ Good to know:
 - Large files work both ways, including files of 4 GiB and more. Uploads check the phone's free space first.
 - Keep the phone unlocked. Some phones close the connection when the screen locks.
 
+### Screen mirroring (beta)
+
+See your phone's screen in a window on the Mac and use it with the mouse, trackpad and keyboard. It runs the open-source [scrcpy](https://github.com/Genymobile/scrcpy) server on the phone, built into OpenBridge, so there is nothing else to install.
+
+1. Once: turn on USB debugging. On the phone, open Settings › About phone and tap **Build number** seven times, then Settings › System › Developer options › **USB debugging**.
+2. Plug in the phone, open it in OpenBridge, and click **Mirror screen** in the sidebar.
+3. The first time, the phone asks **Allow USB debugging?** Tick *Always allow from this computer* and tap **Allow**.
+
+Click to tap, drag to swipe, scroll to scroll, and type with the keyboard. Right click is Back, and the buttons below the screen are Back, Home, Recent apps, volume, power and rotate. Text you copy on either side is copied to the other. USB debugging gives a trusted computer broad control of the phone; see [SECURITY.md](SECURITY.md#screen-mirroring-usb-debugging) and turn it off when you don't need mirroring.
+
 ### Wi-Fi vs USB File transfer
 
 | | Wi-Fi (and USB tethering) | USB File transfer |
@@ -125,7 +145,7 @@ Good to know:
 | Needs the Android app | Yes | No |
 | What the Mac can see | The folder you picked, or the whole phone if you chose **Whole phone** | Everything Android shares in File transfer mode (usually all of internal storage and the SD card) |
 | Protection | TLS, paired by matching a 6-digit code | The cable and your choice of File transfer on an unlocked phone; no encryption, as with any USB file transfer |
-| Stops when | You leave the app, press Stop sharing, or the network drops | You unplug, lock the phone (on some phones), or choose another USB mode |
+| Stops when | You press Stop sharing (or leave the app, if background sharing is off), or the network drops | You unplug, lock the phone (on some phones), or choose another USB mode |
 
 Choose File transfer only on a Mac you trust, and switch the phone back to *No data transfer* when you are done.
 
@@ -174,7 +194,8 @@ The integration test is explicitly skipped when fixture variables are missing. C
 
 - `protocol/`: small Java streaming handler and storage interface, executable tests, CI-only TLS fixture. No Android dependencies.
 - `android/app/`: Kotlin/Compose UI, local Wi-Fi/USB-tethering listener, AndroidKeyStore TLS identity, SAF-backed storage.
-- `macos/`: SwiftUI app, independent Swift wire codec, pinned TLS channel, streaming transfers and tests.
+- `macos/`: SwiftUI app, independent Swift wire codec, pinned TLS channel, streaming transfers, USB File transfer (MTP) and a native ADB client for mirroring, with tests.
+- `third_party/scrcpy/`: license and pinned checksum of the scrcpy server bundled for mirroring.
 - `docs/`: protocol contract, limitations, and manual verification.
 
 The `Store` interface separates document access from wire handling; `BridgeCore` separates networking from the Mac UI. Future clipboard, notifications, folder sync, and screen mirroring need explicit new capabilities and protocol versions. They are not implemented in Phase 1. There is no background sharing, resumable transfer, remote deletion, folder creation, batch upload, or automatic discovery in this MVP.
