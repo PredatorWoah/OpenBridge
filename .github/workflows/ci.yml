@@ -104,6 +104,13 @@ jobs:
           app=windows/build/compose/binaries/main/app/OpenBridge
           test -f "$app/OpenBridge.exe"
           test -f "$app/app/resources/scrcpy/scrcpy.exe" && test -f "$app/app/resources/scrcpy/adb.exe"
+      - name: Launch the packaged app and check it keeps running
+        shell: pwsh
+        run: |
+          $app = Start-Process -FilePath windows/build/compose/binaries/main/app/OpenBridge/OpenBridge.exe -PassThru
+          Start-Sleep -Seconds 25
+          if ($app.HasExited) { Write-Error "OpenBridge.exe exited at startup with code $($app.ExitCode)"; exit 1 }
+          Stop-Process -Id $app.Id -Force
       - name: Zip the app
         shell: pwsh
         run: Compress-Archive -Path windows/build/compose/binaries/main/app/OpenBridge -DestinationPath windows/build/OpenBridge-Windows.zip
