@@ -9,7 +9,7 @@ final class BrowserModel: ObservableObject {
     /// The 6-digit code shown while the phone asks its user to confirm the pairing.
     @Published var pairingCode: String?
     @Published var entries: [Entry] = []
-    @Published var path: [(id: String, name: String)] = [("", "Shared folder")]
+    @Published var path: [(id: String, name: String)] = [("", "Phone")]
     @Published var connected = false
     @Published var busy = false
     @Published var status = "Start sharing on Android, then enter the IP and port shown on the phone."
@@ -49,7 +49,7 @@ final class BrowserModel: ObservableObject {
             self.pairingCode = nil
             let entries = try await paired.list()
             self.client = paired; self.connected = true
-            self.path = [("", "Shared folder")]; self.entries = entries
+            self.path = [("", "Phone")]; self.entries = entries
             self.connectionLabel = "\(self.host):\(self.port) on the local network"
             self.status = "Paired. Both screens showed the same code."
         }
@@ -72,7 +72,7 @@ final class BrowserModel: ObservableObject {
     func disconnect() {
         guard !busy else { return }
         if let old = client { Task { await old.disconnect() } }
-        client = nil; connected = false; entries = []; path = [("", "Shared folder")]; connectionLabel = ""
+        client = nil; connected = false; entries = []; path = [("", "Phone")]; connectionLabel = ""
         error = nil
         status = "Disconnected. Credentials are kept only in memory."
     }

@@ -4,6 +4,20 @@ All notable changes to OpenBridge are recorded here. Every release has an entry;
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-10-17
+
+Share your whole phone over Wi-Fi, not just one folder.
+
+### Added
+- **Share whole phone.** Besides **Choose folder**, the Android app can now share all of internal storage and any SD card. Android asks once for *All files access*; the Mac then browses, downloads and uploads anywhere, just like over USB, but wireless and encrypted. Android keeps `Android/data` and `Android/obb` private.
+- Uploads in whole-phone mode publish with a move that refuses to replace an existing file, and symbolic links are never followed.
+
+### Changed
+- The Mac labels the top of the phone's storage "Phone".
+
+### Notes
+- Installs over 0.9.1 without uninstalling. Still a preview, not yet verified on physical devices.
+
 ## [0.9.1] - 2026-10-17
 
 Easy 6-digit pairing, and USB File transfer that actually finds your phone.
@@ -51,6 +65,7 @@ The first public preview: move files between an Android phone and a Mac, private
 - Pairing over Wi-Fi requires typing the address, port, fingerprint and secret.
 - The APK is signed with a build-machine key and the Mac app is not notarized; see the README for how to install and open them. If you installed an earlier test build, uninstall it first.
 
+[0.9.2]: https://github.com/PredatorWoah/OpenBridge/releases/tag/v0.9.2
 [0.9.1]: https://github.com/PredatorWoah/OpenBridge/releases/tag/v0.9.1
 [0.9.0]: https://github.com/PredatorWoah/OpenBridge/releases/tag/v0.9.0
 [0.5.0]: https://github.com/PredatorWoah/OpenBridge/releases/tag/v0.5.0
