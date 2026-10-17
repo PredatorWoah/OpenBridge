@@ -79,6 +79,7 @@ final class BrowserModel: ObservableObject {
 
     /// USB cable in File transfer (MTP) mode: no app or pairing needed on the phone.
     func connectUSB() {
+        guard !busy else { return }   // never relabel a connection that is still in progress
         overUSB = true
         let attached = MTPClient.attachedPhone()
         run {
@@ -99,6 +100,7 @@ final class BrowserModel: ObservableObject {
     func retryUSB() { skipped = nil; error = nil; connectUSB() }
 
     func pair() {
+        guard !busy else { return }
         overUSB = false
         run {
             self.status = "Connecting to the phone…"
@@ -351,7 +353,7 @@ struct ConnectScreen: View {
                             .padding(.top, 16)
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                     } else if let error = model.error {
-                        ErrorCard(message: error, retry: { if model.overUSB { model.retryUSB() } else { wifi = true } })
+                        ErrorCard(message: error, busy: model.busy, retry: { if model.overUSB { model.retryUSB() } else { wifi = true } })
                             .padding(.top, 16)
                             .transition(.opacity)
                     }
@@ -423,12 +425,13 @@ struct DeviceCard: View {
 
 struct ErrorCard: View {
     var message: String
+    var busy = false
     var retry: () -> Void
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Palette.amber)
             Text(message).font(.system(size: 13)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-            Button("Try again", action: retry).buttonStyle(GhostButton())
+            Button("Try again", action: retry).buttonStyle(GhostButton()).disabled(busy)
         }
         .padding(14)
         .frame(width: 460)
@@ -482,15 +485,18 @@ struct BrowserScreen: View {
 
                 ScrollView {
                     LazyVStack(spacing: 2) {
-                        ForEach(Array(model.entries.enumerated()), id: \.element.id) { index, entry in
+                        ForEach(model.entries) { entry in
                             FileRow(entry: entry, selected: model.selection == entry.id)
-                                .modifier(Cascade(index: index))
                                 .onTapGesture(count: 2) { model.open(entry) }
                                 .onTapGesture { model.selection = entry.id }
                         }
                     }
                     .padding(10)
                 }
+                // Each folder fades in as a whole, quickly; rows never wait on their own timers.
+                .id(model.path.last?.id ?? "")
+                .transition(.opacity.combined(with: .offset(y: 6)))
+                .animation(.easeOut(duration: 0.15), value: model.path.last?.id)
                 if model.entries.isEmpty && !model.busy {
                     Text("This folder is empty.").foregroundStyle(Palette.muted).frame(maxHeight: .infinity)
                 }
@@ -505,22 +511,6 @@ struct BrowserScreen: View {
             }
             .animation(.spring(response: 0.5, dampingFraction: 0.75), value: model.transfer != nil)
         }
-    }
-}
-
-/// Rows slide in one after another when a folder opens.
-struct Cascade: ViewModifier {
-    var index: Int
-    @State private var shown = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    func body(content: Content) -> some View {
-        content
-            .opacity(shown ? 1 : 0)
-            .offset(y: shown ? 0 : 10)
-            .onAppear {
-                if reduceMotion { shown = true; return }
-                withAnimation(.spring(response: 0.5, dampingFraction: 0.7).delay(0.18 + Double(min(index, 14)) * 0.035)) { shown = true }
-            }
     }
 }
 
