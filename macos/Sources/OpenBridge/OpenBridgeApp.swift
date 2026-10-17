@@ -79,6 +79,7 @@ final class BrowserModel: ObservableObject {
 
     /// USB cable in File transfer (MTP) mode: no app or pairing needed on the phone.
     func connectUSB() {
+        guard !busy else { return }   // never relabel a connection that is still in progress
         overUSB = true
         let attached = MTPClient.attachedPhone()
         run {
@@ -99,6 +100,7 @@ final class BrowserModel: ObservableObject {
     func retryUSB() { skipped = nil; error = nil; connectUSB() }
 
     func pair() {
+        guard !busy else { return }
         overUSB = false
         run {
             self.status = "Connecting to the phone…"
@@ -351,7 +353,7 @@ struct ConnectScreen: View {
                             .padding(.top, 16)
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                     } else if let error = model.error {
-                        ErrorCard(message: error, retry: { if model.overUSB { model.retryUSB() } else { wifi = true } })
+                        ErrorCard(message: error, busy: model.busy, retry: { if model.overUSB { model.retryUSB() } else { wifi = true } })
                             .padding(.top, 16)
                             .transition(.opacity)
                     }
@@ -423,12 +425,13 @@ struct DeviceCard: View {
 
 struct ErrorCard: View {
     var message: String
+    var busy = false
     var retry: () -> Void
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Palette.amber)
             Text(message).font(.system(size: 13)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-            Button("Try again", action: retry).buttonStyle(GhostButton())
+            Button("Try again", action: retry).buttonStyle(GhostButton()).disabled(busy)
         }
         .padding(14)
         .frame(width: 460)

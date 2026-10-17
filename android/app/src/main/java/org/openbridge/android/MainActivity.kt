@@ -413,7 +413,8 @@ private fun ChoiceTile(title: String, detail: String, selected: Boolean, onClick
 private fun UsbHint() {
     Column(Modifier.fillMaxWidth().glass().padding(horizontal = 16.dp, vertical = 12.dp)) {
         Text("Using a cable?", color = Palette.fg, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
-        Text("No app needed. Plug in, choose File transfer, and your Mac opens it.", color = Palette.muted, fontSize = 12.5.sp)
+        Text("Plug into your Mac and choose File transfer in the USB notification. OpenBridge on your Mac opens your phone. No need to tap the sun for a cable.",
+            color = Palette.muted, fontSize = 12.5.sp)
     }
 }
 
