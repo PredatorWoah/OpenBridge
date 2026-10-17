@@ -18,7 +18,7 @@
 - 🗂️ **A real file browser.** Thumbnails and a grid view, Quick Look with the space bar, sorting, multi-select, whole folders both ways, drag and drop from Finder, and new folders.
 - 📋 **Shared clipboard.** Send text from Mac to phone and back.
 - 📺 **Screen mirroring (beta).** See and control your phone in a window on the Mac, over the cable, powered by [scrcpy](https://github.com/Genymobile/scrcpy).
-- 🐘 **Big files are fine.** Files of 4 GB and more work both ways, and an interrupted download continues where it stopped. A 7.83 GB file has been copied from a real phone.
+- 🐘 **Big files are fine.** Files of 4 GB and more work both ways. Unplug mid-download, plug back in, and it carries on from where it stopped. A 7.83 GB file has been copied from a real phone.
 - 🛡️ **Never overwrites.** Existing files are never replaced on either side; copies get a new name like "photo 2.jpg".
 
 **Download:** get the Android APK and the Mac app (`.dmg`) from the [latest release](https://github.com/PredatorWoah/OpenBridge/releases/latest). See the [changelog](CHANGELOG.md) for what's new.
@@ -108,7 +108,7 @@ The script makes an application bundle with a **local ad-hoc signature**. It doe
    - Drop files or folders from Finder onto the window to upload them, or use **⋯ › Upload…**. Drag a file out to Finder to copy it.
    - Press the space bar to Quick Look a photo, video or document.
    - **⋯ › New Folder…**, and **⋯ › Send Mac clipboard to phone / Copy phone clipboard to Mac** (over Wi‑Fi; reading the phone's clipboard needs OpenBridge on screen on the phone).
-   - Progress shows in the bar at the bottom. If a transfer is interrupted, **Resume** continues it, picking up a download where it stopped.
+   - Progress shows in the bar at the bottom. If a transfer is interrupted, **Resume** continues it, picking up a download where it stopped. If the phone was unplugged or disconnected, reconnecting it continues the transfer by itself.
 5. Press **Stop sharing** on Android (in the app or the notification) when finished. Losing or changing Wi-Fi, or unplugging a USB tethering cable, also stops sharing. Restarting creates new credentials; pair again on the Mac.
 
 Existing filenames are rejected on both sides, before any data is transferred. On Android, names are compared ignoring case (`Photo.JPG` collides with `photo.jpg`), and the characters `" * : < > ? |` are not allowed. Choose another name (rename the source before upload). Downloads use temporary sibling files; uploads use temporary SAF documents and publish only after the declared body is received. On a normal disconnection/cancellation, partial files are removed. After a process kill or power loss, remove any leftover `.openbridge-part-*` Android documents (hidden from the Mac's file list) or `.openbridge-*.part` Mac files manually. A cancellation exactly at upload completion can mean the phone committed the file before the Mac received its acknowledgement; refresh before retrying.
@@ -136,7 +136,7 @@ See your phone's screen in a window on the Mac and use it with the mouse, trackp
 2. Plug in the phone, open it in OpenBridge, and click **Mirror screen** in the sidebar.
 3. The first time, the phone asks **Allow USB debugging?** Tick *Always allow from this computer* and tap **Allow**.
 
-Click to tap, drag to swipe, scroll to scroll, and type with the keyboard. Right click is Back, and the buttons below the screen are Back, Home, Recent apps, volume, power and rotate. Text you copy on either side is copied to the other. USB debugging gives a trusted computer broad control of the phone; see [SECURITY.md](SECURITY.md#screen-mirroring-usb-debugging) and turn it off when you don't need mirroring.
+Click to tap, drag to swipe, scroll to scroll, and type with the keyboard. If the picture ever stalls, it recovers on its own within a second. Right click is Back, and the buttons below the screen are Back, Home, Recent apps, volume, power and rotate. Text you copy on either side is copied to the other. USB debugging gives a trusted computer broad control of the phone; see [SECURITY.md](SECURITY.md#screen-mirroring-usb-debugging) and turn it off when you don't need mirroring.
 
 ### Wi-Fi vs USB File transfer
 

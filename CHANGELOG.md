@@ -4,7 +4,12 @@ All notable changes to OpenBridge are recorded here. Every release has an entry;
 
 ## [Unreleased]
 
+## [0.9.7] - 2026-10-17
+
+Fixes from real-device testing of 0.9.6: mirroring that froze, and resume that didn't survive unplugging.
+
 ### Fixed
+- **Resume now works after unplugging.** Unplugging the phone mid-download cleared the transfer, and the phone gives files new IDs on every connection, so nothing could continue it. Interrupted transfers now remember where each file lives on the phone by name. Plug the same phone back in (or pair it again over Wi‑Fi) and the download continues by itself from where it stopped, with a "Continuing…" notice. Downloading the same file to the same place again also continues it.
 - **Screen mirroring no longer freezes.** The picture could stop until you rotated the phone, when macOS paused its video decoder (window hidden, display asleep, graphics switch) or after a decoding hiccup. OpenBridge now notices and asks the phone for a fresh frame at once, and refreshes the picture when the window comes back into view or the Mac wakes.
 
 ## [0.9.6] - 2026-10-17
@@ -153,6 +158,7 @@ The first public preview: move files between an Android phone and a Mac, private
 - Pairing over Wi-Fi requires typing the address, port, fingerprint and secret.
 - The APK is signed with a build-machine key and the Mac app is not notarized; see the README for how to install and open them. If you installed an earlier test build, uninstall it first.
 
+[0.9.7]: https://github.com/PredatorWoah/OpenBridge/releases/tag/v0.9.7
 [0.9.6]: https://github.com/PredatorWoah/OpenBridge/releases/tag/v0.9.6
 [0.9.5]: https://github.com/PredatorWoah/OpenBridge/releases/tag/v0.9.5
 [0.9.4]: https://github.com/PredatorWoah/OpenBridge/releases/tag/v0.9.4
