@@ -43,6 +43,9 @@ public final class MTPClient: FileSource, @unchecked Sendable {
             }
         }
     }
+
+    /// Name of a phone plugged in and in File transfer mode, if any. Does not open or claim it.
+    public static func attachedPhone() -> String? { USBTransport.attachedPhone() }
     #endif
 
     // MARK: FileSource

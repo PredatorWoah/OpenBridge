@@ -127,6 +127,13 @@ public final class USBTransport: MTPTransport {
             + (summary.isEmpty ? " The Mac sees no USB devices with interfaces." : " USB devices seen: \(summary)."))
     }
 
+    /// Name of a phone attached in File transfer (MTP) or PTP mode, without opening it. Cheap enough to poll.
+    public static func attachedPhone() -> String? {
+        let interfaces = usbInterfaces()
+        defer { interfaces.forEach { IOObjectRelease($0.service) } }
+        return interfaces.first { $0.code.isMTP || $0.code.isPTP }?.device
+    }
+
     struct InterfaceCode: CustomStringConvertible {
         let interfaceClass: Int, subclass: Int, interfaceProtocol: Int
         var isMTP: Bool { interfaceClass == 0xFF && subclass == 0xFF && interfaceProtocol == 0x00 }
