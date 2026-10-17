@@ -6,6 +6,10 @@ public protocol FileSource {
     func list(id: String) async throws -> [Entry]
     func download(_ entry: Entry, to destination: URL, progress: @MainActor (Int64, Int64) -> Void) async throws
     func upload(_ source: URL, directoryID: String, progress: @MainActor (Int64, Int64) -> Void) async throws
+    /// Creates an empty folder and returns it; never reuses an existing name.
+    func makeFolder(named name: String, in directoryID: String) async throws -> Entry
+    /// A small JPEG preview of a photo or video.
+    func thumbnail(_ entry: Entry, size: Int) async throws -> Data
     func disconnect() async
 }
 
@@ -65,47 +69,81 @@ public final class MTPClient: FileSource, @unchecked Sendable {
         }
     }
 
+    /// Downloads `entry`, continuing an earlier interrupted download to the same place when there is one.
     public func download(_ entry: Entry, to destination: URL, progress: @MainActor (Int64, Int64) -> Void) async throws {
-        guard !FileManager.default.fileExists(atPath: destination.path) else {
-            throw BridgeError.message("\(destination.lastPathComponent) already exists. Choose a new name; OpenBridge never replaces files.")
-        }
         let location = try Location(entry.id)
         guard location.storage != nil, location.handle != MTPSession.root, !entry.directory else {
             throw BridgeError.message("Choose a file to download.")
         }
-        let (stream, total) = try await run { session -> (MTPInbound, UInt64) in
-            let size = try session.size(of: location.handle, info: try session.info(location.handle))
-            return (try session.beginDownload(location.handle), size)
-        }
-        let manager = FileManager.default
-        let temporary = destination.deletingLastPathComponent().appendingPathComponent(".openbridge-\(UUID().uuidString).part")
-        guard manager.createFile(atPath: temporary.path, contents: nil, attributes: [.posixPermissions: 0o600]) else {
-            await abandon()
-            throw BridgeError.message("Cannot create download in the selected folder.")
-        }
-        defer { try? manager.removeItem(at: temporary) }
-        let file = try FileHandle(forWritingTo: temporary)
+        let total = try await run { session in try session.size(of: location.handle, info: try session.info(location.handle)) }
+        guard Int64(clamping: total) == entry.size else { throw BridgeError.fileChanged }
+        let partial = try PartialFile.open(for: destination, size: entry.size)
+        var received = UInt64(partial.offset)
         do {
-            var received: Int64 = 0, reported: Int64 = 0
-            await progress(0, Int64(clamping: total))
-            while true {
-                try Task.checkCancellation()
-                guard let chunk = try await run({ _ in try stream.next() }) else { break }
-                try file.write(contentsOf: chunk)
-                received += Int64(chunk.count)
-                if received - reported >= MTPClient.progressStep { reported = received; await progress(received, Int64(clamping: total)) }
+            await progress(Int64(received), entry.size)
+            if received == 0 {
+                // A whole-object download works on every phone.
+                let stream = try await run { try $0.beginDownload(location.handle) }
+                received = try await drain(stream, into: partial, from: 0, total: total, progress: progress)
+            } else {
+                // Continue in pieces of at most 1 GiB; one request can carry under 4 GiB.
+                while received < total {
+                    let count = UInt32(min(total - received, 1 << 30))
+                    let offset = received
+                    let stream: MTPInbound
+                    do { stream = try await run { try $0.beginPartialDownload(location.handle, offset: offset, count: count) } }
+                    catch MTPError.response(0x2005) {
+                        // This phone can't continue a download: start over.
+                        partial.end(after: CancellationError())
+                        return try await download(entry, to: destination, progress: progress)
+                    }
+                    let got = try await drain(stream, into: partial, from: received, total: total, progress: progress) - received
+                    guard got == UInt64(count) else { throw BridgeError.message("The phone sent \(got) of \(count) bytes. Try again.") }
+                    received += got
+                }
             }
-            _ = try await run { _ in try stream.finish() }
-            guard UInt64(received) == total else { throw BridgeError.message("The phone sent \(received) of \(total) bytes. Try again.") }
-            await progress(received, Int64(clamping: total))
-            try file.synchronize()
-            try file.close()
+            guard received == total else { throw BridgeError.message("The phone sent \(received) of \(total) bytes. Try again.") }
+            await progress(Int64(clamping: received), entry.size)
+            try partial.finish(at: destination)
         } catch {
-            try? file.close()
+            partial.end(after: error)
             if !MTPClient.keepsSession(error) { await abandon() }
             throw error
         }
-        try manager.moveItem(at: temporary, to: destination)
+    }
+
+    /// Writes one data phase to `partial` and reads its response. Returns the new byte count.
+    private func drain(_ stream: MTPInbound, into partial: PartialFile, from start: UInt64, total: UInt64,
+                       progress: @MainActor (Int64, Int64) -> Void) async throws -> UInt64 {
+        var received = start, reported = start
+        while true {
+            try Task.checkCancellation()
+            guard let chunk = try await run({ _ in try stream.next() }) else { break }
+            try partial.write(chunk)
+            received += UInt64(chunk.count)
+            if received - reported >= UInt64(MTPClient.progressStep) {
+                reported = received
+                await progress(Int64(clamping: received), Int64(clamping: total))
+            }
+        }
+        _ = try await run { _ in try stream.finish() }
+        return received
+    }
+
+    public func makeFolder(named name: String, in directoryID: String) async throws -> Entry {
+        try Wire.validateName(name)
+        let location = try Location(directoryID)
+        guard let storage = location.storage else { throw BridgeError.message("Open a storage on the phone first.") }
+        let existing = Set(try await list(id: directoryID).map { $0.name.lowercased() })
+        guard !existing.contains(name.lowercased()) else { throw BridgeError.message("A file or folder named “\(name)” already exists on the phone.") }
+        let handle = try await run { try $0.createFolder(storage: storage, parent: location.handle, name: name) }
+        return Entry(id: "o:\(storage):\(handle)", name: name, directory: true, size: 0)
+    }
+
+    public func thumbnail(_ entry: Entry, size: Int) async throws -> Data {
+        let location = try Location(entry.id)
+        guard location.storage != nil, !entry.directory else { throw BridgeError.message("No preview.") }
+        return try await run { try $0.thumbnail(location.handle) }
     }
 
     public func upload(_ source: URL, directoryID: String, progress: @MainActor (Int64, Int64) -> Void) async throws {

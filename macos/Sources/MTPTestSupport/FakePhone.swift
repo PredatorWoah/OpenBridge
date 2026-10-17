@@ -21,6 +21,8 @@ public final class FakePhone: MTPTransport {
     public var freeSpace: UInt64 = 64 << 30
     /// Reported in device info; a different value simulates a different phone.
     public var serialNumber = "SERIAL"
+    /// Whether the phone implements Android's GetPartialObject64 (for resuming downloads).
+    public var supportsPartialObject = true
     /// Simulates a USB error when the host sends this command.
     public var failWritingCommand: UInt16?
     /// Simulates a USB error after this many more successful writes.
@@ -142,8 +144,9 @@ public final class FakePhone: MTPTransport {
                 let parsed = try MTPObjectInfo(parsing: body)
                 lastDeclaredSize = parsed.compressedSize
                 let handle = nextHandle; nextHandle += 1
-                objects[handle] = Object(storage: info.storage, parent: info.parent, name: parsed.filename, folder: false, data: Data(), bigSize: nil)
-                pendingSend = (handle, 0); pendingInfo = nil
+                let folder = parsed.format == MTPCode.associationFormat
+                objects[handle] = Object(storage: info.storage, parent: info.parent, name: parsed.filename, folder: folder, data: Data(), bigSize: nil)
+                pendingSend = folder ? nil : (handle, 0); pendingInfo = nil
                 respond(MTPCode.ok, info.transaction, [info.storage, info.parent == MTPSession.root ? 0 : info.parent, handle])
             } else if header.code == MTPCode.sendObject, let target = pendingSend {
                 objects[target.handle]?.data = body
@@ -192,6 +195,18 @@ public final class FakePhone: MTPTransport {
             let handle = try reader.u32()
             guard let object = objects[handle], !object.folder else { respond(0x2009, t); return }
             dataThenOK(header.code, t, object.data)
+        case MTPCode.getThumb:
+            let handle = try reader.u32()
+            guard let object = objects[handle], object.name.hasSuffix(".jpg") else { respond(0x2010, t); return }   // no thumbnail
+            dataThenOK(header.code, t, Data([0xFF, 0xD8, UInt8(handle & 0xFF), 0xFF, 0xD9]))
+        case MTPCode.getPartialObject64:
+            guard supportsPartialObject else { respond(0x2005, t); return }
+            let handle = try reader.u32(), low = try reader.u32(), high = try reader.u32(), count = try reader.u32()
+            let offset = Int(UInt64(high) << 32 | UInt64(low))
+            guard let object = objects[handle], !object.folder, offset <= object.data.count else { respond(0x2009, t); return }
+            let slice = object.data[offset..<min(object.data.count, offset + Int(count))]
+            send(.data, header.code, t, Data(slice))
+            respond(MTPCode.ok, t, [UInt32(slice.count)])
         case MTPCode.sendObjectInfo:
             pendingInfo = (try reader.u32(), try reader.u32(), t)
         case MTPCode.deleteObject:

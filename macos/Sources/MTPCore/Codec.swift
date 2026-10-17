@@ -38,6 +38,9 @@ enum MTPCode {
     static let getObjectHandles: UInt16 = 0x1007
     static let getObjectInfo: UInt16 = 0x1008
     static let getObject: UInt16 = 0x1009
+    static let getThumb: UInt16 = 0x100A
+    /// Android's extension: part of an object from a 64-bit offset. Lets an interrupted download continue.
+    static let getPartialObject64: UInt16 = 0x95C1
     static let deleteObject: UInt16 = 0x100B
     static let sendObjectInfo: UInt16 = 0x100C
     static let sendObject: UInt16 = 0x100D
