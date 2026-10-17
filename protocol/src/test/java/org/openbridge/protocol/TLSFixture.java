@@ -19,8 +19,13 @@ public final class TLSFixture {
         byte[] digest = MessageDigest.getInstance("SHA-256").digest(keys.getCertificate("fixture").getEncoded());
         String fingerprint = HexFormat.of().formatHex(digest);
         MemoryStore store = new MemoryStore();
+        String[] clip = {"phone clipboard"};
+        Clipboard clipboard = new Clipboard() {
+            public String read() { return clip[0]; }
+            public void write(String text) { clip[0] = text; }
+        };
         // Approves every pairing request, as if the user tapped Pair after comparing the codes.
-        Session session = new Session(store, ProtocolTest.SECRET, digest, code -> true);
+        Session session = new Session(store, ProtocolTest.SECRET, digest, code -> true, clipboard);
         try (SSLServerSocket server = (SSLServerSocket) context.getServerSocketFactory().createServerSocket(0, 8, InetAddress.getByName("127.0.0.1"))) {
             System.out.println(server.getLocalPort() + " " + fingerprint); System.out.flush();
             while (true) {

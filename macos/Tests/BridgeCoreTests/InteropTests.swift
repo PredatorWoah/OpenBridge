@@ -61,6 +61,26 @@ final class InteropTests: XCTestCase {
             XCTFail("Existing Mac destination must not be overwritten")
         } catch { XCTAssertEqual(try Data(contentsOf: destination), bytes) }
         XCTAssertFalse(try FileManager.default.contentsOfDirectory(atPath: directory.path).contains { $0.hasSuffix(".part") })
+        // Resume: an interrupted download continues from the bytes already on disk.
+        let resumed = directory.appendingPathComponent("resumed.bin")
+        try Data(bytes.prefix(70_000)).write(to: directory.appendingPathComponent(".resumed.bin.\(bytes.count).openbridge-part"))
+        var firstReport: Int64 = -1
+        try await client.download(uploaded, to: resumed) { done, _ in if firstReport < 0 { firstReport = done } }
+        XCTAssertEqual(firstReport, 70_000)
+        XCTAssertEqual(try Data(contentsOf: resumed), bytes)
+        // Folders, previews and the clipboard.
+        let folder = try await client.makeFolder(named: "Holiday", in: "")
+        XCTAssertTrue(folder.directory)
+        do { _ = try await client.makeFolder(named: "Holiday", in: ""); XCTFail("Existing folder name must fail") }
+        catch { XCTAssertTrue(error.localizedDescription.contains("exists")) }
+        let hello = try XCTUnwrap(afterUpload.first { $0.name == "hello.txt" })
+        let preview = try await client.thumbnail(hello, size: 256)
+        XCTAssertEqual(preview.count, 5)
+        let phoneText = try await client.clipboard()
+        XCTAssertEqual(phoneText, "phone clipboard")
+        try await client.setClipboard("from the Mac ✓")
+        let roundTrip = try await client.clipboard()
+        XCTAssertEqual(roundTrip, "from the Mac ✓")
         for badPin in [false, true] {
             let rejected = BridgeClient(testHost: "127.0.0.1", port: port,
                 fingerprint: badPin ? Data(repeating: 0, count: 32) : fingerprint,

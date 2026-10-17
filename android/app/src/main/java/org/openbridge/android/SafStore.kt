@@ -136,6 +136,25 @@ class SafStore(private val resolver: ContentResolver, private val root: Document
         }
     }
 
+    @Synchronized
+    override fun createDirectory(parentId: String, name: String): String = storage {
+        Names.requireStorable(name)
+        val parent = document(parentId, true)
+        if (reserved.any { it.first == parent.uri && it.second == Names.collisionKey(name) } || exists(parent, name))
+            throw IOException("A file or folder with that name already exists")
+        if (!parent.canWrite()) throw IOException("Folder is read-only")
+        val made = parent.createDirectory(name) ?: throw IOException("Cannot create the folder")
+        if (made.name != name) { made.delete(); throw IOException("Provider could not create that folder name") }
+        if (documents.size >= 50_000) throw IOException("Restart sharing to refresh document IDs")
+        UUID.randomUUID().toString().also { ids[made.uri] = it; documents[it] = made }
+    }
+
+    // Not synchronized: decoding a preview can take a while and must not hold up other requests.
+    override fun thumbnail(fileId: String, size: Int): ByteArray = storage {
+        val file = synchronized(this) { document(fileId, false) }
+        Thumbs.ofDocument(resolver, file.uri, file.name ?: "", size)
+    }
+
     private fun <T> storage(block: () -> T): T = try { block() }
     catch (e: SecurityException) { throw IOException("Storage permission denied; select the folder again") }
     catch (e: java.io.FileNotFoundException) { throw IOException("Document is unavailable") }

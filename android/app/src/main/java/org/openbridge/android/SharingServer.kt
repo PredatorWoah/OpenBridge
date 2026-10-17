@@ -8,6 +8,10 @@ import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
+import android.net.nsd.NsdManager
+import android.net.nsd.NsdServiceInfo
+import android.provider.Settings
+import org.openbridge.protocol.Clipboard
 import org.openbridge.protocol.Pairing
 import org.openbridge.protocol.Session
 import org.openbridge.protocol.Store
@@ -34,8 +38,13 @@ import javax.net.ssl.SSLSocket
 import javax.security.auth.x500.X500Principal
 
 class SharingServer(context: Context, private val store: Store, private val approver: Pairing.Approver,
-                    private val stopped: (String) -> Unit) : Closeable {
+                    private val clipboard: Clipboard?, private val stopped: (String) -> Unit) : Closeable {
     private val connectivity = context.getSystemService(ConnectivityManager::class.java)
+    private val nsd = context.getSystemService(NsdManager::class.java)
+    /** The name Macs see in their list of phones, like "vivo X300 Pro". */
+    private val deviceName = Settings.Global.getString(context.contentResolver, "device_name")?.takeIf { it.isNotBlank() }
+        ?: "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}"
+    private var announcement: NsdManager.RegistrationListener? = null
     private val closed = AtomicBoolean(false)
     private val sockets = ConcurrentHashMap.newKeySet<SSLSocket>()
     private val workers = ThreadPoolExecutor(0, 2, 10, TimeUnit.SECONDS, SynchronousQueue())
@@ -89,7 +98,7 @@ class SharingServer(context: Context, private val store: Store, private val appr
             generateKeyPair()
         }
         val fingerprint = MessageDigest.getInstance("SHA-256").digest(keyStore.getCertificate(alias).encoded)
-        session = Session(store, secret, fingerprint, approver)
+        session = Session(store, secret, fingerprint, approver, clipboard)
         val managers = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm()).apply { init(keyStore, null) }
         val tls = SSLContext.getInstance("TLS").apply { init(managers.keyManagers, null, SecureRandom()) }
         listener = (tls.serverSocketFactory.createServerSocket() as SSLServerSocket).apply {
@@ -110,6 +119,7 @@ class SharingServer(context: Context, private val store: Store, private val appr
     }
 
     fun start() {
+        announce()
         Thread({
             try {
                 while (!closed.get()) {
@@ -147,8 +157,33 @@ class SharingServer(context: Context, private val store: Store, private val appr
 
     private fun stop(reason: String) { close(); stopped(reason) }
 
+    /**
+     * Lets Macs on this Wi-Fi list the phone while sharing (DNS-SD `_openbridge._tcp`), so nobody types an
+     * address. It reveals only the phone's name, address and port; pairing still needs the 6-digit code.
+     */
+    private fun announce() {
+        if (usb) return
+        val info = NsdServiceInfo().apply {
+            serviceName = deviceName.take(60)
+            serviceType = "_openbridge._tcp"
+            port = this@SharingServer.port
+            setAttribute("ip", host)
+            setAttribute("port", this@SharingServer.port.toString())
+            setAttribute("v", "1")
+        }
+        val listener = object : NsdManager.RegistrationListener {
+            override fun onServiceRegistered(info: NsdServiceInfo) {}
+            override fun onRegistrationFailed(info: NsdServiceInfo, error: Int) {}
+            override fun onServiceUnregistered(info: NsdServiceInfo) {}
+            override fun onUnregistrationFailed(info: NsdServiceInfo, error: Int) {}
+        }
+        runCatching { nsd.registerService(info, NsdManager.PROTOCOL_DNS_SD, listener); announcement = listener }
+    }
+
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
+        announcement?.let { runCatching { nsd.unregisterService(it) } }
+        announcement = null
         if (callbackRegistered) connectivity.unregisterNetworkCallback(callback)
         listener.close()
         sockets.forEach { runCatching { it.close() } }

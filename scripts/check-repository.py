@@ -16,7 +16,12 @@ ns = "{http://schemas.android.com/apk/res/android}"
 permissions = {p.attrib[ns + "name"] for p in manifest.findall("uses-permission")}
 assert permissions == {"android.permission.INTERNET", "android.permission.ACCESS_NETWORK_STATE",
                        "android.permission.MANAGE_EXTERNAL_STORAGE", "android.permission.READ_EXTERNAL_STORAGE",
-                       "android.permission.WRITE_EXTERNAL_STORAGE"}, permissions
+                       "android.permission.WRITE_EXTERNAL_STORAGE", "android.permission.FOREGROUND_SERVICE",
+                       "android.permission.FOREGROUND_SERVICE_DATA_SYNC", "android.permission.POST_NOTIFICATIONS",
+                       "android.permission.WAKE_LOCK"}, permissions
+services = manifest.find("application").findall("service")
+assert [(s.attrib[ns + "name"], s.attrib[ns + "exported"], s.attrib[ns + "foregroundServiceType"]) for s in services] == \
+    [(".ShareService", "false", "dataSync")], "only the private background-sharing service"
 # The legacy storage permissions are only for Android 9 and 10.
 assert all(p.attrib.get(ns + "maxSdkVersion") == "29" for p in manifest.findall("uses-permission")
            if p.attrib[ns + "name"].split(".")[-1] in ("READ_EXTERNAL_STORAGE", "WRITE_EXTERNAL_STORAGE")), "storage permissions must stop at API 29"
