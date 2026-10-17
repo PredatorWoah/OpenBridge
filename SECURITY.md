@@ -34,6 +34,14 @@ Choose File transfer only on a Mac you trust, and switch the phone back to *No d
 - OpenBridge pushes the official scrcpy 5.0.1 server (Apache-2.0, unmodified) to `/data/local/tmp/scrcpy-server.jar` and starts it with video only, no audio. The server file is downloaded when the app is built and verified against a pinned SHA-256 (see `third_party/scrcpy`). Mirroring sends the screen over the cable unencrypted, like scrcpy and ADB.
 - While mirroring, text copied on either side is synced to the other (scrcpy's clipboard sync). Close the window to stop; the server exits when its connection closes.
 
+## Windows app
+
+The Windows app is a client like the Mac app and keeps the same rules for Wi‑Fi: it accepts only literal RFC1918 IPv4 addresses, pairs with OBP1 numeric comparison, pins the phone's certificate before sending the secret, and keeps credentials in memory only. Downloads use the same `.<name>.<size>.openbridge-part` files and never replace an existing file. Phones are listed with DNS-SD (multicast DNS on the local network).
+
+- **USB** on Windows is handled by Windows itself: OpenBridge only checks whether a portable device is present and opens File Explorer. The MTP notes above apply to Windows' own File transfer too.
+- **Screen mirroring** runs the bundled official scrcpy for Windows (with its own `adb.exe`), pinned by SHA-256 (see `third_party/scrcpy`). The same USB debugging warnings apply. Its adb key lives in `%USERPROFILE%\.android\adbkey`, managed by adb, and adb may leave a small background server running on `127.0.0.1:5037` until you sign out or end it.
+- The app is not code-signed yet, so Windows SmartScreen may warn the first time. Check the zip against `SHA256SUMS.txt` from the release.
+
 ## Verifying downloads
 
 From 1.0.0, every Android APK is signed with the OpenBridge release key, whose certificate SHA-256 fingerprint is:

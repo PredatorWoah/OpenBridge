@@ -54,6 +54,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import org.openbridge.ui.Palette
+import org.openbridge.ui.SunEngine
+import org.openbridge.ui.drawSunArch
 
 class MainActivity : ComponentActivity() {
     private val model = Sharing
@@ -194,11 +197,11 @@ private fun ShareScreen(model: Sharing, tapSun: () -> Unit, onWholePhone: () -> 
             Spacer(Modifier.height(18.dp))
             Text("OpenBridge", color = Palette.fg, fontSize = 26.sp, fontWeight = FontWeight.Bold)
             Text(when {
-                byCable -> "Connected to your Mac by cable"
-                model.paired -> "Your Mac is connected"
-                sharing != null -> "Waiting for your Mac"
+                byCable -> "Connected to your computer by cable"
+                model.paired -> "Your computer is connected"
+                sharing != null -> "Waiting for your computer"
                 model.busy -> "Starting…"
-                else -> "Tap the sun to share with your Mac"
+                else -> "Tap the sun to share with your computer"
             }, color = Palette.muted, fontSize = 14.sp)
             // The sun's tap area. The arch itself is drawn by the full-screen canvas behind, so ripples are never clipped.
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -210,16 +213,16 @@ private fun ShareScreen(model: Sharing, tapSun: () -> Unit, onWholePhone: () -> 
             StatusPill(model)
             Spacer(Modifier.height(12.dp))
             if (sharing != null && !model.paired) {
-                Text("On your Mac, type", color = Palette.muted, fontSize = 13.sp)
+                Text("On your computer, type", color = Palette.muted, fontSize = 13.sp)
                 SelectionContainer {
                     Text(sharing.host, color = Palette.fg, fontSize = 30.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
                 }
                 Text("port ${sharing.port}", color = Palette.muted, fontSize = 15.sp, fontFamily = FontFamily.Monospace)
             }
             if (byCable && (sharing == null || model.paired)) {
-                Text("Open OpenBridge on your Mac to browse this phone.", color = Palette.muted, fontSize = 13.sp, textAlign = TextAlign.Center)
+                Text("Open OpenBridge on your Mac, or File Explorer on a PC, to browse this phone.", color = Palette.muted, fontSize = 13.sp, textAlign = TextAlign.Center)
             } else if (model.cable == Cable.CHARGING && sharing == null) {
-                Text("Cable connected, but only charging. Choose File transfer in the USB notification to browse from your Mac.",
+                Text("Cable connected, but only charging. Choose File transfer in the USB notification to browse from your computer.",
                     color = Palette.muted, fontSize = 13.sp, textAlign = TextAlign.Center)
             }
             model.note?.let { Text(it, color = Palette.amber, fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp)) }
@@ -256,7 +259,7 @@ private fun StatusPill(model: Sharing) {
         Box(Modifier.size(8.dp).clip(CircleShape).background(if (on) Palette.ok else Color(0xFF8E8E9C)))
         Spacer(Modifier.width(8.dp))
         Text(when {
-            model.paired -> "Connected to your Mac"
+            model.paired -> "Connected to your computer"
             on -> "Connected by cable · File transfer"
             model.server != null -> if (model.wholePhone) "Sharing whole phone" else "Sharing one folder"
             model.busy -> "Starting…"
@@ -297,7 +300,7 @@ private fun BackgroundToggle(model: Sharing) {
 private fun UsbHint() {
     Column(Modifier.fillMaxWidth().glass().padding(horizontal = 16.dp, vertical = 12.dp)) {
         Text("Using a cable?", color = Palette.fg, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
-        Text("Plug into your Mac and choose File transfer in the USB notification. OpenBridge on your Mac opens your phone. No need to tap the sun for a cable.",
+        Text("Plug into your Mac or PC and choose File transfer in the USB notification. OpenBridge on the Mac, or File Explorer on Windows, opens your phone. No need to tap the sun for a cable.",
             color = Palette.muted, fontSize = 12.5.sp)
     }
 }
@@ -337,8 +340,8 @@ private fun BoxScope.PairingSheet(model: Sharing) {
             horizontalAlignment = Alignment.CenterHorizontally) {
             Box(Modifier.size(40.dp, 5.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.3f)))
             Spacer(Modifier.height(18.dp))
-            Text("Pair with this Mac?", color = Palette.fg, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-            Text("Check that your Mac shows the same code", color = Palette.muted, fontSize = 13.sp)
+            Text("Pair with this computer?", color = Palette.fg, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            Text("Check that your computer shows the same code", color = Palette.muted, fontSize = 13.sp)
             Spacer(Modifier.height(20.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 shown.forEachIndexed { index, digit ->
