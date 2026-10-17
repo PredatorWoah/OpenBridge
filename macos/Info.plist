@@ -12,5 +12,6 @@
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSPrincipalClass</key><string>NSApplication</string>
+    <key>NSBonjourServices</key><array><string>_openbridge._tcp</string></array>
     <key>NSLocalNetworkUsageDescription</key><string>OpenBridge connects to your Android phone to transfer files on your local network.</string>
 </dict></plist>

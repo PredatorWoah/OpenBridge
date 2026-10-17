@@ -1,0 +1,573 @@
+import SwiftUI
+import AppKit
+import BridgeCore
+
+/// What a file is, from its name: decides its icon, colour, sorting group and whether it has a preview.
+enum FileKind: Int, Comparable {
+    case folder, image, video, audio, document, archive, app, other
+
+    init(_ entry: Entry) {
+        if entry.directory { self = .folder; return }
+        switch (entry.name as NSString).pathExtension.lowercased() {
+        case "jpg", "jpeg", "png", "heic", "heif", "webp", "gif", "dng", "bmp": self = .image
+        case "mp4", "mov", "mkv", "3gp", "webm", "m4v", "avi": self = .video
+        case "mp3", "m4a", "aac", "wav", "flac", "ogg", "opus": self = .audio
+        case "pdf", "txt", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "md", "rtf", "csv": self = .document
+        case "zip", "rar", "7z", "tar", "gz", "iso": self = .archive
+        case "apk", "xapk", "apks": self = .app
+        default: self = .other
+        }
+    }
+    var previewable: Bool { self == .image || self == .video }
+    static func < (a: FileKind, b: FileKind) -> Bool { a.rawValue < b.rawValue }
+}
+
+enum SortKey: String, CaseIterable, Identifiable {
+    case name = "Name", size = "Size", kind = "Kind"
+    var id: String { rawValue }
+}
+
+@MainActor
+final class BrowserModel: ObservableObject {
+    @Published var host = ""
+    @Published var port = ""
+    /// The 6-digit code shown while the phone asks its user to confirm the pairing.
+    @Published var pairingCode: String?
+    @Published var entries: [Entry] = []
+    @Published var path: [(id: String, name: String)] = [("", "Phone")]
+    @Published var connected = false
+    @Published var busy = false
+    @Published var status = ""
+    @Published var error: String?
+    /// A short confirmation that fades away, like "Copied the phone's clipboard".
+    @Published var toast: String?
+    @Published var deviceName = "Phone"
+    @Published var overUSB = false
+    /// Whether the file browser is showing (instead of the connect screen).
+    @Published var showBrowser = false
+    @Published var selection: Set<Entry.ID> = []
+    @Published var transfer: Transfer?
+    @Published var thumbnails: [Entry.ID: NSImage] = [:]
+    /// A downloaded copy shown with Quick Look.
+    @Published var previewURL: URL?
+    @Published var sortKey: SortKey = SortKey(rawValue: UserDefaults.standard.string(forKey: "sortKey") ?? "") ?? .name {
+        didSet { UserDefaults.standard.set(sortKey.rawValue, forKey: "sortKey") }
+    }
+    @Published var ascending = !UserDefaults.standard.bool(forKey: "sortDescending") {
+        didSet { UserDefaults.standard.set(!ascending, forKey: "sortDescending") }
+    }
+    @Published var grid = UserDefaults.standard.bool(forKey: "gridView") {
+        didSet { UserDefaults.standard.set(grid, forKey: "gridView") }
+    }
+    private(set) var client: (any FileSource)?
+    private var task: Task<Void, Never>?
+    private var watcher: Task<Void, Never>?
+    private var toastTask: Task<Void, Never>?
+    /// A plugged-in phone that is not opened automatically: it failed to connect, or the user disconnected it.
+    /// Cleared when that phone is unplugged.
+    private var skipped: String?
+    private var anchor: Entry.ID?
+    private var thumbnailsPending: Set<Entry.ID> = []
+    private var thumbnailsFailed: Set<Entry.ID> = []
+    private let previews = FileManager.default.temporaryDirectory.appendingPathComponent("OpenBridge Previews", isDirectory: true)
+
+    /// A batch of transfers. Whatever is left after a failure can be resumed.
+    struct Transfer {
+        var name: String
+        var upload: Bool
+        var index = 1
+        var count = 1
+        var fraction = 0.0
+        var done = false
+        var saved: URL?
+        /// Jobs not finished yet (including the one that failed), for Resume.
+        var remaining: [Job] = []
+    }
+
+    enum Job {
+        case download(Entry, to: URL)
+        case upload(URL, into: String)
+        var name: String {
+            switch self {
+            case .download(let entry, _): return entry.name
+            case .upload(let url, _): return url.lastPathComponent
+            }
+        }
+    }
+
+    private func run(_ work: @escaping () async throws -> Void) {
+        guard !busy else { return }
+        busy = true; error = nil
+        task = Task {
+            defer { busy = false; task = nil; pairingCode = nil }
+            do { try await work() }
+            catch is CancellationError { status = "Cancelled."; transfer = nil }
+            catch {
+                self.error = error.localizedDescription
+                status = overUSB
+                    ? "Couldn't reach the phone over USB. Keep it unlocked, plugged in and in File transfer mode."
+                    : "Couldn't reach the phone. Check Wi‑Fi and that sharing is still on, or pair again."
+            }
+        }
+    }
+
+    func show(_ message: String) {
+        toast = message
+        toastTask?.cancel()
+        toastTask = Task { try? await Task.sleep(nanoseconds: 2_500_000_000); if !Task.isCancelled { toast = nil } }
+    }
+
+    // MARK: Connecting
+
+    /// Watches for a phone being plugged in or unplugged, so USB needs no button.
+    func startWatching() {
+        guard watcher == nil else { return }
+        // The model lives as long as the window, so the loop holds it strongly.
+        watcher = Task {
+            while !Task.isCancelled {
+                poll()
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+            }
+        }
+    }
+
+    private func poll() {
+        guard !busy else { return }
+        let attached = MTPClient.attachedPhone()
+        if attached == nil { skipped = nil }
+        if connected {
+            if overUSB && attached == nil { drop("The phone was unplugged.") }
+            return
+        }
+        if let attached, attached != skipped { connectUSB() }
+    }
+
+    /// USB cable in File transfer (MTP) mode: no app or pairing needed on the phone.
+    func connectUSB() {
+        guard !busy else { return }   // never relabel a connection that is still in progress
+        overUSB = true
+        let attached = MTPClient.attachedPhone()
+        run {
+            self.status = "Opening File transfer…"
+            do {
+                let usb = try await MTPClient.connectUSB()
+                let storages = try await usb.list(id: "")
+                self.client = usb; self.deviceName = usb.name
+                self.path = [("", usb.name)]; self.entries = storages
+                self.connected = true; self.status = ""
+            } catch {
+                self.skipped = attached   // don't retry in a loop; replugging or Try again does
+                throw error
+            }
+        }
+    }
+
+    func retryUSB() { skipped = nil; error = nil; connectUSB() }
+
+    func pair(name: String? = nil) {
+        guard !busy else { return }
+        overUSB = false
+        run {
+            self.status = "Connecting to the phone…"
+            let paired = try await BridgeClient.pair(host: self.host.trimmingCharacters(in: .whitespacesAndNewlines), port: self.port) { code in
+                self.pairingCode = code
+                self.status = "Check that your phone shows the same code, then tap Pair on the phone."
+            }
+            self.pairingCode = nil
+            let entries = try await paired.list()
+            self.client = paired; self.deviceName = name ?? "Phone at \(self.host)"
+            self.path = [("", "Phone")]; self.entries = entries
+            self.connected = true; self.status = ""
+        }
+    }
+
+    func disconnect() {
+        guard !busy else { return }
+        if overUSB { skipped = MTPClient.attachedPhone() }
+        drop("")
+    }
+
+    private func drop(_ reason: String) {
+        if let old = client { Task { await old.disconnect() } }
+        client = nil; connected = false; showBrowser = false; entries = []; path = [("", "Phone")]
+        selection = []; transfer = nil; error = nil; status = reason
+        thumbnails = [:]; thumbnailsPending = []; thumbnailsFailed = []
+        try? FileManager.default.removeItem(at: previews)
+    }
+
+    func cancel() { task?.cancel() }
+
+    // MARK: Browsing
+
+    /// Folders first, then in the chosen order.
+    var sorted: [Entry] {
+        entries.sorted { a, b in
+            if a.directory != b.directory { return a.directory }
+            let order: ComparisonResult
+            switch sortKey {
+            case .name: order = a.name.localizedStandardCompare(b.name)
+            case .size: order = a.size == b.size ? a.name.localizedStandardCompare(b.name) : (a.size < b.size ? .orderedAscending : .orderedDescending)
+            case .kind:
+                let (ka, kb) = (FileKind(a), FileKind(b))
+                order = ka == kb ? a.name.localizedStandardCompare(b.name) : (ka < kb ? .orderedAscending : .orderedDescending)
+            }
+            return ascending ? order == .orderedAscending : order == .orderedDescending
+        }
+    }
+
+    private func display(_ entries: [Entry], at path: [(id: String, name: String)]) {
+        self.path = path; self.entries = entries; selection = []; anchor = nil
+    }
+
+    func refresh() {
+        guard let client else { return }
+        run { self.entries = try await client.list(id: self.path.last!.id) }
+    }
+
+    func open(_ entry: Entry) {
+        if entry.directory { enter(entry) } else { download([entry]) }
+    }
+
+    func enter(_ entry: Entry) {
+        guard entry.directory, let client else { return }
+        run { self.display(try await client.list(id: entry.id), at: self.path + [(entry.id, entry.name)]) }
+    }
+
+    func up() {
+        guard path.count > 1 else { return }
+        go(to: path.count - 2)
+    }
+
+    /// Opens a folder from the path bar.
+    func go(to level: Int) {
+        guard level < path.count - 1, let client else { return }
+        let trail = Array(path.prefix(level + 1))
+        run { self.display(try await client.list(id: trail.last!.id), at: trail) }
+    }
+
+    /// Opens a well-known folder such as DCIM/Camera. Tries each spelling in turn; phones differ.
+    func jump(_ label: String, to candidates: [[String]]) {
+        guard let client else { return }
+        run {
+            for names in candidates {
+                if let (trail, entries) = try await self.resolve(names, client) {
+                    self.display(entries, at: trail); self.showBrowser = true
+                    return
+                }
+            }
+            self.status = "This phone has no \(label) folder."
+        }
+    }
+
+    private func resolve(_ names: [String], _ client: any FileSource) async throws -> ([(id: String, name: String)], [Entry])? {
+        func find(_ name: String, in entries: [Entry]) -> Entry? {
+            entries.first { $0.directory && $0.name.caseInsensitiveCompare(name) == .orderedSame }
+        }
+        var trail = [path[0]]
+        var entries = try await client.list(id: "")
+        // USB and multi-storage phones list storage areas first: look inside the first one.
+        if let first = names.first, find(first, in: entries) == nil, let storage = entries.first(where: \.directory) {
+            entries = try await client.list(id: storage.id); trail.append((storage.id, storage.name))
+        }
+        for name in names {
+            guard let next = find(name, in: entries) else { return nil }
+            entries = try await client.list(id: next.id); trail.append((next.id, next.name))
+        }
+        return (trail, entries)
+    }
+
+    // MARK: Selection
+
+    var selected: [Entry] { sorted.filter { selection.contains($0.id) } }
+
+    /// Click selects one item, ⌘-click adds or removes, ⇧-click selects a range, like Finder.
+    func click(_ entry: Entry) {
+        let flags = NSEvent.modifierFlags
+        if flags.contains(.command) {
+            if selection.contains(entry.id) { selection.remove(entry.id) } else { selection.insert(entry.id) }
+            anchor = entry.id
+        } else if flags.contains(.shift), let anchor, let from = sorted.firstIndex(where: { $0.id == anchor }),
+                  let to = sorted.firstIndex(where: { $0.id == entry.id }) {
+            selection = Set(sorted[min(from, to)...max(from, to)].map(\.id))
+        } else {
+            selection = [entry.id]; anchor = entry.id
+        }
+    }
+
+    func selectAll() { selection = Set(entries.map(\.id)) }
+
+    // MARK: Previews
+
+    func loadThumbnail(_ entry: Entry) {
+        guard FileKind(entry).previewable, let client, thumbnails[entry.id] == nil,
+              !thumbnailsPending.contains(entry.id), !thumbnailsFailed.contains(entry.id) else { return }
+        // Over USB the phone handles one request at a time; never interleave previews with a transfer.
+        if overUSB && busy { return }
+        thumbnailsPending.insert(entry.id)
+        Task {
+            defer { thumbnailsPending.remove(entry.id) }
+            if let data = try? await client.thumbnail(entry, size: 256), let image = NSImage(data: data) {
+                thumbnails[entry.id] = image
+            } else {
+                thumbnailsFailed.insert(entry.id)
+            }
+        }
+    }
+
+    /// Quick Look: downloads a temporary copy, then shows it.
+    func preview() {
+        guard let entry = selected.first(where: { !$0.directory }), let client else { return }
+        guard entry.size <= 2 << 30 else { show("That file is too large to preview. Download it instead."); return }
+        let folder = previews.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let target = folder.appendingPathComponent(entry.name)
+        run {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            self.transfer = Transfer(name: entry.name, upload: false)
+            try await client.download(entry, to: target) { done, total in self.update(done, total) }
+            self.transfer = nil
+            self.previewURL = target
+        }
+    }
+
+    // MARK: Clipboard
+
+    var clipboardAvailable: Bool { client is BridgeClient }
+
+    func sendClipboard() {
+        guard let bridge = client as? BridgeClient else { return }
+        guard let text = NSPasteboard.general.string(forType: .string), !text.isEmpty else { show("The Mac's clipboard has no text."); return }
+        run {
+            try await bridge.setClipboard(text)
+            self.show("Sent to the phone's clipboard")
+        }
+    }
+
+    func fetchClipboard() {
+        guard let bridge = client as? BridgeClient else { return }
+        run {
+            let text = try await bridge.clipboard()
+            guard !text.isEmpty else { self.show("The phone's clipboard is empty."); return }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+            self.show("Copied the phone's clipboard to your Mac")
+        }
+    }
+
+    // MARK: Folders
+
+    func newFolder() {
+        guard let client, !busy, path.count > 1 || !overUSB else {
+            show("Open a storage on the phone first."); return
+        }
+        let alert = NSAlert()
+        alert.messageText = "New folder"
+        alert.informativeText = "Create a folder on the phone in “\(path.last!.name)”."
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        field.stringValue = "New folder"
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Create"); alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        let directory = path.last!.id
+        run {
+            _ = try await client.makeFolder(named: name, in: directory)
+            self.entries = try await client.list(id: directory)
+            self.show("Created “\(name)”")
+        }
+    }
+
+    // MARK: Transfers
+
+    /// Downloads files and folders. One file asks where to save it; several, or folders, ask for a folder.
+    func download(_ items: [Entry]) {
+        guard let client, !busy, !items.isEmpty else { return }
+        let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+        if items.count == 1, let file = items.first, !file.directory {
+            let panel = NSSavePanel()
+            panel.nameFieldStringValue = file.name
+            panel.directoryURL = downloads
+            panel.message = "Choose where to save. OpenBridge never replaces existing files."
+            guard panel.runModal() == .OK, let target = panel.url else { return }
+            start([.download(file, to: target)])
+            return
+        }
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.canCreateDirectories = true
+        panel.directoryURL = downloads; panel.prompt = "Download Here"
+        panel.message = "Choose a folder for \(items.count == 1 ? "“\(items[0].name)”" : "\(items.count) items"). Existing files are kept; copies get a new name."
+        guard panel.runModal() == .OK, let folder = panel.url else { return }
+        run {
+            self.transfer = Transfer(name: "Preparing…", upload: false)
+            try await self.perform(try await self.plan(items, into: folder, client: client), client: client)
+        }
+    }
+
+    /// Expands folders into individual downloads, creating the folders on the Mac.
+    private func plan(_ items: [Entry], into folder: URL, client: any FileSource) async throws -> [Job] {
+        var jobs: [Job] = []
+        for item in items {
+            try Task.checkCancellation()
+            let target = Self.free(folder.appendingPathComponent(item.name))
+            if item.directory {
+                try FileManager.default.createDirectory(at: target, withIntermediateDirectories: false)
+                jobs += try await plan(try await client.list(id: item.id), into: target, client: client)
+            } else {
+                jobs.append(.download(item, to: target))
+            }
+        }
+        return jobs
+    }
+
+    /// Uploads files and folders (from the Upload button or dropped from Finder) into the open folder.
+    func upload(_ urls: [URL]) {
+        guard let client, !busy, !urls.isEmpty else { return }
+        if overUSB && path.count < 2 { show("Open a storage on the phone first, then upload."); return }
+        let directory = path.last!.id
+        run {
+            self.transfer = Transfer(name: "Preparing…", upload: true)
+            try await self.perform(try await self.plan(urls, into: directory, client: client), client: client)
+        }
+    }
+
+    func chooseUploads() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true; panel.canChooseDirectories = true; panel.allowsMultipleSelection = true
+        panel.prompt = "Upload"
+        guard panel.runModal() == .OK else { return }
+        upload(panel.urls)
+    }
+
+    /// Expands Mac folders into uploads, creating the folders on the phone. Names already taken get a new name.
+    private func plan(_ urls: [URL], into directory: String, client: any FileSource) async throws -> [Job] {
+        var taken = Set(try await client.list(id: directory).map { $0.name.lowercased() })
+        var jobs: [Job] = []
+        for url in urls {
+            try Task.checkCancellation()
+            let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey, .isHiddenKey])
+            if values.isSymbolicLink == true || values.isHidden == true { continue }
+            if values.isDirectory == true {
+                let name = Self.unique(url.lastPathComponent, taken: taken)
+                taken.insert(name.lowercased())
+                let folder = try await client.makeFolder(named: name, in: directory)
+                let children = try FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])
+                jobs += try await plan(children, into: folder.id, client: client)
+            } else {
+                let name = Self.unique(url.lastPathComponent, taken: taken)
+                taken.insert(name.lowercased())
+                if name == url.lastPathComponent {
+                    jobs.append(.upload(url, into: directory))
+                } else {
+                    // Upload under the new name by way of a temporary link with that name.
+                    let staged = FileManager.default.temporaryDirectory.appendingPathComponent("OpenBridge Uploads/\(UUID().uuidString)", isDirectory: true)
+                    try FileManager.default.createDirectory(at: staged, withIntermediateDirectories: true)
+                    let renamed = staged.appendingPathComponent(name)
+                    do { try FileManager.default.linkItem(at: url, to: renamed) }
+                    catch { try FileManager.default.copyItem(at: url, to: renamed) }   // another volume
+                    jobs.append(.upload(renamed, into: directory))
+                }
+            }
+        }
+        return jobs
+    }
+
+    /// Runs transfers one after another. On a failure the rest stay queued, and Resume continues them;
+    /// an interrupted download picks up where it stopped.
+    func start(_ jobs: [Job]) {
+        guard let client, !jobs.isEmpty else { return }
+        run { try await self.perform(jobs, client: client) }
+    }
+
+    private func perform(_ jobs: [Job], client: any FileSource) async throws {
+        guard !jobs.isEmpty else { transfer = nil; show("Nothing to transfer."); return }
+        let upload: Bool
+        if case .upload = jobs[0] { upload = true } else { upload = false }
+        transfer = Transfer(name: jobs[0].name, upload: upload, count: jobs.count, remaining: jobs)
+        do {
+            var lastSaved: URL?
+            var touchedFolder = false
+            for (index, job) in jobs.enumerated() {
+                try Task.checkCancellation()
+                self.transfer?.name = job.name; self.transfer?.index = index + 1; self.transfer?.fraction = 0
+                self.transfer?.remaining = Array(jobs[index...])
+                switch job {
+                case .download(let entry, let target):
+                    try await client.download(entry, to: target) { done, total in self.update(done, total) }
+                    lastSaved = target
+                case .upload(let url, let directory):
+                    try await client.upload(url, directoryID: directory) { done, total in self.update(done, total) }
+                    touchedFolder = touchedFolder || directory == self.path.last?.id
+                }
+            }
+            self.transfer?.remaining = []
+            self.transfer?.fraction = 1; self.transfer?.done = true; self.transfer?.saved = lastSaved
+            try? FileManager.default.removeItem(at: FileManager.default.temporaryDirectory.appendingPathComponent("OpenBridge Uploads"))
+            if touchedFolder || upload {
+                // Publication succeeded even if a subsequent folder refresh fails.
+                do { self.entries = try await client.list(id: self.path.last!.id) }
+                catch { self.error = "Uploaded, but the folder didn't refresh: \(error.localizedDescription)" }
+            }
+        }
+    }
+
+    func resume() {
+        guard let remaining = transfer?.remaining, !remaining.isEmpty else { return }
+        start(remaining)
+    }
+
+    /// Drag a file from the list to Finder: it downloads to a temporary place, and Finder copies it.
+    func dragItem(_ entry: Entry) -> NSItemProvider {
+        let provider = NSItemProvider()
+        provider.suggestedName = entry.name
+        guard !entry.directory, let client else { return provider }
+        provider.registerFileRepresentation(forTypeIdentifier: "public.data", fileOptions: [], visibility: .all) { completion in
+            Task { @MainActor in
+                guard !self.busy else { completion(nil, false, BridgeError.message("Wait for the current transfer to finish.")); return }
+                self.busy = true
+                defer { self.busy = false }
+                let folder = self.previews.appendingPathComponent(UUID().uuidString, isDirectory: true)
+                do {
+                    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                    let target = folder.appendingPathComponent(entry.name)
+                    self.transfer = Transfer(name: entry.name, upload: false)
+                    try await client.download(entry, to: target) { done, total in self.update(done, total) }
+                    self.transfer = nil
+                    completion(target, false, nil)
+                } catch {
+                    self.transfer = nil
+                    self.error = error.localizedDescription
+                    completion(nil, false, error)
+                }
+            }
+            return nil
+        }
+        return provider
+    }
+
+    private func update(_ done: Int64, _ total: Int64) {
+        transfer?.fraction = total == 0 ? 0 : Double(done) / Double(total)
+    }
+
+    // MARK: Names
+
+    /// "photo.jpg" becomes "photo 2.jpg", "photo 3.jpg"…, skipping names in `taken` (compared ignoring case).
+    static func unique(_ name: String, taken: Set<String>) -> String {
+        guard taken.contains(name.lowercased()) else { return name }
+        let base = (name as NSString).deletingPathExtension, ext = (name as NSString).pathExtension
+        for number in 2... {
+            let candidate = ext.isEmpty ? "\(base) \(number)" : "\(base) \(number).\(ext)"
+            if !taken.contains(candidate.lowercased()) { return candidate }
+        }
+        return name
+    }
+
+    /// A Mac destination that doesn't exist yet: "photo 2.jpg" if "photo.jpg" is there. Never replaces a file.
+    static func free(_ url: URL) -> URL {
+        let manager = FileManager.default
+        if !manager.fileExists(atPath: url.path) { return url }
+        let folder = url.deletingLastPathComponent()
+        let taken = Set(((try? manager.contentsOfDirectory(atPath: folder.path)) ?? []).map { $0.lowercased() })
+        return folder.appendingPathComponent(unique(url.lastPathComponent, taken: taken))
+    }
+}

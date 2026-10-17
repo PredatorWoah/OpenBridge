@@ -167,7 +167,7 @@ class SharingServer(context: Context, private val store: Store, private val appr
             serviceName = deviceName.take(60)
             serviceType = "_openbridge._tcp"
             port = this@SharingServer.port
-            setAttribute("ip", host)
+            setAttribute("ip", this@SharingServer.host)
             setAttribute("port", this@SharingServer.port.toString())
             setAttribute("v", "1")
         }
