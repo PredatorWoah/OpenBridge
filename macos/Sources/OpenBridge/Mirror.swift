@@ -25,6 +25,10 @@ final class MirrorSession: ObservableObject, @unchecked Sendable {
     private var control: ADBStream?
     private var running = false
     private var format: CMVideoFormatDescription?
+    /// After a flush the decoder needs a keyframe; frames that depend on older ones are dropped until then.
+    /// Only touched on the main thread.
+    private var waitingForKeyFrame = true
+    private var lastReset = Date.distantPast
     private let controlQueue = DispatchQueue(label: "org.openbridge.mirror.control")
     private var clipboardTimer: Timer?
     private var pasteboardCount = NSPasteboard.general.changeCount
@@ -105,9 +109,9 @@ final class MirrorSession: ObservableObject, @unchecked Sendable {
             switch try Scrcpy.parseHeader(try video.read(12)) {
             case .session(let width, let height):
                 main { self.videoSize = CGSize(width: width, height: height) }
-            case .media(let size, let config, _):
+            case .media(let size, let config, let keyFrame):
                 let payload = try video.read(size)
-                if config { configure(payload) } else { show(payload) }
+                if config { configure(payload) } else { show(payload, keyFrame: keyFrame) }
             }
         }
     }
@@ -126,10 +130,10 @@ final class MirrorSession: ObservableObject, @unchecked Sendable {
             }
         }
         format = description
-        main { self.layer.flush() }
+        main { self.layer.flush(); self.waitingForKeyFrame = true }
     }
 
-    private func show(_ payload: Data) {
+    private func show(_ payload: Data, keyFrame: Bool) {
         guard let format else { return }
         let data = H264.lengthPrefixed(H264.units(payload).filter { ![7, 8, 9].contains(H264.type($0)) })
         guard !data.isEmpty else { return }
@@ -145,11 +149,41 @@ final class MirrorSession: ObservableObject, @unchecked Sendable {
                                         sampleSizeArray: &size, sampleBufferOut: &sample) == noErr, let sample else { return }
         if let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: true) as? [NSMutableDictionary] {
             attachments.first?[kCMSampleAttachmentKey_DisplayImmediately] = true
+            attachments.first?[kCMSampleAttachmentKey_NotSync] = !keyFrame
+            attachments.first?[kCMSampleAttachmentKey_DependsOnOthers] = !keyFrame
         }
         main {
-            if self.layer.status == .failed { self.layer.flush() }
+            // macOS pauses the hardware decoder when the window is hidden, the display sleeps or the GPU
+            // changes, and a decode error stops it too. Flush, and ask the phone for a keyframe right away
+            // instead of waiting seconds for the next one (this is what rotating the phone used to fix).
+            if self.layer.status == .failed || self.layer.requiresFlushToResumeDecoding {
+                self.layer.flush()
+                self.waitingForKeyFrame = true
+                self.requestKeyFrame()
+            }
+            if self.waitingForKeyFrame {
+                guard keyFrame else { self.requestKeyFrame(); return }
+                self.waitingForKeyFrame = false
+            }
             self.layer.enqueue(sample)
         }
+    }
+
+    /// The window is visible again (or the Mac woke up): a still screen sends no new frames, so get a fresh
+    /// picture now rather than waiting for something on the phone to change.
+    func refresh() {
+        guard phase == .streaming else { return }
+        if layer.status == .failed || layer.requiresFlushToResumeDecoding { layer.flush() }
+        waitingForKeyFrame = true
+        lastReset = .distantPast
+        requestKeyFrame()
+    }
+
+    /// At most once a second, so a burst of dropped frames doesn't restart the encoder repeatedly.
+    private func requestKeyFrame() {
+        guard Date().timeIntervalSince(lastReset) > 1 else { return }
+        lastReset = Date()
+        send(Scrcpy.resetVideo())
     }
 
     // MARK: Input
@@ -245,7 +279,25 @@ private final class MirrorNSView: NSView {
         CATransaction.commit()
     }
 
-    override func viewDidMoveToWindow() { window?.makeFirstResponder(self) }
+    private var observers: [NSObjectProtocol] = []
+
+    override func viewDidMoveToWindow() {
+        window?.makeFirstResponder(self)
+        observers.forEach(NotificationCenter.default.removeObserver)
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
+        guard let window else { observers = []; return }
+        observers = [
+            NotificationCenter.default.addObserver(forName: NSWindow.didChangeOcclusionStateNotification, object: window, queue: .main) { [weak self] _ in
+                if window.occlusionState.contains(.visible) { self?.session?.refresh() }
+            },
+            NotificationCenter.default.addObserver(forName: NSWindow.didDeminiaturizeNotification, object: window, queue: .main) { [weak self] _ in
+                self?.session?.refresh()
+            },
+        ]
+        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(woke), name: NSWorkspace.didWakeNotification, object: nil)
+    }
+
+    @objc private func woke() { session?.refresh() }
 
     /// Mac point to phone pixels, inside the letterboxed video.
     private func phonePoint(_ event: NSEvent) -> (x: Int, y: Int, w: Int, h: Int)? {

@@ -4,6 +4,9 @@ All notable changes to OpenBridge are recorded here. Every release has an entry;
 
 ## [Unreleased]
 
+### Fixed
+- **Screen mirroring no longer freezes.** The picture could stop until you rotated the phone, when macOS paused its video decoder (window hidden, display asleep, graphics switch) or after a decoding hiccup. OpenBridge now notices and asks the phone for a fresh frame at once, and refreshes the picture when the window comes back into view or the Mac wakes.
+
 ## [0.9.6] - 2026-10-17
 
 The power-user release: mirror and control your phone from the Mac, a real file browser, a shared clipboard, and no more typing addresses.

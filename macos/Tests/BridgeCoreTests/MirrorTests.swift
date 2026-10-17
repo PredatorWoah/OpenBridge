@@ -85,6 +85,7 @@ final class MirrorTests: XCTestCase {
 
         XCTAssertEqual([UInt8](Scrcpy.key(.up, keycode: Scrcpy.Key.home)), [0, 1, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0])
         XCTAssertEqual([UInt8](Scrcpy.backOrScreenOn(.down)), [4, 0])
+        XCTAssertEqual([UInt8](Scrcpy.resetVideo()), [17])
 
         let pieces = Scrcpy.text(String(repeating: "é", count: 400))   // 800 bytes
         XCTAssertEqual(pieces.count, 3)
