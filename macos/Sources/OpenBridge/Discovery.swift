@@ -16,13 +16,14 @@ final class PhoneDiscovery: ObservableObject {
     func start() {
         guard browser == nil else { return }
         let browser = NWBrowser(for: .bonjourWithTXTRecord(type: "_openbridge._tcp", domain: nil), using: .tcp)
-        browser.browseResultsChangedHandler = { [weak self] results, _ in
+        let owner = WeakOwner(self)
+        browser.browseResultsChangedHandler = { results, _ in
             let found = results.compactMap { result -> Phone? in
                 guard case .service(let name, _, _, _) = result.endpoint, case .bonjour(let txt) = result.metadata,
                       let host = txt["ip"], let port = txt["port"] else { return nil }
                 return Phone(name: name, host: host, port: port)
             }
-            Task { @MainActor in self?.phones = found.sorted { $0.name < $1.name } }
+            Task { @MainActor in owner.discovery?.phones = found.sorted { $0.name < $1.name } }
         }
         browser.start(queue: .main)
         self.browser = browser
@@ -31,4 +32,10 @@ final class PhoneDiscovery: ObservableObject {
     func stop() {
         browser?.cancel(); browser = nil; phones = []
     }
+}
+
+/// Lets the browser's callback reach the discovery object without keeping it alive.
+private final class WeakOwner: @unchecked Sendable {
+    weak var discovery: PhoneDiscovery?
+    init(_ discovery: PhoneDiscovery) { self.discovery = discovery }
 }

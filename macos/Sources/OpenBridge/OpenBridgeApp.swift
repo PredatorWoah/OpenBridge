@@ -285,7 +285,7 @@ struct WiFiSheet: View {
             HStack {
                 Button("Cancel") { if model.busy { model.cancel() }; isPresented = false }.buttonStyle(GhostButton())
                 Spacer()
-                Button("Pair", action: model.pair)
+                Button("Pair") { model.pair() }
                     .buttonStyle(SunsetButton())
                     .keyboardShortcut(.defaultAction)
                     .disabled(model.busy || model.host.isEmpty || model.port.isEmpty)

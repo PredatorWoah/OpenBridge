@@ -39,8 +39,15 @@ for required in ["LICENSE", "SECURITY.md", "README.md", "docs/protocol.md", "doc
                  "macos/Package.swift", ".github/workflows/ci.yml", ".github/workflows/release.yml", "docs/releasing.md",
                  "CHANGELOG.md", "docs/images/screens.png", "docs/images/connect.png", "docs/images/how-it-works.svg",
                  "macos/AppIcon.icns", "assets/icon/icon.svg",
-                 "android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml"]:
+                 "android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml",
+                 "third_party/scrcpy/LICENSE", "third_party/scrcpy/README.md"]:
     assert (root / required).is_file(), required
+# The bundled scrcpy server is pinned, and its notice names the same file and version as the Swift client.
+fetch = (root / "scripts/fetch-scrcpy-server.sh").read_text()
+pin = re.search(r'sha256="([0-9a-f]{64})"', fetch).group(1)
+pinned_version = re.search(r'version="([0-9.]+)"', fetch).group(1)
+assert pin in (root / "third_party/scrcpy/README.md").read_text(), "scrcpy notice must list the pinned SHA-256"
+assert f'version = "{pinned_version}"' in (root / "macos/Sources/BridgeCore/Scrcpy.swift").read_text(), "client and server versions differ"
 for script in (root / "scripts").glob("*.sh"):
     subprocess.run(["bash", "-n", str(script)], check=True)
 # Every app version must have a changelog entry before it can be released.
