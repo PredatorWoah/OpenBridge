@@ -1,6 +1,6 @@
 # Security model
 
-OpenBridge grants a paired Mac read and upload access to **one approved SAF tree**, or, if the user chooses **Share whole phone** and grants Android's *All files access*, to all of shared storage (internal storage and SD cards, excluding `Android/data` and `Android/obb`), while the Android app is visible. Pair only with a Mac you trust, on a trusted local network. There is no identity/account service.
+OpenBridge grants a paired Mac read and upload access to **one approved SAF tree**, or, if the user chooses **Whole phone** and grants Android's *All files access*, to all of shared storage (internal storage and SD cards, excluding `Android/data` and `Android/obb`), while the Android app is visible. Pair only with a Mac you trust, on a trusted local network. There is no identity/account service.
 
 - The Android listener binds only to a specific RFC1918 IPv4 address: either on a USB tethering interface (`rndis*`, `usb*`, `ncm*`, preferred when present, and reachable only by the cable-connected computer), or on an Android `TRANSPORT_WIFI` network with `NOT_VPN`. Unplugging the cable or turning tethering off stops sharing within about two seconds. It never binds wildcard, public, cellular, or IPv6 addresses. The peer address must also be RFC1918. It performs no UPnP, NAT traversal, discovery broadcast, or port forwarding. The Mac accepts only literal RFC1918 endpoints, with no DNS or redirects. No software can prevent an administrator from deliberately forwarding or proxying a local port: do not expose it that way.
 - All commands and file contents use TLS 1.2 or later. Android generates a new RSA-2048 AndroidKeyStore key and self-signed certificate for each start. After pairing, the Mac pins the SHA-256 digest of the exact leaf certificate DER and checks it on every connection **before sending credentials**. Public CA trust/hostname validation is replaced by this pin, not disabled without a replacement.
@@ -15,7 +15,7 @@ OpenBridge grants a paired Mac read and upload access to **one approved SAF tree
 
 ## USB File transfer (MTP)
 
-The Mac app's **Connect over USB** does not use the protocol above. It talks to Android's built-in File transfer (MTP) mode directly, so none of the guarantees above apply to it:
+The Mac app's USB File transfer connection does not use the protocol above. It talks to Android's built-in File transfer (MTP) mode directly, so none of the guarantees above apply to it:
 
 - **No TLS and no pairing secret.** The trust boundary is the USB cable plus the user unlocking the phone and choosing File transfer. Data crosses the cable unencrypted, as with any MTP client, including Windows.
 - **No single-folder restriction.** The Mac can see, download and upload anything Android exposes in File transfer mode, typically all shared internal storage and SD cards. OpenBridge never deletes or replaces files except for removing its own partial upload after a failure.

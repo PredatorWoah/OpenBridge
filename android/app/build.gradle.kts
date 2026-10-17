@@ -15,8 +15,8 @@ android {
         applicationId = "org.openbridge.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = 8
-        versionName = "0.9.3"
+        versionCode = 9
+        versionName = "0.9.4"
     }
     signingConfigs {
         if (releaseKeystore != null) {

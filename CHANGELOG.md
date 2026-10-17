@@ -4,8 +4,28 @@ All notable changes to OpenBridge are recorded here. Every release has an entry;
 
 ## [Unreleased]
 
+## [0.9.4] - 2026-10-17
+
+A brand new look on both devices, built around the sunset arch from the icon.
+
+### Added
+- **Tap the sun to share.** On Android the arch from the app icon is now the main button. Tap the sun: it pulls back, whips once around the ring like a drop of liquid glass and warms up as it goes. When your Mac pairs, it lights up gold with a ripple and a little haptic tick, then breathes softly every few seconds while connected. It stays grey glass while nothing is connected.
+- **The Mac finds your phone by itself.** Plug in the phone and choose File transfer: no button to press. The Mac's sun circles while it waits, then whips to the top and lights up, and a card for your phone springs up with **Open phone**.
+- **Open phone, or jump straight in.** The card has shortcuts to Camera, Download, Screenshots, WhatsApp and Documents, and an **Open automatically when I plug in** option.
+- **A new file browser on the Mac.** Glass sidebar, folders that open with a double-click, rows that cascade in, a sunset-coloured progress bar with a glowing sun at its tip, and **Show in Finder** when a download finishes.
+- A pairing sheet on Android with big, easy-to-compare code digits.
+
+### Changed
+- **Simpler phone screen.** Two choices (**Whole phone** or **One folder**) and the sun. Everything else appears only when you need it. The address and port show while waiting for your Mac.
+- The confusing **USB tethering** button is gone. USB File transfer needs no app at all, and the screen now says so.
+- On the Mac, Wi‑Fi pairing moved into its own **Pair over Wi‑Fi** sheet. Unplugging the phone returns to the waiting screen.
+- Both apps use the dark Dusk Glass look from the icon.
+
 ### Fixed
 - **The Mac window no longer disappears.** Switching to another app could hide the OpenBridge window for good, even though the app kept running. Clicking OpenBridge in the Dock now always brings its window back.
+
+### Notes
+- Installs over 0.9.3 without uninstalling. USB File transfer remains beta.
 
 ## [0.9.3] - 2026-10-17
 
@@ -84,6 +104,7 @@ The first public preview: move files between an Android phone and a Mac, private
 - Pairing over Wi-Fi requires typing the address, port, fingerprint and secret.
 - The APK is signed with a build-machine key and the Mac app is not notarized; see the README for how to install and open them. If you installed an earlier test build, uninstall it first.
 
+[0.9.4]: https://github.com/PredatorWoah/OpenBridge/releases/tag/v0.9.4
 [0.9.3]: https://github.com/PredatorWoah/OpenBridge/releases/tag/v0.9.3
 [0.9.2]: https://github.com/PredatorWoah/OpenBridge/releases/tag/v0.9.2
 [0.9.1]: https://github.com/PredatorWoah/OpenBridge/releases/tag/v0.9.1
