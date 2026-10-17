@@ -136,6 +136,11 @@ jobs:
           gradle-version: '8.13'
       - run: bash scripts/fetch-scrcpy-windows.sh windows/build/app-resources
       - run: gradle -PdesktopOnly -PappVersion=${{ needs.verify.outputs.version }} :windows:test :windows:createDistributable --stacktrace
+      - name: Check the app carries screen mirroring
+        run: |
+          app=windows/build/compose/binaries/main/app/OpenBridge
+          test -f "$app/OpenBridge.exe"
+          test -f "$app/app/resources/scrcpy/scrcpy.exe" && test -f "$app/app/resources/scrcpy/adb.exe"
       - name: Zip the app (unzip anywhere and run OpenBridge.exe)
         shell: pwsh
         run: Compress-Archive -Path windows/build/compose/binaries/main/app/OpenBridge -DestinationPath "OpenBridge-${{ needs.verify.outputs.version }}-Windows.zip"
