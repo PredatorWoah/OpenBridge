@@ -32,7 +32,7 @@
 ## Install a release
 
 1. **Android:** download `OpenBridge-<version>.apk` from the release onto your phone and open it. Allow installing from your browser or file manager when asked.
-2. **Mac:** download `OpenBridge-<version>-macOS.zip`, unzip it, and move `OpenBridge.app` to Applications. The app is not notarized, so the first time, right-click it and choose **Open**, then **Open** again. If macOS says the app is damaged, run `xattr -dr com.apple.quarantine /Applications/OpenBridge.app` in Terminal.
+2. **Mac:** download `OpenBridge-<version>-macOS.dmg`, open it, and drag OpenBridge onto the Applications folder. The app is not notarized, so the first time, right-click it and choose **Open**, then **Open** again. If macOS says the app is damaged, run `xattr -dr com.apple.quarantine /Applications/OpenBridge.app` in Terminal.
 
 ## Build from source
 

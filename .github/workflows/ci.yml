@@ -76,11 +76,11 @@ jobs:
           FIXTURE_CLASSPATH: ${{ github.workspace }}/build/protocol-tests
           FIXTURE_KEYSTORE: ${{ runner.temp }}/fixture.p12
       - run: bash scripts/build-macos.sh
-      - run: ditto -c -k --keepParent macos/build/OpenBridge.app macos/build/OpenBridge-macOS.zip
+      - run: bash scripts/package-macos.sh macos/build/OpenBridge-macOS.dmg
       - uses: actions/upload-artifact@v4
         with:
           name: OpenBridge-macOS
-          path: macos/build/OpenBridge-macOS.zip
+          path: macos/build/OpenBridge-macOS.dmg
   repository:
     runs-on: ubuntu-latest
     steps:
