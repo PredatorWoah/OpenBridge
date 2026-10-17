@@ -135,7 +135,7 @@ jobs:
         with:
           gradle-version: '8.13'
       - run: bash scripts/fetch-scrcpy-windows.sh windows/build/app-resources
-      - run: gradle -PdesktopOnly -PappVersion=${{ needs.verify.outputs.version }} :windows:test :windows:createDistributable --stacktrace
+      - run: gradle -PdesktopOnly -PappVersion=${{ needs.verify.outputs.version }} :windows:test :windows:createDistributable :windows:packageExe --stacktrace
       - name: Check the app carries screen mirroring
         run: |
           app=windows/build/compose/binaries/main/app/OpenBridge
@@ -144,10 +144,14 @@ jobs:
       - name: Zip the app (unzip anywhere and run OpenBridge.exe)
         shell: pwsh
         run: Compress-Archive -Path windows/build/compose/binaries/main/app/OpenBridge -DestinationPath "OpenBridge-${{ needs.verify.outputs.version }}-Windows.zip"
+      - name: Name the installer
+        run: cp windows/build/compose/binaries/main/exe/OpenBridge-*.exe "OpenBridge-${{ needs.verify.outputs.version }}-Windows-Setup.exe"
       - uses: actions/upload-artifact@v4
         with:
           name: windows
-          path: OpenBridge-*-Windows.zip
+          path: |
+            OpenBridge-*-Windows.zip
+            OpenBridge-*-Windows-Setup.exe
           if-no-files-found: error
   publish:
     needs: [verify, android, macos, windows]

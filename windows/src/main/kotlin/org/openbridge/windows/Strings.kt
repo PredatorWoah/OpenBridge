@@ -61,4 +61,16 @@ object S {
     val phone = t("Phone", "手机")
     fun continuing(name: String) = t("Continuing “$name”", "继续传输“$name”")
     val cancelled = t("Cancelled.", "已取消。")
+    val certificateChanged = t("The phone restarted sharing, so it has a new identity. Pair again.", "手机重新开始了共享，身份已更新。请重新配对。")
+    fun unreachable(address: String) = t(
+        "Couldn't reach the phone at $address. Check that sharing is on and both are on the same Wi‑Fi. If a VPN or proxy is on, allow local network (LAN) traffic or turn it off.",
+        "无法连接到手机 $address。请确认手机正在共享，且两者连接同一个 Wi‑Fi。如果开着 VPN 或代理，请允许局域网流量或暂时关闭。")
+    val dropped = t("The connection to the phone dropped.", "与手机的连接已断开。")
+    val lostHint = t("Tap the sun on the phone and pair again. Unfinished transfers continue by themselves.",
+        "请在手机上点一下太阳并重新配对，未完成的传输会自动继续。")
+    val badAddress = t("Enter the phone's Wi‑Fi address, like 192.168.1.23.", "请输入手机的 Wi‑Fi 地址，例如 192.168.1.23。")
+    val badPort = t("Enter the port the phone shows (1–65535).", "请输入手机上显示的端口（1–65535）。")
+    val pairingTampered = t("Pairing failed a security check. Someone may be interfering with the connection.", "配对未通过安全检查，可能有人在干扰连接。")
+    val notFound = t("Not seeing your phone? Type the address shown on the phone below. Windows also hides phones when this Wi‑Fi is set to Public: open Settings › Network & internet › Wi‑Fi, click your network and choose Private.",
+        "看不到手机？请在下方输入手机上显示的地址。如果 Windows 把此 Wi‑Fi 设为“公用网络”，也会找不到手机：打开 设置 › 网络和 Internet › WLAN，点当前网络并选择“专用网络”。")
 }

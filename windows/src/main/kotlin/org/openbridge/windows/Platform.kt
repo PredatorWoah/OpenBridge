@@ -31,18 +31,12 @@ class Discovery(private val changed: (List<NearbyPhone>) -> Unit) {
         changed(snapshot)
     }
 
+    /** Runs until the app quits. JmmDNS follows network changes itself, like joining another Wi‑Fi. */
     fun start() {
         if (dns != null) return
         Thread {
             runCatching { JmmDNS.Factory.getInstance().also { dns = it; it.addServiceListener(type, listener) } }
         }.apply { isDaemon = true }.start()
-    }
-
-    fun stop() {
-        val current = dns ?: return
-        dns = null
-        Thread { runCatching { current.removeServiceListener(type, listener); current.close() } }.apply { isDaemon = true }.start()
-        synchronized(phones) { phones.clear() }
     }
 }
 

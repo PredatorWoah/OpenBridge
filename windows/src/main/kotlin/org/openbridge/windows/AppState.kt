@@ -64,24 +64,31 @@ class AppState {
     var mirroring by mutableStateOf(false); private set
 
     private val worker = Executors.newSingleThreadExecutor { Thread(it, "openbridge-work").apply { isDaemon = true } }
-    private val previews = Executors.newFixedThreadPool(3) { Thread(it, "openbridge-previews").apply { isDaemon = true } }
+    // One preview at a time: the phone serves only a few connections at once, and browsing and transfers come first.
+    private val previews = Executors.newSingleThreadExecutor { Thread(it, "openbridge-previews").apply { isDaemon = true } }
     private val discovery = Discovery { found -> ui { nearby = found } }
     @Volatile private var cancelled = false
     // Counts pairings, on the worker thread, so a transfer planned on an earlier connection finds its files again.
     @Volatile private var connection = 0
     private var lastHost: String? = null
+    @Volatile private var pairing: java.io.Closeable? = null
+    /** True once discovery has run a while without finding a phone, to explain why. */
+    var searchedLong by mutableStateOf(false); private set
     private var anchor: String? = null
     private val pendingPreviews = HashSet<String>()
 
     private fun ui(block: () -> Unit) = SwingUtilities.invokeLater(block)
 
     fun start() {
+        // Discovery runs for the whole session: the phone may stop and start sharing at any time.
         discovery.start()
         Thread {
+            Thread.sleep(10_000)
+            ui { searchedLong = true }
             while (true) {
-                val found = Usb.phones()
-                ui { usbPhones = found }
-                Thread.sleep(3_000)
+                // Asking PowerShell costs some CPU, so only look while the cable card is on screen.
+                if (client == null) { val found = Usb.phones(); ui { usbPhones = found } }
+                Thread.sleep(4_000)
             }
         }.apply { isDaemon = true }.start()
     }
@@ -98,24 +105,36 @@ class AppState {
         worker.execute {
             try { work() }
             catch (e: InterruptedException) { ui { status = S.cancelled; transfer = null } }
-            catch (e: Exception) { ui { error = e.message ?: e.toString() } }
-            finally { ui { busy = false; pairingCode = null } }
+            catch (e: Exception) {
+                when {
+                    cancelled && client == null -> ui { status = "" }   // pairing cancelled
+                    e is BridgeException && e.lost -> ui { lose(e.message ?: S.dropped) }
+                    else -> ui { error = e.message ?: e.toString() }
+                }
+            }
+            finally { pairing = null; ui { busy = false; pairingCode = null } }
         }
     }
 
     // Connecting
 
-    fun pair(name: String? = null) = run {
+    fun pair(name: String? = null) {
+        // Accept "192.168.1.23:41987" pasted into the address field.
+        val typed = host.trim()
+        if (typed.count { it == ':' } == 1 && port.isBlank()) { host = typed.substringBefore(':'); port = typed.substringAfter(':') }
+        connect(name)
+    }
+
+    private fun connect(name: String?) = run {
         ui { status = S.pairing }
-        val paired = BridgeClient.pair(host.trim(), port.trim()) { code -> ui { pairingCode = code } }
+        val paired = BridgeClient.pair(host.trim(), port.trim(), { pairing = it }) { code -> ui { pairingCode = code } }
         val top = paired.list()
         connection++
         val samePhone = lastHost == paired.host
         lastHost = paired.host
         ui {
             client = paired; deviceName = name ?: "${S.phone} ${paired.host}"
-            path = listOf("" to S.phone); entries = top; selection = emptySet(); status = ""
-            discovery.stop()
+            path = listOf("" to S.phone); entries = top; selection = emptySet(); status = ""; thumbnails = emptyMap()
         }
         // An interrupted transfer continues by itself when the same phone pairs again.
         val pending = transfer?.takeIf { samePhone && !it.done && it.remaining.isNotEmpty() } ?: return@run
@@ -128,10 +147,20 @@ class AppState {
     fun disconnect() {
         if (busy) return
         client = null; entries = emptyList(); path = listOf("" to S.phone); selection = emptySet(); thumbnails = emptyMap()
-        discovery.start()
     }
 
-    fun cancel() { cancelled = true }
+    /** The phone is gone (stopped sharing, new identity, left the Wi‑Fi): back to pairing, keeping unfinished transfers. */
+    private fun lose(message: String) {
+        if (client == null) { error = message; return }
+        client = null; entries = emptyList(); path = listOf("" to S.phone); selection = emptySet(); thumbnails = emptyMap()
+        pendingPreviews.clear()
+        error = "$message ${S.lostHint}"
+    }
+
+    fun cancel() {
+        cancelled = true
+        runCatching { pairing?.close() }
+    }
 
     fun mirror() {
         if (mirroring) return
@@ -199,8 +228,10 @@ class AppState {
         val phone = client ?: return
         if (!Kind.of(entry).previewable || entry.id in thumbnails || !pendingPreviews.add(entry.id)) return
         previews.execute {
-            val image = runCatching { org.jetbrains.skia.Image.makeFromEncoded(phone.thumbnail(entry)).toComposeImageBitmap() }.getOrNull()
-            ui { if (image != null) thumbnails = thumbnails + (entry.id to image) }
+            val image = if (client !== phone) null
+                else runCatching { org.jetbrains.skia.Image.makeFromEncoded(phone.thumbnail(entry)).toComposeImageBitmap() }.getOrNull()
+            // Without a preview the row keeps its icon; it asks again the next time the folder opens.
+            ui { pendingPreviews.remove(entry.id); if (image != null && client === phone) thumbnails = thumbnails + (entry.id to image) }
         }
     }
 

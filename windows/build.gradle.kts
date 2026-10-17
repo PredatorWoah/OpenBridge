@@ -26,13 +26,14 @@ dependencies {
 
 tasks.test { useJUnitPlatform() }
 
-val appVersion = providers.gradleProperty("appVersion").orElse("0.9.8")
+val appVersion = providers.gradleProperty("appVersion").orElse("0.9.9")
 
 compose.desktop {
     application {
         mainClass = "org.openbridge.windows.MainKt"
         nativeDistributions {
-            targetFormats(TargetFormat.Msi)
+            // A setup .exe that installs for the current user only: no administrator prompt.
+            targetFormats(TargetFormat.Exe)
             packageName = "OpenBridge"
             packageVersion = appVersion.get()
             description = "Move files between an Android phone and a PC"
@@ -43,6 +44,10 @@ compose.desktop {
             windows {
                 iconFile.set(project.file("src/main/resources/OpenBridge.ico"))
                 menuGroup = "OpenBridge"
+                menu = true
+                shortcut = true
+                perUserInstall = true
+                dirChooser = false
                 upgradeUuid = "6c1a8f27-3b9e-4d55-9a0e-6f0b3f5c2e41"
             }
         }
