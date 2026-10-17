@@ -41,10 +41,10 @@ class ShareService : Service() {
 
         fun showPairing(context: Context, code: String) {
             channels(context)
-            val text = "Code ${code.chunked(3).joinToString(" ")}. Tap Pair only if your Mac shows the same code."
+            val text = "Code ${code.chunked(3).joinToString(" ")}. Tap Pair only if your computer shows the same code."
             val notification = NotificationCompat.Builder(context, PAIRING_CHANNEL)
                 .setSmallIcon(R.drawable.ic_launcher_monochrome)
-                .setContentTitle("Pair with this Mac?")
+                .setContentTitle("Pair with this computer?")
                 .setContentText(text)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(text))
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -81,8 +81,8 @@ class ShareService : Service() {
             channels(context)
             val server = Sharing.server
             val text = when {
-                Sharing.paired -> "Your Mac is connected"
-                server != null -> "On your Mac: ${server.host} · port ${server.port}"
+                Sharing.paired -> "Your computer is connected"
+                server != null -> "On your computer: ${server.host} · port ${server.port}"
                 else -> "Starting…"
             }
             return NotificationCompat.Builder(context, SHARING_CHANNEL)

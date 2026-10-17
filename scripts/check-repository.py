@@ -40,7 +40,9 @@ for required in ["LICENSE", "SECURITY.md", "README.md", "docs/protocol.md", "doc
                  "CHANGELOG.md", "docs/images/screens.png", "docs/images/connect.png", "docs/images/how-it-works.svg",
                  "macos/AppIcon.icns", "assets/icon/icon.svg",
                  "android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml",
-                 "third_party/scrcpy/LICENSE", "third_party/scrcpy/README.md"]:
+                 "third_party/scrcpy/LICENSE", "third_party/scrcpy/README.md", "README.zh-CN.md",
+                 "windows/build.gradle.kts", "windows/src/main/resources/OpenBridge.ico",
+                 "shared/compose/org/openbridge/ui/Sun.kt"]:
     assert (root / required).is_file(), required
 # The bundled scrcpy server is pinned, and its notice names the same file and version as the Swift client.
 fetch = (root / "scripts/fetch-scrcpy-server.sh").read_text()
@@ -48,11 +50,16 @@ pin = re.search(r'sha256="([0-9a-f]{64})"', fetch).group(1)
 pinned_version = re.search(r'version="([0-9.]+)"', fetch).group(1)
 assert pin in (root / "third_party/scrcpy/README.md").read_text(), "scrcpy notice must list the pinned SHA-256"
 assert f'version = "{pinned_version}"' in (root / "macos/Sources/BridgeCore/Scrcpy.swift").read_text(), "client and server versions differ"
+# The Windows build of scrcpy is pinned too, and listed in the same notice.
+windows_pin = re.search(r'sha256="([0-9a-f]{64})"', (root / "scripts/fetch-scrcpy-windows.sh").read_text()).group(1)
+assert windows_pin in (root / "third_party/scrcpy/README.md").read_text(), "scrcpy notice must list the Windows SHA-256"
 for script in (root / "scripts").glob("*.sh"):
     subprocess.run(["bash", "-n", str(script)], check=True)
 # Every app version must have a changelog entry before it can be released.
 android_version = re.search(r'versionName = "([^"]+)"', (root / "android/app/build.gradle.kts").read_text()).group(1)
 assert android_version == info["CFBundleShortVersionString"], "Android and macOS versions differ"
+windows_version = re.search(r'orElse\("([^"]+)"\)', (root / "windows/build.gradle.kts").read_text()).group(1)
+assert windows_version == android_version, "Android and Windows versions differ"
 subprocess.run([sys.executable, str(root / "scripts/release-notes.py"), android_version], check=True, stdout=subprocess.DEVNULL)
 subprocess.run(["git", "diff", "--check"], cwd=root, check=True)
 print("Repository checks passed (manifest, plist, required files, shell syntax, versions and changelog, whitespace).")

@@ -31,5 +31,5 @@ class PhoneClipboard(private val context: Context) : Clipboard {
         if (clip == null || clip.itemCount == 0) "" else clip.getItemAt(0).coerceToText(context).toString()
     }
 
-    override fun write(text: String) = onMain { manager.setPrimaryClip(ClipData.newPlainText("From your Mac", text)) }
+    override fun write(text: String) = onMain { manager.setPrimaryClip(ClipData.newPlainText("From your computer", text)) }
 }

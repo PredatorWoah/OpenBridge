@@ -67,7 +67,9 @@ class AppState {
     private val previews = Executors.newFixedThreadPool(3) { Thread(it, "openbridge-previews").apply { isDaemon = true } }
     private val discovery = Discovery { found -> ui { nearby = found } }
     @Volatile private var cancelled = false
-    private var connection = 0
+    // Counts pairings, on the worker thread, so a transfer planned on an earlier connection finds its files again.
+    @Volatile private var connection = 0
+    private var lastHost: String? = null
     private var anchor: String? = null
     private val pendingPreviews = HashSet<String>()
 
@@ -107,11 +109,18 @@ class AppState {
         ui { status = S.pairing }
         val paired = BridgeClient.pair(host.trim(), port.trim()) { code -> ui { pairingCode = code } }
         val top = paired.list()
+        connection++
+        val samePhone = lastHost == paired.host
+        lastHost = paired.host
         ui {
-            client = paired; deviceName = name ?: "${S.phone} ${paired.host}"; connection++
+            client = paired; deviceName = name ?: "${S.phone} ${paired.host}"
             path = listOf("" to S.phone); entries = top; selection = emptySet(); status = ""
             discovery.stop()
         }
+        // An interrupted transfer continues by itself when the same phone pairs again.
+        val pending = transfer?.takeIf { samePhone && !it.done && it.remaining.isNotEmpty() } ?: return@run
+        ui { show(S.continuing(pending.remaining.first().name)) }
+        perform(pending.remaining, paired, pending.connection)
     }
 
     fun pairWith(phone: NearbyPhone) { host = phone.host; port = phone.port; pair(phone.name) }

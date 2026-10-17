@@ -31,6 +31,7 @@ jobs:
           echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "::error::Version must look like 1.2.3"; exit 1; }
           grep -q "versionName = \"$version\"" android/app/build.gradle.kts || { echo "::error::android versionName is not $version"; exit 1; }
           grep -q "<key>CFBundleShortVersionString</key><string>$version</string>" macos/Info.plist || { echo "::error::macOS version is not $version"; exit 1; }
+          grep -q "orElse(\"$version\")" windows/build.gradle.kts || { echo "::error::Windows version is not $version"; exit 1; }
           python3 scripts/release-notes.py "$version" > /dev/null
           echo "version=$version" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-java@v4
@@ -117,8 +118,34 @@ jobs:
         with:
           name: macos
           path: OpenBridge-*-macOS.dmg
+  windows:
+    needs: verify
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+      - run: bash scripts/fetch-scrcpy-windows.sh windows/build/app-resources
+      - run: gradle -PdesktopOnly -PappVersion=${{ needs.verify.outputs.version }} :windows:test :windows:createDistributable --stacktrace
+      - name: Zip the app (unzip anywhere and run OpenBridge.exe)
+        shell: pwsh
+        run: Compress-Archive -Path windows/build/compose/binaries/main/app/OpenBridge -DestinationPath "OpenBridge-${{ needs.verify.outputs.version }}-Windows.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: OpenBridge-*-Windows.zip
+          if-no-files-found: error
   publish:
-    needs: [verify, android, macos]
+    needs: [verify, android, macos, windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write

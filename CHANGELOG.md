@@ -4,6 +4,28 @@ All notable changes to OpenBridge are recorded here. Every release has an entry;
 
 ## [Unreleased]
 
+## [0.9.8] - 2026-10-17
+
+OpenBridge comes to Windows: a fast, private alternative to Phone Link that works with any Android phone, in English and Simplified Chinese.
+
+### Added
+- **OpenBridge for Windows (beta).** Unzip and run `OpenBridge.exe`, no installer and nothing else to install. It has the same Dusk Glass sun as the phone and does everything the Mac app does over Wi‑Fi:
+  - Phones sharing on the same Wi‑Fi show up by themselves; click one, compare the 6 digits and tap Pair on the phone.
+  - Browse with thumbnails, sort by name, size or kind, select with Ctrl and Shift, and download files or whole folders. Interrupted downloads continue where they stopped, and continue by themselves when the same phone pairs again.
+  - Drop files or folders onto the window to upload them, and create folders on the phone.
+  - Send the PC's clipboard to the phone, or copy the phone's to the PC.
+- **USB on Windows.** Plug in the phone and choose File transfer: OpenBridge notices it and opens it in File Explorer, where Windows handles it like a USB drive.
+- **Screen mirroring on Windows (beta).** Click Mirror screen to see and control the phone in a window, with the official scrcpy built in. It needs USB debugging, like on the Mac.
+- **Simplified Chinese.** The Windows app follows Windows' language, and there is a Chinese README. OpenBridge works with Xiaomi, OPPO, vivo, OnePlus, Honor and other Android phones without any account or cloud, including where Phone Link can't connect.
+
+### Changed
+- The phone app now says "computer" instead of "Mac", since it pairs with Windows PCs too, and its cable hint mentions File Explorer.
+
+### Notes
+- The Windows app is not code-signed yet, so SmartScreen may show "Windows protected your PC": click More info, then Run anyway. Check the zip against SHA256SUMS.txt.
+- Huawei phones on HarmonyOS NEXT can't run Android apps, so they can't use OpenBridge. Huawei phones on EMUI or HarmonyOS 2 to 4 can.
+- Installs over 0.9.7. The Mac app is unchanged apart from the version number.
+
 ## [0.9.7] - 2026-10-17
 
 Fixes from real-device testing of 0.9.6: mirroring that froze, and resume that didn't survive unplugging.
