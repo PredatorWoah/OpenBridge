@@ -1,17 +1,30 @@
 # OB01 file-transfer protocol
 
-Transport: one request per **TLS** TCP connection, TLS 1.2 minimum. Pin the SHA-256 digest of the server's complete leaf certificate DER from the Android screen. A self-signed certificate is expected. Never send the secret before successful pin verification. The server is reachable only through its selected private IPv4 address (Wi-Fi, or a USB tethering interface) and ephemeral port.
+Transport: one request per **TLS** TCP connection, TLS 1.2 minimum. Pin the SHA-256 digest of the server's complete leaf certificate DER, learned by pairing (below). A self-signed certificate is expected. Never send the secret before successful pin verification. The server is reachable only through its selected private IPv4 address (Wi-Fi, or a USB tethering interface) and ephemeral port.
 
 All integers are big endian. A string is a signed 32-bit nonnegative UTF-8 byte length followed by exactly that many bytes, strictly decoded. Strings are not Java modified UTF-8. Each connection starts with:
 
 | Field | Encoding |
 | --- | --- |
 | Version | four ASCII bytes `OB01` |
-| Pairing secret | 32 raw bytes (the phone displays 64 hex characters) |
+| Pairing secret | 32 raw bytes, received during pairing |
 | Operation | one byte: `1` LIST, `2` GET, `3` PUT |
 | Document ID | string, maximum 128 bytes; empty for root |
 
 Authentication is checked before the operation reaches storage. There is no unauthenticated metadata endpoint. A status is one byte: `0` success, or `1` followed by an error string (client limit 512 bytes). Any unexpected status, length, EOF, TLS failure, or timeout means failure. Close the connection; do not parse additional commands.
+
+## Pairing (OBP1)
+
+A new client pairs on a TLS connection **without** a pin, recording the SHA-256 `F` of the server's leaf certificate. Nonces are 32 random bytes. `H` is SHA-256 over an ASCII label followed by the listed byte strings.
+
+1. Client sends the four ASCII bytes `OBP1`.
+2. Server replies status `0` and the commitment `H("OpenBridge pairing commit", F, Np)` for its nonce `Np` (or status `1` and an error, for example when pairing is unavailable).
+3. Client sends its nonce `Nm`.
+4. Server sends `Np`. The client checks the commitment against the `F` it saw and fails on a mismatch.
+5. Both compute the code: the first 4 bytes of `H("OpenBridge pairing code", F, Nm, Np)` as a big-endian unsigned integer, modulo 1,000,000, written as 6 digits with leading zeros. Both display it; the phone asks its user to confirm that they match (at most about a minute).
+6. Server sends status `0` and the 32-byte secret if the user approved, or status `1` and an error. The client then pins `F` and uses the secret for OB01 requests.
+
+Reference vector: with `F`, `Nm` and `Np` filled with the bytes `01`, `02` and `03`, the commitment is `8ef8a25a…9b356` and the code is `520380`.
 
 ## LIST (1)
 

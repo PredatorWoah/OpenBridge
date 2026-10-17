@@ -6,13 +6,13 @@ import BridgeCore
 final class BrowserModel: ObservableObject {
     @Published var host = ""
     @Published var port = ""
-    @Published var fingerprint = ""
-    @Published var secret = ""
+    /// The 6-digit code shown while the phone asks its user to confirm the pairing.
+    @Published var pairingCode: String?
     @Published var entries: [Entry] = []
     @Published var path: [(id: String, name: String)] = [("", "Shared folder")]
     @Published var connected = false
     @Published var busy = false
-    @Published var status = "Start sharing on Android, then enter the credentials shown on the phone."
+    @Published var status = "Start sharing on Android, then enter the IP and port shown on the phone."
     @Published var error: String?
     @Published var fraction: Double = 0
     @Published var connectionLabel = ""
@@ -26,14 +26,14 @@ final class BrowserModel: ObservableObject {
         guard !busy else { return }
         busy = true; error = nil; fraction = 0
         task = Task {
-            defer { busy = false; task = nil }
+            defer { busy = false; task = nil; pairingCode = nil }
             do { try await work() }
             catch is CancellationError { status = "Operation cancelled. Refresh to check the phone's folder." }
             catch {
                 self.error = error.localizedDescription
                 status = usb
                     ? "Couldn't reach the phone over USB. Keep it unlocked, plugged in, and in File transfer mode."
-                    : "Operation failed. Check Wi-Fi, that sharing is still on, and the fingerprint on the phone."
+                    : "Operation failed. Check Wi-Fi and that sharing is still on, or pair again."
             }
         }
     }
@@ -41,13 +41,17 @@ final class BrowserModel: ObservableObject {
     func connect() {
         usb = false
         run {
-            let candidate = try BridgeClient(host: self.host.trimmingCharacters(in: .whitespacesAndNewlines),
-                port: self.port, fingerprint: self.fingerprint, secret: self.secret)
-            let entries = try await candidate.list()
-            self.client = candidate; self.connected = true
+            self.status = "Connecting to the phone…"
+            let paired = try await BridgeClient.pair(host: self.host.trimmingCharacters(in: .whitespacesAndNewlines), port: self.port) { code in
+                self.pairingCode = code
+                self.status = "Check that your phone shows the same code, then tap Pair on the phone."
+            }
+            self.pairingCode = nil
+            let entries = try await paired.list()
+            self.client = paired; self.connected = true
             self.path = [("", "Shared folder")]; self.entries = entries
             self.connectionLabel = "\(self.host):\(self.port) on the local network"
-            self.status = "Paired. Certificate fingerprint matched the value entered from the phone."
+            self.status = "Paired. Both screens showed the same code."
         }
     }
 
@@ -69,7 +73,7 @@ final class BrowserModel: ObservableObject {
         guard !busy else { return }
         if let old = client { Task { await old.disconnect() } }
         client = nil; connected = false; entries = []; path = [("", "Shared folder")]; connectionLabel = ""
-        secret = ""; fingerprint = ""; error = nil
+        error = nil
         status = "Disconnected. Credentials are kept only in memory."
     }
 
@@ -138,14 +142,21 @@ struct BrowserView: View {
             Text("OpenBridge").font(.largeTitle)
             if !model.connected {
                 Text("Wi-Fi (with the OpenBridge Android app)").font(.headline)
-                Text("Connect both devices to the same trusted local network, or plug in the phone with USB tethering on. Start sharing in the Android app and copy its four values here.")
+                Text("Put both devices on the same network (or plug in the phone with USB tethering on), start sharing in the Android app, and enter the IP and port it shows.")
                 HStack {
                     TextField("Phone IPv4 address", text: $model.host)
                     TextField("Port", text: $model.port).frame(width: 90)
                 }
-                TextField("Certificate SHA-256 (64 hex characters)", text: $model.fingerprint)
-                SecureField("Pairing secret (64 hex characters)", text: $model.secret)
-                Button("Pair and browse", action: model.connect).disabled(model.busy)
+                Button("Pair", action: model.connect).disabled(model.busy || model.host.isEmpty || model.port.isEmpty)
+                if let code = model.pairingCode {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Pairing code").font(.caption).foregroundStyle(.secondary)
+                        Text("\(code.prefix(3)) \(code.suffix(3))")
+                            .font(.system(size: 44, weight: .semibold, design: .monospaced))
+                            .textSelection(.enabled)
+                        Text("Tap Pair on the phone only if it shows the same code.").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
                 Divider().padding(.vertical, 6)
                 Text("USB cable (beta)").font(.headline)
                 Text("Plug in your phone, unlock it, and choose File transfer in its USB notification. No pairing and nothing to install on the phone.")

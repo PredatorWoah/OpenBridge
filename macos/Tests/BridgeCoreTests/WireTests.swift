@@ -27,4 +27,14 @@ final class WireTests: XCTestCase {
             XCTAssertThrowsError(try Wire.validateName(name), name)
         }
     }
+
+    func testPairingMatchesTheAndroidImplementation() {
+        // Same reference vector as ProtocolTest.java and scripts/test-tls.py.
+        let fingerprint = Data(repeating: 1, count: 32), macNonce = Data(repeating: 2, count: 32), phoneNonce = Data(repeating: 3, count: 32)
+        XCTAssertEqual(Pairing.code(fingerprint: fingerprint, macNonce: macNonce, phoneNonce: phoneNonce), "520380")
+        XCTAssertEqual(Pairing.commitment(fingerprint: fingerprint, phoneNonce: phoneNonce).map { String(format: "%02x", $0) }.joined(),
+                       "8ef8a25a4293066adbb289a0cff4a91b7e65d0db9811cd15d30f14d2c0a9b356")
+        var other = fingerprint; other[0] ^= 1
+        XCTAssertNotEqual(Pairing.code(fingerprint: other, macNonce: macNonce, phoneNonce: phoneNonce), "520380")
+    }
 }

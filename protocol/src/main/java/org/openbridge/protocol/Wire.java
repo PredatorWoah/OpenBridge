@@ -55,9 +55,15 @@ public final class Wire {
     }
 
     public static void authenticate(DataInputStream in, byte[] secret) throws IOException {
-        if (secret.length != 32) throw new IllegalArgumentException("Secret must be 32 bytes");
-        byte[] magic = new byte[4], supplied = new byte[32];
+        byte[] magic = new byte[4];
         in.readFully(magic);
+        authenticate(in, magic, secret);
+    }
+
+    /** Like {@link #authenticate(DataInputStream, byte[])} when the 4-byte magic has already been read. */
+    public static void authenticate(DataInputStream in, byte[] magic, byte[] secret) throws IOException {
+        if (secret.length != 32) throw new IllegalArgumentException("Secret must be 32 bytes");
+        byte[] supplied = new byte[32];
         in.readFully(supplied);
         if (!MessageDigest.isEqual(magic, MAGIC) || !MessageDigest.isEqual(supplied, secret))
             throw new IOException("Pairing rejected");

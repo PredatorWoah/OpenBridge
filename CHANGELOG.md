@@ -8,6 +8,7 @@ All notable changes to OpenBridge are recorded here. Every release has an entry;
 - **USB File transfer now finds Android phones.** The Mac looked for the phone's File transfer interface in a way macOS cannot match for Android's vendor-specific USB class, so it never found the phone. It now checks every USB interface itself. If no phone is found, the message lists the USB devices the Mac can see, to show whether the phone is attached and in which mode.
 
 ### Changed
+- **6-digit pairing instead of 64-character codes.** Enter the phone's IP and port on the Mac, check that both screens show the same 6-digit code, and tap Pair on the phone, like pairing Bluetooth. The long fingerprint and secret are gone, and the protection against someone intercepting the connection stays.
 - The start screen separates Wi-Fi and USB clearly: USB File transfer needs no pairing, and its errors no longer mention Wi-Fi or fingerprints.
 
 ## [0.9.0] - 2026-10-17

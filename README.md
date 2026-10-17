@@ -10,7 +10,7 @@
 
 **OpenBridge is a free, open-source way to move files between an Android phone and a Mac.** Pick one folder on the phone, and browse, download and upload it from your Mac over your home Wi-Fi or a USB cable. Everything stays on your own network: no accounts, no cloud, no tracking.
 
-- 🔒 **Encrypted and pinned on Wi-Fi.** Over Wi-Fi (and USB tethering) every request uses TLS, and the Mac checks the phone's certificate fingerprint before sending anything.
+- 🔒 **Encrypted, with 6-digit pairing.** Over Wi-Fi (and USB tethering) every request uses TLS. To pair, check that both screens show the same 6-digit code and tap Pair on the phone, like pairing Bluetooth.
 - 📁 **One folder on Wi-Fi.** The Android app shares only the folder you pick, and only while it is open.
 - 🛡️ **Never overwrites.** Existing files are never replaced on either side, and interrupted transfers are cleaned up.
 - 🔌 **Or just plug in (beta).** On a Mac, connect a cable, choose File transfer on the phone, and browse it like on Windows. This uses Android's own File transfer mode, so it sees everything that mode shares, not one folder; see [how the two modes differ](#wi-fi-vs-usb-file-transfer).
@@ -60,8 +60,8 @@ The script makes an application bundle with a **local ad-hoc signature**. It doe
 ## Transfer files
 
 1. Put both devices on the same trusted LAN. Open Android OpenBridge and choose **Choose folder**. Select a folder under internal storage or the SD card in the system picker. Android intentionally disallows some roots; use a subfolder such as `Documents/OpenBridge`. Cloud providers are rejected.
-2. Press **Start sharing**. Keep the Android app visible; the screen stays on while sharing. The screen shows the connection type (Wi-Fi or USB cable), the phone's IPv4 address, a dynamically allocated port, a SHA-256 certificate fingerprint, and a 64-character pairing secret.
-3. Open the Mac app. Enter those four values, copying the fingerprint **directly from the phone**. Press **Pair and browse**. A wrong certificate or secret is rejected; TLS verification has no bypass.
+2. Press **Start sharing**. Keep the Android app visible; the screen stays on while sharing. The screen shows the connection type (Wi-Fi or USB cable), the phone's IPv4 address and a port.
+3. Open the Mac app, enter the IP and port, and press **Pair**. Both screens show a 6-digit code: tap **Pair** on the phone **only if they match**. If they differ, tap Cancel; another device may be trying to connect.
 4. Use **Open**, **Up**, and **Refresh** to browse. Use **Download…** to save a file on Mac, or **Upload file…** to send a regular file into the current Android folder. Progress and failures appear in the window. Empty files are supported; the per-file limit is 64 GiB.
 5. Use **Stop** on Android when finished. Leaving the Android app, losing/changing Wi-Fi, or unplugging the USB cable also stops sharing. Restarting creates new credentials; disconnect and pair again on Mac.
 
@@ -88,7 +88,7 @@ Good to know:
 | --- | --- | --- |
 | Needs the Android app | Yes | No |
 | What the Mac can see | Only the one folder you picked | Everything Android shares in File transfer mode (usually all of internal storage and the SD card) |
-| Protection | TLS with a pinned certificate and a pairing secret | The cable and your choice of File transfer on an unlocked phone; no encryption, as with any USB file transfer |
+| Protection | TLS, paired by matching a 6-digit code | The cable and your choice of File transfer on an unlocked phone; no encryption, as with any USB file transfer |
 | Stops when | You leave the app, press Stop, or the network drops | You unplug, lock the phone (on some phones), or choose another USB mode |
 
 Choose File transfer only on a Mac you trust, and switch the phone back to *No data transfer* when you are done.
@@ -99,7 +99,7 @@ This uses the OpenBridge Android app and the same encrypted protocol as Wi-Fi, o
 
 1. Plug the phone into the Mac. On the phone, tap **USB cable: turn on USB tethering** in OpenBridge (or find *USB tethering* under Settings → Network → Hotspot & tethering) and switch it on. Return to OpenBridge.
 2. Press **Start sharing**. It shows **Connection: USB cable**. When tethering is on, OpenBridge prefers the cable over Wi-Fi.
-3. Pair on the Mac exactly as above, using the IP, port, fingerprint and secret on the phone. Wi-Fi is not needed.
+3. Pair on the Mac exactly as above, using the IP and port on the phone. Wi-Fi is not needed.
 
 Limitations, stated plainly:
 
