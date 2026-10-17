@@ -22,7 +22,7 @@ final class BrowserModel: ObservableObject {
     @Published var transfer: Transfer?
     private var client: (any FileSource)?
     private var task: Task<Void, Never>?
-    private var watcher: Timer?
+    private var watcher: Task<Void, Never>?
     /// A plugged-in phone that is not opened automatically: it failed to connect, or the user disconnected it.
     /// Cleared when that phone is unplugged.
     private var skipped: String?
@@ -57,10 +57,13 @@ final class BrowserModel: ObservableObject {
     /// Watches for a phone being plugged in or unplugged, so USB needs no button.
     func startWatching() {
         guard watcher == nil else { return }
-        watcher = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.poll() }
+        // The model lives as long as the window, so the loop holds it strongly.
+        watcher = Task {
+            while !Task.isCancelled {
+                poll()
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+            }
         }
-        poll()
     }
 
     private func poll() {
