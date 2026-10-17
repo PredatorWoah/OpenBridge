@@ -170,7 +170,7 @@ class MainActivity : ComponentActivity() {
             if (result.resultCode == RESULT_OK) result.data?.data?.let(model::select)
         }
         val storagePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { model.wholePhoneResult() }
-        val requestWholePhone = {
+        val requestWholePhone: () -> Unit = {
             if (AllFiles.granted(this)) model.selectWholePhone() else {
                 model.awaitWholePhone()
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
