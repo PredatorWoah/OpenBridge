@@ -100,8 +100,94 @@ public final class ProtocolTest {
         for (String name : new String[] {"wlan0", "rmnet_data0", "tun0", "lo", "ncm", "usb", "rndis0x", "eth0", null})
             check(!Wire.isUsbTetherInterface(name), "Not a USB tether interface " + name);
         pairingTests(store);
+        extensionTests();
         fileStoreTests();
         System.out.println("Protocol tests passed: " + checks + " assertions");
+    }
+
+    private static DataOutputStream header(ByteArrayOutputStream bytes, int operation, String id) throws IOException {
+        DataOutputStream out = new DataOutputStream(bytes);
+        out.write(Wire.MAGIC); out.write(SECRET); out.writeByte(operation); Wire.writeString(out, id);
+        return out;
+    }
+    private static DataInputStream serve(Session session, ByteArrayOutputStream request) throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        session.serve(new ByteArrayInputStream(request.toByteArray()), output);
+        return new DataInputStream(new ByteArrayInputStream(output.toByteArray()));
+    }
+
+    /** MKDIR, THUMB, ranged GET and the clipboard (operations 4 to 8). */
+    private static void extensionTests() throws Exception {
+        MemoryStore store = new MemoryStore();
+        String[] clip = {"from the phone"};
+        Clipboard clipboard = new Clipboard() {
+            public String read() { return clip[0]; }
+            public void write(String text) { clip[0] = text; }
+        };
+        Session session = new Session(store, SECRET, null, null, clipboard);
+        byte[] hello = store.files.get("hello.txt");
+
+        for (long offset : new long[] {0, 6, hello.length}) {
+            ByteArrayOutputStream request = new ByteArrayOutputStream();
+            header(request, 6, "file:hello.txt").writeLong(offset);
+            DataInputStream reply = serve(session, request);
+            check(reply.readByte() == 0 && reply.readLong() == hello.length, "Resume reports the full size");
+            check(Arrays.equals(reply.readAllBytes(), Arrays.copyOfRange(hello, (int) offset, hello.length)), "Resume sends the rest from " + offset);
+        }
+        for (long offset : new long[] {-1, hello.length + 1}) {
+            ByteArrayOutputStream request = new ByteArrayOutputStream();
+            header(request, 6, "file:hello.txt").writeLong(offset);
+            DataInputStream reply = serve(session, request);
+            check(reply.readByte() == 1 && Wire.readString(reply, 512).contains("resume"), "Bad resume position rejected: " + offset);
+        }
+
+        ByteArrayOutputStream mkdir = new ByteArrayOutputStream();
+        Wire.writeString(header(mkdir, 4, ""), "Holiday");
+        DataInputStream made = serve(session, mkdir);
+        check(made.readByte() == 0 && Wire.readString(made, 128).equals("folder:Holiday") && store.folders.contains("Holiday"), "Create folder");
+        DataInputStream again = serve(session, mkdir);
+        check(again.readByte() == 1 && Wire.readString(again, 512).contains("already exists"), "Existing folder name refused");
+        ByteArrayOutputStream badName = new ByteArrayOutputStream();
+        Wire.writeString(header(badName, 4, ""), "../up");
+        check(serve(session, badName).readByte() == 1, "Folder name validated");
+
+        ByteArrayOutputStream thumb = new ByteArrayOutputStream();
+        header(thumb, 5, "file:hello.txt").writeInt(256);
+        DataInputStream preview = serve(session, thumb);
+        check(preview.readByte() == 0 && preview.readInt() == 5, "Preview length");
+        byte[] jpeg = new byte[5]; preview.readFully(jpeg);
+        check(jpeg[0] == (byte) 0xFF && jpeg[2] == (byte) 256, "Preview bytes");
+        for (int size : new int[] {0, 31, 1025}) {
+            ByteArrayOutputStream bad = new ByteArrayOutputStream();
+            header(bad, 5, "file:hello.txt").writeInt(size);
+            check(serve(session, bad).readByte() == 1, "Preview size bounded: " + size);
+        }
+        ByteArrayOutputStream none = new ByteArrayOutputStream();
+        header(none, 5, "folder-id").writeInt(256);
+        check(serve(session, none).readByte() == 1, "No preview for folders");
+
+        ByteArrayOutputStream get = new ByteArrayOutputStream();
+        header(get, 7, "");
+        DataInputStream read = serve(session, get);
+        check(read.readByte() == 0 && Wire.readString(read, Wire.MAX_CLIPBOARD).equals("from the phone"), "Read the phone clipboard");
+        ByteArrayOutputStream set = new ByteArrayOutputStream();
+        Wire.writeString(header(set, 8, ""), "from the Mac ✓");
+        check(serve(session, set).readByte() == 0 && clip[0].equals("from the Mac ✓"), "Write the phone clipboard");
+        ByteArrayOutputStream huge = new ByteArrayOutputStream();
+        DataOutputStream hugeOut = header(huge, 8, "");
+        hugeOut.writeInt(Wire.MAX_CLIPBOARD + 1);
+        check(serve(session, huge).readByte() == 1 && clip[0].equals("from the Mac ✓"), "Oversized clipboard refused");
+        check(serve(new Session(store, SECRET), get).readByte() == 1, "No clipboard unless shared");
+
+        ByteArrayOutputStream unknown = new ByteArrayOutputStream();
+        header(unknown, 99, "");
+        DataInputStream refused = serve(session, unknown);
+        check(refused.readByte() == 1 && Wire.readString(refused, 512).contains("update"), "Unknown operation asks for an update");
+
+        ByteArrayOutputStream wrongSecret = new ByteArrayOutputStream();
+        DataOutputStream w = new DataOutputStream(wrongSecret);
+        w.write(Wire.MAGIC); w.write(new byte[32]); w.writeByte(7); Wire.writeString(w, "");
+        check(serve(session, wrongSecret).readByte() == 1 && clip[0].equals("from the Mac ✓"), "Clipboard needs the pairing secret");
     }
 
     private static void pairingTests(MemoryStore store) throws Exception {
@@ -167,6 +253,19 @@ public final class ProtocolTest {
             java.nio.file.Files.writeString(internal.resolve(Names.TEMPORARY_PREFIX + "left-over"), "partial");
             boolean linked = true;
             try { java.nio.file.Files.createSymbolicLink(internal.resolve("escape"), outside); } catch (Exception e) { linked = false; }
+
+            FileStore single = new FileStore(List.of(new FileStore.Root("Internal storage", internal.toFile())),
+                (file, size) -> ("thumb:" + file.getName() + ":" + size).getBytes(StandardCharsets.UTF_8));
+            String made = single.createDirectory("", "Trips");
+            check(java.nio.file.Files.isDirectory(internal.resolve("Trips")) && single.list(made).isEmpty(), "Create a folder in whole-phone mode");
+            for (String clash : new String[] {"Trips", "trips", "notes.txt", "NOTES.TXT"}) {
+                try { single.createDirectory("", clash); check(false, "Folder name clash allowed: " + clash); }
+                catch (IOException expected) { check(expected.getMessage().contains("already exists"), "Folder clash reported: " + clash); }
+            }
+            String notesId = single.list("").stream().filter(e -> e.name.equals("notes.txt")).findFirst().get().id;
+            check(new String(single.thumbnail(notesId, 200), StandardCharsets.UTF_8).equals("thumb:notes.txt:200"), "Thumbnail from the platform");
+            try { single.thumbnail(made, 200); check(false, "Folder thumbnail"); } catch (IOException expected) { check(true, "No folder thumbnail"); }
+            java.nio.file.Files.delete(internal.resolve("Trips"));
 
             FileStore two = new FileStore(List.of(new FileStore.Root("Internal storage", internal.toFile()), new FileStore.Root("SD card", sd.toFile())));
             List<Store.Entry> top = two.list("");

@@ -22,11 +22,11 @@ public struct BridgeClient {
         self.host = testHost; self.port = port; self.fingerprint = fingerprint; self.secret = secret
     }
 
-    private func open(operation: UInt8, id: String) async throws -> TLSChannel {
+    private func open(operation: UInt8, id: String, extra: Data = Data()) async throws -> TLSChannel {
         let channel = TLSChannel(host: host, port: port, fingerprint: fingerprint)
         do {
             try await channel.connect()
-            try await channel.send(Data("OB01".utf8) + secret + Data([operation]) + Wire.string(id))
+            try await channel.send(Data("OB01".utf8) + secret + Data([operation]) + Wire.string(id) + extra)
             return channel
         } catch { channel.close(); throw error }
     }
@@ -53,42 +53,80 @@ public struct BridgeClient {
         return result
     }
 
+    /// Downloads `entry`, continuing an earlier interrupted download to the same place when there is one.
     public func download(_ entry: Entry, to destination: URL, progress: @MainActor (Int64, Int64) -> Void) async throws {
-        // Fail before transferring anything; the final move below would refuse to replace it anyway.
-        guard !FileManager.default.fileExists(atPath: destination.path) else {
-            throw BridgeError.message("\(destination.lastPathComponent) already exists. Choose a new name; OpenBridge never replaces files.")
-        }
-        let channel = try await open(operation: 2, id: entry.id)
-        defer { channel.close() }
-        try await channel.status()
-        let length = try await channel.number(8)
-        guard length <= Wire.maxFile else { throw BridgeError.message("Unsupported file size.") }
-        let manager = FileManager.default
-        // Sibling temporary file permits a same-volume atomic move without replacing an existing file.
-        let temporary = destination.deletingLastPathComponent().appendingPathComponent(".openbridge-\(UUID().uuidString).part")
-        guard manager.createFile(atPath: temporary.path, contents: nil, attributes: [.posixPermissions: 0o600]) else {
-            throw BridgeError.message("Cannot create download in the selected folder.")
-        }
-        defer { try? manager.removeItem(at: temporary) }
-        let file = try FileHandle(forWritingTo: temporary)
+        let partial = try PartialFile.open(for: destination, size: entry.size)
         do {
-            var received: Int64 = 0, reported: Int64 = 0
-            await progress(0, Int64(length))
-            while received < length {
+            let channel: TLSChannel
+            if partial.offset > 0 {
+                channel = try await open(operation: 6, id: entry.id, extra: Wire.integer(partial.offset))
+                do { try await channel.status() } catch BridgeError.message(let text) where text.contains("Unsupported operation") {
+                    // A phone app from before resuming existed: start over.
+                    channel.close(); partial.end(after: CancellationError())
+                    return try await download(entry, to: destination, progress: progress)
+                }
+            } else {
+                channel = try await open(operation: 2, id: entry.id)
+                try await channel.status()
+            }
+            defer { channel.close() }
+            let total = try await channel.number(8)
+            guard total <= Wire.maxFile else { throw BridgeError.message("Unsupported file size.") }
+            guard Int64(total) == entry.size else { throw BridgeError.fileChanged }
+            var received = partial.offset, reported = partial.offset
+            await progress(received, Int64(total))
+            while received < Int64(total) {
                 try Task.checkCancellation()
-                let chunk = try await channel.read(Int(min(65_536, length - UInt64(received))))
-                try file.write(contentsOf: chunk)
+                let chunk = try await channel.read(Int(min(65_536, Int64(total) - received)))
+                try partial.write(chunk)
                 received += Int64(chunk.count)
-                if received - reported >= Self.progressStep || received == Int64(length) {
+                if received - reported >= Self.progressStep || received == Int64(total) {
                     reported = received
-                    await progress(received, Int64(length))
+                    await progress(received, Int64(total))
                 }
             }
-            try file.synchronize()
-            try file.close()
-        } catch { try? file.close(); throw error }
-        // FileManager.moveItem fails if destination exists; never replace it.
-        try manager.moveItem(at: temporary, to: destination)
+            try partial.finish(at: destination)
+        } catch {
+            partial.end(after: error)
+            throw error
+        }
+    }
+
+    /// Creates an empty folder named `name` inside `directoryID` and returns it.
+    public func makeFolder(named name: String, in directoryID: String) async throws -> Entry {
+        try Wire.validateName(name)
+        let channel = try await open(operation: 4, id: directoryID, extra: Wire.string(name))
+        defer { channel.close() }
+        try await channel.status()
+        let id = try await channel.string(limit: 128)
+        guard !id.isEmpty else { throw BridgeError.message("Invalid folder ID.") }
+        return Entry(id: id, name: name, directory: true, size: 0)
+    }
+
+    /// A JPEG preview of a photo or video, at most `size` pixels on its longer side.
+    public func thumbnail(_ entry: Entry, size: Int) async throws -> Data {
+        let channel = try await open(operation: 5, id: entry.id, extra: Wire.integer(Int32(min(max(size, 32), 1024))))
+        defer { channel.close() }
+        try await channel.status()
+        let length = try await channel.number(4)
+        guard length > 0, length <= 1 << 20 else { throw BridgeError.message("Invalid preview.") }
+        return try await channel.read(Int(length))
+    }
+
+    /// The phone's clipboard text.
+    public func clipboard() async throws -> String {
+        let channel = try await open(operation: 7, id: "")
+        defer { channel.close() }
+        try await channel.status()
+        return try await channel.string(limit: Wire.maxClipboard)
+    }
+
+    /// Puts `text` on the phone's clipboard.
+    public func setClipboard(_ text: String) async throws {
+        guard text.utf8.count <= Wire.maxClipboard else { throw BridgeError.message("That text is too long for the phone's clipboard.") }
+        let channel = try await open(operation: 8, id: "", extra: Wire.string(text))
+        defer { channel.close() }
+        try await channel.status()
     }
 
     public func upload(_ source: URL, directoryID: String, progress: @MainActor (Int64, Int64) -> Void) async throws {

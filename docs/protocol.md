@@ -8,7 +8,7 @@ All integers are big endian. A string is a signed 32-bit nonnegative UTF-8 byte 
 | --- | --- |
 | Version | four ASCII bytes `OB01` |
 | Pairing secret | 32 raw bytes, received during pairing |
-| Operation | one byte: `1` LIST, `2` GET, `3` PUT |
+| Operation | one byte: `1` LIST, `2` GET, `3` PUT, `4` MKDIR, `5` THUMB, `6` RESUME, `7` CLIPBOARD GET, `8` CLIPBOARD SET |
 | Document ID | string, maximum 128 bytes; empty for root |
 
 Authentication is checked before the operation reaches storage. There is no unauthenticated metadata endpoint. A status is one byte: `0` success, or `1` followed by an error string (client limit 512 bytes). Any unexpected status, length, EOF, TLS failure, or timeout means failure. Close the connection; do not parse additional commands.
@@ -51,6 +51,26 @@ The server validates storage permissions, filename and collision policy, creates
 
 Existing names are rejected, not replaced. Android compares names ignoring case, matching its shared storage. LIST omits in-progress upload documents and entries whose names the protocol cannot carry. App-local concurrent uploads reserve names. External provider concurrency and process-kill cleanup limitations are documented in [SECURITY.md](../SECURITY.md).
 
+## MKDIR (4)
+
+ID names the parent directory. After the common header, send a folder name string (same rules as PUT). Reply: status; on success, the new folder's ID string (maximum 128 bytes). An existing file or folder with that name (compared ignoring case on Android) is an error; nothing is reused or replaced.
+
+## THUMB (5)
+
+ID names a previously listed file. After the common header, send a signed 32-bit size, 32 to 1024: the longest side of the preview in pixels. Reply: status; on success, a 32-bit length (1 to 1,048,576) and that many bytes of JPEG. Files without a preview (not a photo or video, or one Android can't decode) return an error.
+
+## RESUME (6)
+
+Like GET, from an offset, to continue an interrupted download. After the common header, send a signed 64-bit offset (0 to the file size). Reply: status; on success, the file's full signed 64-bit size, then exactly size − offset bytes starting at the offset. The client checks that the size matches the file it was downloading and otherwise starts over. The Mac keeps an interrupted download as `.<name>.<size>.openbridge-part` next to its destination and continues it on the next attempt to the same place.
+
+## CLIPBOARD GET (7) and CLIPBOARD SET (8)
+
+The document ID is empty. GET replies with status and, on success, the phone's clipboard text as a string (at most 262,144 UTF-8 bytes; empty when there is no text). SET sends one string of at most 262,144 bytes after the common header and replies with status. Android lets an app read the clipboard only while it is on screen, so GET fails while OpenBridge is in the background. Both need the pairing secret like every other operation.
+
+## Discovery
+
+While sharing over Wi-Fi, the phone announces itself with DNS-SD as `_openbridge._tcp` under its device name, with TXT keys `ip`, `port` and `v=1`. The Mac lists these so nobody types an address. The announcement reveals only the name, address and port that the phone would otherwise show on screen; pairing still needs the 6-digit code. It stops when sharing stops.
+
 ## Evolution
 
-Unknown operation/version fails closed. Future companion features should use a new version/capability negotiation, with explicit permissions, rather than adding implicit access to this file capability. OB01 has no deletion, arbitrary path access, background synchronization, public hosting, or command execution.
+Unknown operation/version fails closed; servers older than 0.9.6 answer operations 4–8 with an error, and the Mac asks to update the phone app. Future companion features should use a new version/capability negotiation, with explicit permissions, rather than adding implicit access to this file capability. OB01 has no deletion, arbitrary path access, background synchronization, public hosting, or command execution. (Screen mirroring is separate: it uses USB debugging over the cable, not this protocol; see SECURITY.md.)

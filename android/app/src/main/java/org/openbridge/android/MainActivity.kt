@@ -1,7 +1,6 @@
 package org.openbridge.android
 
 import android.Manifest
-import android.app.Application
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -55,150 +54,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import androidx.documentfile.provider.DocumentFile
-import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.ViewModelProvider
-import java.util.concurrent.CompletableFuture
-import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
-import org.openbridge.protocol.FileStore
-import org.openbridge.protocol.Pairing
-
-enum class Cable { NONE, CHARGING, FILE_TRANSFER }
-
-class ShareModel(application: Application) : AndroidViewModel(application) {
-    /** What tapping the sun shares: the whole phone (needs All files access) or one chosen folder. */
-    var wholePhone by mutableStateOf(true); private set
-    var folder by mutableStateOf<Uri?>(null); private set
-    var server by mutableStateOf<SharingServer?>(null); private set
-    var busy by mutableStateOf(false); private set
-    /** A Mac has paired since sharing started. */
-    var paired by mutableStateOf(false); private set
-    /** The USB cable: unplugged, charging only, or in File transfer mode (the Mac can browse the phone). */
-    var cable by mutableStateOf(Cable.NONE)
-    /** A problem or hint to show under the status, or null. */
-    var note by mutableStateOf<String?>(null); private set
-    /** Sharing should start as soon as the needed permission or folder arrives. */
-    private var startWhenReady = false
-    private var awaitingWholePhone = false
-    private val worker = Executors.newSingleThreadExecutor()
-    private val main = android.os.Handler(android.os.Looper.getMainLooper())
-    private var generation = 0
-
-    /** 6-digit code of a pairing request waiting for the user, shown in a sheet. */
-    var pairingCode by mutableStateOf<String?>(null); private set
-    private var pairingDecision: CompletableFuture<Boolean>? = null
-
-    /** Called on a server thread: shows the code and waits up to a minute for Pair or Cancel. */
-    private val approver = Pairing.Approver { code ->
-        val decision = CompletableFuture<Boolean>()
-        synchronized(this) {
-            if (pairingDecision != null) return@Approver false   // one request at a time
-            pairingDecision = decision
-        }
-        main.post { pairingCode = code }
-        val approved = try {
-            decision.get(60, TimeUnit.SECONDS)
-        } catch (_: java.util.concurrent.TimeoutException) {
-            false
-        } catch (_: java.util.concurrent.ExecutionException) {
-            false
-        } finally {
-            synchronized(this) { pairingDecision = null }
-            main.post { if (pairingCode == code) pairingCode = null }
-        }
-        if (approved) main.post { if (server != null) paired = true }
-        approved
-    }
-
-    fun decidePairing(approve: Boolean) {
-        synchronized(this) { pairingDecision }?.complete(approve)
-        pairingCode = null
-    }
-
-    fun chooseWholePhone() { if (server == null && !busy) { wholePhone = true; note = null } }
-
-    fun select(uri: Uri) {
-        // Local external-storage documents only: no cloud providers or broad filesystem permissions.
-        if (uri.authority != "com.android.externalstorage.documents") {
-            startWhenReady = false
-            note = "Pick a folder on this phone's storage or SD card."
-            return
-        }
-        folder = uri; wholePhone = false; note = null
-        if (startWhenReady) { startWhenReady = false; start() }
-    }
-
-    fun folderCancelled() { startWhenReady = false }
-
-    /** Folder mode with no folder yet: sharing starts once the picker returns one. */
-    fun startAfterFolderPicked() { startWhenReady = true }
-
-    /** The user went to grant All files access (or the storage permission); [wholePhoneResult] runs when they return. */
-    fun awaitWholePhone(start: Boolean) { awaitingWholePhone = true; startWhenReady = start }
-
-    fun wholePhoneResult() {
-        if (!awaitingWholePhone) return
-        awaitingWholePhone = false
-        if (AllFiles.granted(getApplication())) {
-            wholePhone = true; note = null
-            if (startWhenReady) { startWhenReady = false; start() }
-        } else {
-            startWhenReady = false
-            note = "OpenBridge needs All files access to share the whole phone. Or choose One folder."
-        }
-    }
-
-    fun start() {
-        val selected = folder
-        val shareAll = wholePhone
-        if ((!shareAll && selected == null) || busy || server != null) return
-        busy = true; note = null; paired = false
-        val current = ++generation
-        worker.execute {
-            try {
-                val context = getApplication<Application>()
-                val store = if (shareAll) {
-                    if (!AllFiles.granted(context)) error("All files access was turned off. Allow it again to share the whole phone.")
-                    FileStore(AllFiles.roots(context))
-                } else {
-                    val root = DocumentFile.fromTreeUri(context, selected!!) ?: error("Choose the folder again")
-                    SafStore(context.contentResolver, root)
-                }
-                val created = SharingServer(context, store, approver) { reason ->
-                    main.post { if (generation == current) { stop(); note = reason } }
-                }
-                main.post {
-                    if (generation != current) created.close() else {
-                        server = created; busy = false
-                        created.start()
-                    }
-                }
-            } catch (e: Exception) {
-                main.post {
-                    if (generation == current) {
-                        busy = false
-                        note = when (e) {
-                            is SecurityException -> "Android denied access to the folder. Choose it again."
-                            is IllegalStateException -> e.message ?: "Couldn't start sharing."
-                            else -> "Couldn't start sharing. Check that Wi‑Fi is on."
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    fun stop() {
-        generation++
-        decidePairing(false)
-        server?.close(); server = null; busy = false; paired = false
-    }
-    override fun onCleared() { stop(); worker.shutdownNow() }
-}
 
 class MainActivity : ComponentActivity() {
-    private lateinit var model: ShareModel
+    private val model = Sharing
 
     /** Android's sticky USB state broadcast: whether a computer is attached, and in which mode. */
     private val usbState = object : BroadcastReceiver() {
@@ -218,7 +76,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge(statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
-        model = ViewModelProvider(this)[ShareModel::class.java]
+        Sharing.attach(this)
+        val notifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
         ContextCompat.registerReceiver(this, usbState, IntentFilter("android.hardware.usb.action.USB_STATE"), ContextCompat.RECEIVER_EXPORTED)
         val picker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             val uri = result.data?.data
@@ -244,6 +103,10 @@ class MainActivity : ComponentActivity() {
         }
         // Tapping the sun shares what's selected, asking for the folder or permission first when needed.
         val tapSun: () -> Unit = {
+            // The background notification (Stop button, pairing requests) needs permission on Android 13+.
+            if (Build.VERSION.SDK_INT >= 33 && model.inBackground &&
+                checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED)
+                notifications.launch(Manifest.permission.POST_NOTIFICATIONS)
             when {
                 model.server != null || model.busy -> Unit
                 model.wholePhone && !AllFiles.granted(this) -> requestWholePhone(true)
@@ -272,17 +135,24 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        model.onScreen = true
         model.wholePhoneResult()
     }
 
+    override fun onPause() {
+        model.onScreen = false
+        super.onPause()
+    }
+
     override fun onStop() {
-        if (!isChangingConfigurations) model.stop()
+        // Without background sharing, leaving the app stops sharing, as before.
+        if (!isChangingConfigurations && !model.inBackground) model.stop()
         super.onStop()
     }
 }
 
 @Composable
-private fun ShareScreen(model: ShareModel, tapSun: () -> Unit, onWholePhone: () -> Unit, onFolder: () -> Unit) {
+private fun ShareScreen(model: Sharing, tapSun: () -> Unit, onWholePhone: () -> Unit, onFolder: () -> Unit) {
     val sharing = model.server
     val sharingActive = sharing != null || model.busy
     val byCable = model.cable == Cable.FILE_TRANSFER
@@ -363,7 +233,7 @@ private fun ShareScreen(model: ShareModel, tapSun: () -> Unit, onWholePhone: () 
                         !model.wholePhone, onFolder, Modifier.weight(1f).fillMaxHeight())
                 }
             }
-            Spacer(Modifier.height(14.dp))
+            BackgroundToggle(model)
             if (model.cable == Cable.NONE) UsbHint()
             Spacer(Modifier.height(14.dp))
         }
@@ -379,7 +249,7 @@ private fun Modifier.glass(shape: Shape = glassShape, border: Color = Color.Whit
         .border(1.dp, border, shape)
 
 @Composable
-private fun StatusPill(model: ShareModel) {
+private fun StatusPill(model: Sharing) {
     val on = model.paired || model.cable == Cable.FILE_TRANSFER
     Row(Modifier.glass(CircleShape, if (on) Palette.ok.copy(alpha = 0.45f) else Color.White.copy(alpha = 0.16f))
         .padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -410,6 +280,20 @@ private fun ChoiceTile(title: String, detail: String, selected: Boolean, onClick
 }
 
 @Composable
+private fun BackgroundToggle(model: Sharing) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Keep sharing in the background", color = Palette.fg, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+            Text(if (model.inBackground) "A notification lets you stop it anytime." else "Leaving the app stops sharing.",
+                color = Palette.muted, fontSize = 12.sp)
+        }
+        Switch(model.inBackground, model::keepInBackground, colors = SwitchDefaults.colors(
+            checkedTrackColor = Palette.pink, checkedThumbColor = Color.White,
+            uncheckedTrackColor = Color.White.copy(alpha = 0.12f), uncheckedThumbColor = Palette.muted, uncheckedBorderColor = Color.Transparent))
+    }
+}
+
+@Composable
 private fun UsbHint() {
     Column(Modifier.fillMaxWidth().glass().padding(horizontal = 16.dp, vertical = 12.dp)) {
         Text("Using a cable?", color = Palette.fg, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
@@ -435,7 +319,7 @@ private fun SunsetButton(text: String, onClick: () -> Unit, modifier: Modifier =
 }
 
 @Composable
-private fun BoxScope.PairingSheet(model: ShareModel) {
+private fun BoxScope.PairingSheet(model: Sharing) {
     val code = model.pairingCode
     // Keep the last code on screen while the sheet slides away.
     var last by remember { mutableStateOf("") }

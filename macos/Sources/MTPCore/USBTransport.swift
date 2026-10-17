@@ -12,6 +12,8 @@ public final class USBTransport: MTPTransport {
     private let output: IOUSBHostPipe
     private var closed = false
     private static let timeout: TimeInterval = 30
+    /// Seconds a read may wait for the phone; 0 waits indefinitely (ADB streams can be idle for long).
+    public var readTimeout: TimeInterval = USBTransport.timeout
     private static let exclusiveAccess: UInt32 = 0xE000_02C5
 
     private init(service: io_service_t) throws {
@@ -58,7 +60,7 @@ public final class USBTransport: MTPTransport {
     public func read(maximum: Int) throws -> Data {
         guard let buffer = NSMutableData(length: maximum) else { throw MTPError.transport("Not enough memory to read from the phone.") }
         var transferred = 0
-        try guarded { try input.__sendIORequest(with: buffer, bytesTransferred: &transferred, completionTimeout: USBTransport.timeout) }
+        try guarded { try input.__sendIORequest(with: buffer, bytesTransferred: &transferred, completionTimeout: readTimeout) }
         return Data(bytes: buffer.bytes, count: min(transferred, maximum))
     }
 
@@ -127,6 +129,22 @@ public final class USBTransport: MTPTransport {
             + (summary.isEmpty ? " The Mac sees no USB devices with interfaces." : " USB devices seen: \(summary)."))
     }
 
+    /// Opens the phone's ADB (USB debugging) interface, used for screen mirroring.
+    public static func openADB() throws -> USBTransport {
+        let interfaces = usbInterfaces()
+        defer { interfaces.forEach { IOObjectRelease($0.service) } }
+        guard let adb = interfaces.first(where: { $0.code.isADB }) else {
+            throw MTPError.transport("USB debugging is off on the phone. Turn it on in Settings › Developer options › USB debugging, then try again.")
+        }
+        do {
+            let transport = try USBTransport(service: adb.service)
+            transport.readTimeout = 0
+            return transport
+        } catch let error as NSError where UInt32(truncatingIfNeeded: error.code) == exclusiveAccess {
+            throw MTPError.transport("Another app is using USB debugging on the phone (for example adb or Android Studio). Quit it, or run `adb kill-server`, then try again.")
+        }
+    }
+
     /// Name of a phone attached in File transfer (MTP) or PTP mode, without opening it. Cheap enough to poll.
     public static func attachedPhone() -> String? {
         let interfaces = usbInterfaces()
@@ -138,6 +156,8 @@ public final class USBTransport: MTPTransport {
         let interfaceClass: Int, subclass: Int, interfaceProtocol: Int
         var isMTP: Bool { interfaceClass == 0xFF && subclass == 0xFF && interfaceProtocol == 0x00 }
         var isPTP: Bool { interfaceClass == 0x06 && subclass == 0x01 && interfaceProtocol == 0x01 }
+        /// Android's USB debugging interface.
+        var isADB: Bool { interfaceClass == 0xFF && subclass == 0x42 && interfaceProtocol == 0x01 }
         /// Android's USB tethering (RNDIS) control interface, as listed in the "devices seen" summary.
         static let tethering = "e0/01/03"
         var description: String { String(format: "%02x/%02x/%02x", interfaceClass, subclass, interfaceProtocol) }

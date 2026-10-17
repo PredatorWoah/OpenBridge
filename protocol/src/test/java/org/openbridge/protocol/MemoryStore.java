@@ -27,6 +27,17 @@ public final class MemoryStore implements Store {
             public void close() throws IOException { stream.close(); }
         };
     }
+    public final List<String> folders = new ArrayList<>();
+    @Override public synchronized String createDirectory(String parentId, String name) throws IOException {
+        if (!parentId.isEmpty()) throw new IOException("Unknown directory");
+        if (folders.contains(name) || files.containsKey(name) || name.equals("Nested")) throw new IOException("A file or folder with that name already exists");
+        folders.add(name);
+        return "folder:" + name;
+    }
+    @Override public byte[] thumbnail(String id, int size) throws IOException {
+        if (!id.equals("file:hello.txt")) throw new IOException("No preview");
+        return new byte[] {(byte) 0xFF, (byte) 0xD8, (byte) size, (byte) 0xFF, (byte) 0xD9};
+    }
     @Override public synchronized Upload create(String id, String name) throws IOException {
         if (!id.isEmpty()) throw new IOException("Unknown directory");
         if (files.containsKey(name)) throw new IOException("Filename already exists");

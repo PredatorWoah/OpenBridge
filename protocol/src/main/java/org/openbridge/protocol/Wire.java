@@ -12,6 +12,8 @@ public final class Wire {
     public static final byte[] MAGIC = {'O', 'B', '0', '1'};
     public static final long MAX_FILE = 64L * 1024 * 1024 * 1024;
     public static final int MAX_ENTRIES = 10_000;
+    public static final int MAX_THUMBNAIL = 1 << 20;
+    public static final int MAX_CLIPBOARD = 256 * 1024;
 
     public static String readString(DataInputStream in, int limit) throws IOException {
         int size = in.readInt();
@@ -67,6 +69,20 @@ public final class Wire {
         in.readFully(supplied);
         if (!MessageDigest.isEqual(magic, MAGIC) || !MessageDigest.isEqual(supplied, secret))
             throw new IOException("Pairing rejected");
+    }
+
+    /** Skips exactly `count` bytes, reading through streams that can't seek. */
+    public static void skip(InputStream in, long count) throws IOException {
+        long remaining = count;
+        byte[] scratch = null;
+        while (remaining > 0) {
+            long skipped = in.skip(remaining);
+            if (skipped > 0) { remaining -= skipped; continue; }
+            if (scratch == null) scratch = new byte[65536];
+            int read = in.read(scratch, 0, (int) Math.min(scratch.length, remaining));
+            if (read < 0) throw new EOFException("File is shorter than expected");
+            remaining -= read;
+        }
     }
 
     public static void copy(InputStream in, OutputStream out, long length) throws IOException {

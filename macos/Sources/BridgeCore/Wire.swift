@@ -16,6 +16,7 @@ public struct Entry: Identifiable, Equatable {
 
 public enum Wire {
     public static let maxFile: Int64 = 64 * 1024 * 1024 * 1024
+    public static let maxClipboard = 256 * 1024
     public static func integer<T: FixedWidthInteger>(_ value: T) -> Data {
         var big = value.bigEndian
         return withUnsafeBytes(of: &big) { Data($0) }

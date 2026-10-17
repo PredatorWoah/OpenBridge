@@ -17,14 +17,23 @@ public final class FileStore implements Store {
         public Root(String name, File directory) { this.name = name; this.directory = directory; }
     }
 
+    /** Makes previews of photos and videos; supplied by the platform (Android has the decoders). */
+    public interface Thumbnails {
+        byte[] make(File file, int size) throws IOException;
+    }
+
     private static final int MAX_DOCUMENTS = 50_000;
+    private final Thumbnails thumbnails;
     private final List<Root> roots = new ArrayList<>();
     private final List<Path> rootPaths = new ArrayList<>();
     private final Map<String, Path> documents = new HashMap<>();
     private final Map<Path, String> ids = new HashMap<>();
     private final Set<String> reserved = new HashSet<>();
 
-    public FileStore(List<Root> roots) throws IOException {
+    public FileStore(List<Root> roots) throws IOException { this(roots, null); }
+
+    public FileStore(List<Root> roots, Thumbnails thumbnails) throws IOException {
+        this.thumbnails = thumbnails;
         if (roots.isEmpty()) throw new IOException("No storage is available");
         for (Root root : roots) {
             this.roots.add(root);
@@ -101,6 +110,23 @@ public final class FileStore implements Store {
                 }
             }
         };
+    }
+
+    @Override public synchronized String createDirectory(String parentId, String name) throws IOException {
+        Names.requireStorable(name);
+        if (parentId.isEmpty() && roots.size() > 1) throw new IOException("Open a storage area first, then create a folder");
+        Path directory = directory(parentId);
+        if (exists(directory, name) || reserved.contains(directory + "/" + Names.collisionKey(name)))
+            throw new IOException("A file or folder with that name already exists");
+        if (!Files.isWritable(directory)) throw new IOException("Folder is read-only");
+        try { return id(Files.createDirectory(directory.resolve(name))); }   // fails rather than reuse an existing name
+        catch (FileAlreadyExistsException e) { throw new IOException("A file or folder with that name already exists"); }
+    }
+
+    @Override public synchronized byte[] thumbnail(String fileId, int size) throws IOException {
+        Path file = resolve(fileId);
+        if (thumbnails == null || !Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) throw new IOException("No preview");
+        return thumbnails.make(file.toFile(), size);
     }
 
     private static boolean exists(Path directory, String name) throws IOException {

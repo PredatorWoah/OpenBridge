@@ -4,6 +4,31 @@ All notable changes to OpenBridge are recorded here. Every release has an entry;
 
 ## [Unreleased]
 
+## [0.9.6] - 2026-10-17
+
+The power-user release: mirror and control your phone from the Mac, a real file browser, a shared clipboard, and no more typing addresses.
+
+### Added
+- **Screen mirroring (beta).** Click **Mirror screen** to see and control your phone in a window on the Mac: click to tap, drag to swipe, scroll, type, and use Back, Home, Recent apps, volume, power and rotate. It uses the open-source scrcpy server, built in, with Apple's hardware video decoder, so there is nothing else to install. It needs USB debugging on the phone, and asks you to tap Allow once.
+- **Shared clipboard.** Send the Mac's clipboard to the phone or copy the phone's to the Mac over Wi‑Fi. While mirroring, copying on either side syncs automatically, and ⌘V pastes on the phone.
+- **Phones show up by themselves on Wi‑Fi.** While sharing, the phone announces itself on your network; on the Mac, click it under **Phones nearby** instead of typing its address.
+- **Keep sharing in the background.** Leave the OpenBridge app and sharing continues, with a notification showing the status and a Stop button. Pairing requests arrive as a notification too. A switch on the main screen turns it off.
+- **Thumbnails, grid view and Quick Look.** Photos and videos show previews in the list, or browse them as a grid. Press the space bar to Quick Look a file.
+- **Multi-select, whole folders and drag and drop.** Select with ⌘-click, ⇧-click or ⌘A, download several files or entire folders at once, and drop files or folders from Finder onto the window to upload them. Drag a file out to Finder to copy it.
+- **Sort by name, size or kind**, ascending or descending, with folders first.
+- **New folders on the phone**, over USB or Wi‑Fi.
+- **Downloads continue where they stopped.** An interrupted download keeps its progress; Resume picks it up from the same byte, over USB or Wi‑Fi. Batches continue with the files that were left.
+- A clickable path bar, and keyboard shortcuts: space for Quick Look, ⌘A, ⌘↑, ⌘↓ or Return to open, ⌘⇧N for a new folder.
+
+### Changed
+- Downloads and uploads of several items never fail on a name clash: copies get a new name like "photo 2.jpg". A single download still asks where to save it.
+- The Wi‑Fi protocol gains folder creation, previews, resuming and the clipboard (operations 4 to 8). Update both apps together; an older phone app answers these with a request to update.
+- Android: the phone asks for notification permission the first time you share, for the background notification and pairing requests.
+
+### Notes
+- Installs over 0.9.5 without uninstalling. USB File transfer and screen mirroring are beta.
+- Mirroring relies on USB debugging, which gives a trusted computer broad access to the phone. See SECURITY.md, and turn USB debugging off when you don't need it.
+
 ## [0.9.5] - 2026-10-17
 
 Fixes from the first real-device test of the new design: blank folders on the Mac, a nicer grey sun, and the phone lighting up for the cable too.
@@ -125,6 +150,7 @@ The first public preview: move files between an Android phone and a Mac, private
 - Pairing over Wi-Fi requires typing the address, port, fingerprint and secret.
 - The APK is signed with a build-machine key and the Mac app is not notarized; see the README for how to install and open them. If you installed an earlier test build, uninstall it first.
 
+[0.9.6]: https://github.com/PredatorWoah/OpenBridge/releases/tag/v0.9.6
 [0.9.5]: https://github.com/PredatorWoah/OpenBridge/releases/tag/v0.9.5
 [0.9.4]: https://github.com/PredatorWoah/OpenBridge/releases/tag/v0.9.4
 [0.9.3]: https://github.com/PredatorWoah/OpenBridge/releases/tag/v0.9.3

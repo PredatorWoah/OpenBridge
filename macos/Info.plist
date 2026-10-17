@@ -7,10 +7,11 @@
     <key>CFBundleExecutable</key><string>OpenBridge</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>0.9.5</string>
-    <key>CFBundleVersion</key><string>10</string>
+    <key>CFBundleShortVersionString</key><string>0.9.6</string>
+    <key>CFBundleVersion</key><string>11</string>
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSPrincipalClass</key><string>NSApplication</string>
+    <key>NSBonjourServices</key><array><string>_openbridge._tcp</string></array>
     <key>NSLocalNetworkUsageDescription</key><string>OpenBridge connects to your Android phone to transfer files on your local network.</string>
 </dict></plist>

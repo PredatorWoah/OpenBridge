@@ -92,6 +92,27 @@ public final class MTPSession {
         try MTPInbound(session: self, code: MTPCode.getObject, transactionID: try command(MTPCode.getObject, [handle]))
     }
 
+    /// Starts a download of `count` bytes from `offset` (Android's GetPartialObject64), to resume a download.
+    public func beginPartialDownload(_ handle: UInt32, offset: UInt64, count: UInt32) throws -> MTPInbound {
+        let parameters = [handle, UInt32(truncatingIfNeeded: offset), UInt32(truncatingIfNeeded: offset >> 32), count]
+        return try MTPInbound(session: self, code: MTPCode.getPartialObject64,
+                              transactionID: try command(MTPCode.getPartialObject64, parameters))
+    }
+
+    /// The phone's own JPEG preview of a photo or video.
+    public func thumbnail(_ handle: UInt32) throws -> Data {
+        try dataIn(MTPCode.getThumb, [handle])
+    }
+
+    /// Creates an empty folder and returns its handle. Folders need no data phase.
+    public func createFolder(storage: UInt32, parent: UInt32, name: String) throws -> UInt32 {
+        let info = MTPObjectInfo(storageID: storage, format: MTPCode.associationFormat, compressedSize: 0, parent: parent,
+                                 associationType: MTPCode.genericFolder, filename: name)
+        let reply = try dataOut(MTPCode.sendObjectInfo, [storage, parent], payload: try info.encoded())
+        guard reply.count >= 3 else { throw MTPError.protocolViolation("missing folder handle") }
+        return reply[2]
+    }
+
     /// Creates the (still empty) object on the phone. From here on, a failed upload must be cleaned up
     /// with `deleteIfUnchanged`.
     public func createObject(storage: UInt32, parent: UInt32, name: String, size: UInt64) throws -> MTPCreatedObject {

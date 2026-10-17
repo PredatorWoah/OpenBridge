@@ -28,4 +28,14 @@ public interface Store {
     List<Entry> list(String directoryId) throws IOException;
     Read open(String fileId) throws IOException;
     Upload create(String directoryId, String name) throws IOException;
+
+    /** Creates a new, empty folder and returns its ID. Never reuses or replaces an existing name. */
+    default String createDirectory(String parentId, String name) throws IOException {
+        throw new IOException("This phone can't create folders");
+    }
+
+    /** A small JPEG preview of a photo or video, at most `size` pixels on its longer side. */
+    default byte[] thumbnail(String fileId, int size) throws IOException {
+        throw new IOException("No preview");
+    }
 }

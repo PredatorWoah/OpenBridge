@@ -11,6 +11,7 @@ public final class Session {
     private final byte[] secret;
     private final byte[] fingerprint;
     private final Pairing.Approver approver;
+    private final Clipboard clipboard;
     private final SecureRandom random = new SecureRandom();
 
     /** A session that only accepts clients that already hold the secret. */
@@ -21,7 +22,12 @@ public final class Session {
      * certificate, and `approver` shows the 6-digit code to the user.
      */
     public Session(Store store, byte[] secret, byte[] fingerprint, Pairing.Approver approver) {
-        this.store = store; this.secret = secret.clone(); this.approver = approver;
+        this(store, secret, fingerprint, approver, null);
+    }
+
+    /** Like the pairing constructor, and also shares `clipboard` (null: clipboard requests fail). */
+    public Session(Store store, byte[] secret, byte[] fingerprint, Pairing.Approver approver, Clipboard clipboard) {
+        this.store = store; this.secret = secret.clone(); this.approver = approver; this.clipboard = clipboard;
         this.fingerprint = fingerprint == null ? null : fingerprint.clone();
     }
 
@@ -84,7 +90,54 @@ public final class Session {
                     }
                     break;
                 }
-                default: throw new IOException("Unsupported operation");
+                case 4: {   // MKDIR: parent ID, then a name; replies with the new folder's ID
+                    String name = Wire.readString(in, 255);
+                    Wire.validateName(name);
+                    String created = store.createDirectory(id, name);
+                    out.writeByte(0); responseStarted = true;
+                    Wire.writeString(out, created);
+                    break;
+                }
+                case 5: {   // THUMB: file ID, then the longest side in pixels; replies with a JPEG
+                    int size = in.readInt();
+                    if (size < 32 || size > 1024) throw new IOException("Invalid preview size");
+                    byte[] jpeg = store.thumbnail(id, size);
+                    if (jpeg == null || jpeg.length == 0 || jpeg.length > Wire.MAX_THUMBNAIL) throw new IOException("No preview");
+                    out.writeByte(0); responseStarted = true;
+                    out.writeInt(jpeg.length);
+                    out.write(jpeg);
+                    break;
+                }
+                case 6: {   // GET from an offset, to resume a download: replies with the full size, then the rest
+                    long offset = in.readLong();
+                    try (Store.Read file = store.open(id)) {
+                        long size = file.size();
+                        if (size < 0 || size > Wire.MAX_FILE) throw new IOException("Unsupported file size");
+                        if (offset < 0 || offset > size) throw new IOException("Invalid resume position");
+                        InputStream stream = file.stream();
+                        Wire.skip(stream, offset);
+                        out.writeByte(0); responseStarted = true;
+                        out.writeLong(size);
+                        Wire.copy(stream, out, size - offset);
+                    }
+                    break;
+                }
+                case 7: {   // CLIPBOARD GET
+                    if (clipboard == null) throw new IOException("Clipboard sharing is not available");
+                    String text = clipboard.read();
+                    if (text.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > Wire.MAX_CLIPBOARD) throw new IOException("Clipboard is too large");
+                    out.writeByte(0); responseStarted = true;
+                    Wire.writeString(out, text);
+                    break;
+                }
+                case 8: {   // CLIPBOARD SET
+                    if (clipboard == null) throw new IOException("Clipboard sharing is not available");
+                    String text = Wire.readString(in, Wire.MAX_CLIPBOARD);
+                    clipboard.write(text);
+                    out.writeByte(0);
+                    break;
+                }
+                default: throw new IOException("Unsupported operation; update OpenBridge on the phone");
             }
         } catch (IOException | SecurityException e) {
             if (responseStarted) throw new IOException("Transfer interrupted", e);

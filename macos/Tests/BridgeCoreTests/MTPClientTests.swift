@@ -85,8 +85,9 @@ final class MTPClientTests: XCTestCase {
         do { _ = try await client.list(id: "bogus"); XCTFail("bad id") } catch {}
 
         // A USB failure mid-download resets the phone; the next action reconnects with a new session.
+        let content = Data((0..<50_000).map { UInt8($0 % 241) })
         phone.objects[60] = .init(storage: 0x10001, parent: MTPSession.root, name: "big.bin", folder: false,
-                                  data: Data(repeating: 7, count: 50_000), bigSize: nil)
+                                  data: content, bigSize: nil)
         let directory = try temporaryDirectory()
         let file = Entry(id: "o:65537:60", name: "big.bin", directory: false, size: 50_000)
         // Object info (data + response), then the first data chunk succeed; the failure hits the next chunk.
@@ -97,9 +98,61 @@ final class MTPClientTests: XCTestCase {
         XCTAssertNil(phone.breakAfterReads, "the failure was triggered")
         XCTAssertEqual(partial, 0, "failed inside the data phase, before the end")
         XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("a.bin").path))
-        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), [], "temporary file removed")
-        try await client.download(file, to: directory.appendingPathComponent("b.bin")) { _, _ in }
-        XCTAssertEqual(try Data(contentsOf: directory.appendingPathComponent("b.bin")).count, 50_000)
+        // The interrupted download is kept, so the next attempt continues instead of starting over.
+        let kept = directory.appendingPathComponent(".a.bin.50000.openbridge-part")
+        let keptSize = try Data(contentsOf: kept).count
+        XCTAssertGreaterThan(keptSize, 0)
+        XCTAssertLessThan(keptSize, 50_000)
+        var resumedFrom: Int64 = -1
+        try await client.download(file, to: directory.appendingPathComponent("a.bin")) { done, _ in if resumedFrom < 0 { resumedFrom = done } }
+        XCTAssertEqual(resumedFrom, Int64(keptSize), "continued from the kept bytes")
+        XCTAssertEqual(try Data(contentsOf: directory.appendingPathComponent("a.bin")), content)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: kept.path), "partial file published")
+        XCTAssertEqual(phone.violations, [])
+    }
+
+    @MainActor
+    func testResumeStartsOverWhenThePhoneCannot() async throws {
+        let phone = FakePhone()
+        phone.supportsPartialObject = false
+        let client = client(phone)
+        _ = try await client.list(id: "")
+        let content = Data((0..<20_000).map { UInt8($0 % 239) })
+        phone.objects[61] = .init(storage: 0x10001, parent: MTPSession.root, name: "clip.bin", folder: false, data: content, bigSize: nil)
+        let directory = try temporaryDirectory()
+        let target = directory.appendingPathComponent("clip.bin")
+        try Data(content.prefix(5000)).write(to: directory.appendingPathComponent(".clip.bin.20000.openbridge-part"))
+        try await client.download(Entry(id: "o:65537:61", name: "clip.bin", directory: false, size: 20_000), to: target) { _, _ in }
+        XCTAssertEqual(try Data(contentsOf: target), content)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), ["clip.bin"])
+
+        // A partial copy of a different size is never continued.
+        try Data(repeating: 1, count: 100).write(to: directory.appendingPathComponent(".other.bin.999.openbridge-part"))
+        phone.supportsPartialObject = true
+        let second = directory.appendingPathComponent("again.bin")
+        try Data(repeating: 9, count: 5000).write(to: directory.appendingPathComponent(".again.bin.20000.openbridge-part"))
+        do { try await client.download(Entry(id: "o:65537:61", name: "clip.bin", directory: false, size: 20_001), to: second) { _, _ in }; XCTFail("size changed") }
+        catch { XCTAssertTrue(error.localizedDescription.contains("changed")) }
+        XCTAssertEqual(phone.violations, [])
+    }
+
+    @MainActor
+    func testFoldersAndThumbnails() async throws {
+        let phone = FakePhone()
+        let client = client(phone)
+        let top = try await client.list(id: "s:65537")
+        let made = try await client.makeFolder(named: "Trips", in: "s:65537")
+        XCTAssertTrue(made.directory)
+        let afterCreate = try await client.list(id: "s:65537")
+        XCTAssertEqual(afterCreate.map(\.name), ["DCIM", "Download", "Trips", "huge.mkv"])
+        let inside = try await client.list(id: made.id)
+        XCTAssertEqual(inside, [])
+        do { _ = try await client.makeFolder(named: "trips", in: "s:65537"); XCTFail("name clash") }
+        catch { XCTAssertTrue(error.localizedDescription.contains("already exists")) }
+        let photos = try await client.list(id: top[0].id)
+        let preview = try await client.thumbnail(photos[0], size: 256)
+        XCTAssertEqual(preview.first, 0xFF)
+        do { _ = try await client.thumbnail(top[2], size: 256); XCTFail("no preview for a video without one") } catch {}
         XCTAssertEqual(phone.violations, [])
     }
 

@@ -10,7 +10,7 @@ let package = Package(
         .target(name: "ObjCSupport"),
         .target(name: "MTPCore", dependencies: [.target(name: "ObjCSupport", condition: .when(platforms: [.macOS]))]),
         .target(name: "BridgeCore", dependencies: ["MTPCore"]),
-        .executableTarget(name: "OpenBridge", dependencies: ["BridgeCore"]),
+        .executableTarget(name: "OpenBridge", dependencies: ["BridgeCore", "MTPCore"]),
         // Test-only simulated phone; not linked into the app.
         .target(name: "MTPTestSupport", dependencies: ["MTPCore"]),
         .testTarget(name: "MTPCoreTests", dependencies: ["MTPCore", "MTPTestSupport"]),
