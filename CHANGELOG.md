@@ -4,6 +4,9 @@ All notable changes to OpenBridge are recorded here. Every release has an entry;
 
 ## [Unreleased]
 
+### Fixed
+- **The Mac window no longer disappears.** Switching to another app could hide the OpenBridge window for good, even though the app kept running. Clicking OpenBridge in the Dock now always brings its window back.
+
 ## [0.9.3] - 2026-10-17
 
 Fixes the Mac app crashing on **Connect over USB**.

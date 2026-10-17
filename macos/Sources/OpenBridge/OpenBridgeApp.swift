@@ -203,8 +203,29 @@ struct BrowserView: View {
     }
 }
 
+/// Keeps OpenBridge a normal foreground app: it activates on launch, and clicking its Dock icon
+/// brings the window back even when it was hidden, minimized or behind other apps.
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        NSApp.unhide(nil)
+        for window in sender.windows where window.canBecomeMain {
+            if window.isMiniaturized { window.deminiaturize(nil) }
+            window.makeKeyAndOrderFront(nil)
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        return true   // with no window left, SwiftUI opens a new one
+    }
+}
+
 @main
 struct OpenBridgeApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+
     var body: some Scene {
         WindowGroup { BrowserView() }
     }

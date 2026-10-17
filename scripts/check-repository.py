@@ -26,6 +26,7 @@ with (root / "macos/Info.plist").open("rb") as handle:
 assert info["CFBundleExecutable"] == "OpenBridge"
 assert info["NSLocalNetworkUsageDescription"]
 assert "NSAppTransportSecurity" not in info
+assert info["NSPrincipalClass"] == "NSApplication", "without it the window can vanish and the Dock icon cannot bring it back"
 assert info["CFBundleIconFile"] == "AppIcon" and (root / "macos/AppIcon.icns").read_bytes()[:4] == b"icns"
 application = manifest.find("application").attrib
 assert application[ns + "icon"] == "@mipmap/ic_launcher" and application[ns + "roundIcon"] == "@mipmap/ic_launcher_round"
