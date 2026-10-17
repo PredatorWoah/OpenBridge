@@ -4,6 +4,9 @@ All notable changes to OpenBridge are recorded here. Every release has an entry;
 
 ## [Unreleased]
 
+### Fixed
+- **Mac: folders show their files right away.** Opening the phone or a folder could leave the list blank until you went back and opened it again. Folders now fade in as a whole in a fraction of a second, and rows no longer wait to appear while you scroll.
+
 ## [0.9.4] - 2026-10-17
 
 A brand new look on both devices, built around the sunset arch from the icon.

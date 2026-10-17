@@ -482,15 +482,18 @@ struct BrowserScreen: View {
 
                 ScrollView {
                     LazyVStack(spacing: 2) {
-                        ForEach(Array(model.entries.enumerated()), id: \.element.id) { index, entry in
+                        ForEach(model.entries) { entry in
                             FileRow(entry: entry, selected: model.selection == entry.id)
-                                .modifier(Cascade(index: index))
                                 .onTapGesture(count: 2) { model.open(entry) }
                                 .onTapGesture { model.selection = entry.id }
                         }
                     }
                     .padding(10)
                 }
+                // Each folder fades in as a whole, quickly; rows never wait on their own timers.
+                .id(model.path.last?.id ?? "")
+                .transition(.opacity.combined(with: .offset(y: 6)))
+                .animation(.easeOut(duration: 0.15), value: model.path.last?.id)
                 if model.entries.isEmpty && !model.busy {
                     Text("This folder is empty.").foregroundStyle(Palette.muted).frame(maxHeight: .infinity)
                 }
@@ -505,22 +508,6 @@ struct BrowserScreen: View {
             }
             .animation(.spring(response: 0.5, dampingFraction: 0.75), value: model.transfer != nil)
         }
-    }
-}
-
-/// Rows slide in one after another when a folder opens.
-struct Cascade: ViewModifier {
-    var index: Int
-    @State private var shown = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    func body(content: Content) -> some View {
-        content
-            .opacity(shown ? 1 : 0)
-            .offset(y: shown ? 0 : 10)
-            .onAppear {
-                if reduceMotion { shown = true; return }
-                withAnimation(.spring(response: 0.5, dampingFraction: 0.7).delay(0.18 + Double(min(index, 14)) * 0.035)) { shown = true }
-            }
     }
 }
 
