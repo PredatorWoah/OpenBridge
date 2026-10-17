@@ -1,8 +1,10 @@
 package org.openbridge.android
 
+import android.Manifest
 import android.app.Application
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.WindowManager
@@ -23,10 +25,14 @@ import androidx.lifecycle.ViewModelProvider
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import org.openbridge.protocol.FileStore
 import org.openbridge.protocol.Pairing
 
 class ShareModel(application: Application) : AndroidViewModel(application) {
     var folder by mutableStateOf<Uri?>(null); private set
+    /** Share all of internal storage and SD cards instead of one folder (needs All files access). */
+    var wholePhone by mutableStateOf(false); private set
+    private var awaitingWholePhone = false
     var server by mutableStateOf<SharingServer?>(null); private set
     var busy by mutableStateOf(false); private set
     var message by mutableStateOf("Choose a local folder to share."); private set
@@ -70,20 +76,48 @@ class ShareModel(application: Application) : AndroidViewModel(application) {
             message = "Select a folder from this device's internal storage or SD card."
             return
         }
-        folder = uri
+        folder = uri; wholePhone = false
         message = "Folder approved. Sharing is off."
     }
 
+    fun selectWholePhone() {
+        stop()
+        if (!AllFiles.granted(getApplication())) {
+            message = "Allow all files access for OpenBridge to share the whole phone."
+            return
+        }
+        wholePhone = true; folder = null
+        message = "Whole phone approved. Sharing is off."
+    }
+
+    /** The user went to grant All files access; called when they come back. */
+    fun awaitWholePhone() { awaitingWholePhone = true }
+
+    fun wholePhoneResult() {
+        if (!awaitingWholePhone) return
+        awaitingWholePhone = false
+        if (AllFiles.granted(getApplication())) selectWholePhone()
+        else message = "All files access was not allowed, so whole-phone sharing is off."
+    }
+
     fun start() {
-        val selected = folder ?: return
+        val selected = folder
+        val shareAll = wholePhone
+        if (selected == null && !shareAll) return
         if (busy || server != null) return
         busy = true
         val current = ++generation
         worker.execute {
             try {
                 val context = getApplication<Application>()
-                val root = DocumentFile.fromTreeUri(context, selected) ?: error("Select the folder again")
-                val created = SharingServer(context, SafStore(context.contentResolver, root), approver) { reason ->
+                val store = if (shareAll) {
+                    if (!AllFiles.granted(context)) error("All files access was turned off. Allow it again to share the whole phone.")
+                    FileStore(AllFiles.roots(context))
+                } else {
+                    val root = DocumentFile.fromTreeUri(context, selected!!) ?: error("Select the folder again")
+                    SafStore(context.contentResolver, root)
+                }
+                val created = SharingServer(context, store, approver) { reason ->
                     main.post { if (generation == current) { stop(); message = reason } }
                 }
                 main.post {
@@ -135,6 +169,20 @@ class MainActivity : ComponentActivity() {
         val picker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == RESULT_OK) result.data?.data?.let(model::select)
         }
+        val storagePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { model.wholePhoneResult() }
+        val requestWholePhone = {
+            if (AllFiles.granted(this)) model.selectWholePhone() else {
+                model.awaitWholePhone()
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    // Android 11+: the user turns on "Allow access to manage all files" for this app.
+                    try {
+                        startActivity(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:$packageName")))
+                    } catch (_: Exception) {
+                        runCatching { startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)) }
+                    }
+                } else storagePermission.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            }
+        }
         setContent {
             val sharing = model.server != null
             // Sharing stops when the Activity stops, so stop the screen timeout from ending transfers.
@@ -147,17 +195,29 @@ class MainActivity : ComponentActivity() {
                     Column(Modifier.padding(24.dp).verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         Text("OpenBridge", style = MaterialTheme.typography.headlineLarge)
-                        Text("Share one approved folder with your Mac over local Wi-Fi or a USB cable.")
+                        Text("Share one folder, or your whole phone, with your Mac over local Wi-Fi or a USB cable.")
                         Button(onClick = {
                             picker.launch(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
                                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
                                 putExtra(Intent.EXTRA_LOCAL_ONLY, true)
                             })
                         }, enabled = model.server == null && !model.busy) { Text("Choose folder") }
-                        Text(model.folder?.lastPathSegment ?: "No folder selected")
+                        OutlinedButton(onClick = requestWholePhone, enabled = model.server == null && !model.busy) {
+                            Text("Share whole phone")
+                        }
+                        Text(when {
+                            model.wholePhone -> "Whole phone: internal storage and SD card"
+                            model.folder != null -> model.folder!!.lastPathSegment ?: "Folder selected"
+                            else -> "Nothing selected"
+                        })
+                        if (model.wholePhone) {
+                            Text("A paired Mac can read and upload anywhere in your storage while sharing is on. " +
+                                "Nothing is ever deleted or overwritten. Android keeps Android/data and Android/obb private.",
+                                style = MaterialTheme.typography.bodySmall)
+                        }
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             Button(onClick = model::start,
-                                enabled = model.folder != null && model.server == null && !model.busy) {
+                                enabled = (model.folder != null || model.wholePhone) && model.server == null && !model.busy) {
                                 Text(if (model.busy) "Starting…" else "Start sharing")
                             }
                             OutlinedButton(onClick = model::stop, enabled = model.server != null || model.busy) { Text("Stop") }
@@ -197,6 +257,11 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        model.wholePhoneResult()
     }
 
     override fun onStop() {

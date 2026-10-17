@@ -100,6 +100,7 @@ public final class ProtocolTest {
         for (String name : new String[] {"wlan0", "rmnet_data0", "tun0", "lo", "ncm", "usb", "rndis0x", "eth0", null})
             check(!Wire.isUsbTetherInterface(name), "Not a USB tether interface " + name);
         pairingTests(store);
+        fileStoreTests();
         System.out.println("Protocol tests passed: " + checks + " assertions");
     }
 
@@ -144,5 +145,74 @@ public final class ProtocolTest {
         DataInputStream refused = serve(store, request.toByteArray());
         check(refused.readByte() == 1 && Wire.readString(refused, 512).contains("not available"), "Pairing unavailable");
         check(refused.available() == 0, "Nothing else sent");
+    }
+
+    private static Map<String, Store.Entry> byName(List<Store.Entry> entries) {
+        Map<String, Store.Entry> result = new LinkedHashMap<>();
+        for (Store.Entry entry : entries) result.put(entry.name, entry);
+        return result;
+    }
+
+    private static void fileStoreTests() throws Exception {
+        java.nio.file.Path base = java.nio.file.Files.createTempDirectory("openbridge-files");
+        try {
+            java.nio.file.Path internal = java.nio.file.Files.createDirectories(base.resolve("internal"));
+            java.nio.file.Path sd = java.nio.file.Files.createDirectories(base.resolve("sd"));
+            java.nio.file.Path outside = java.nio.file.Files.createDirectories(base.resolve("outside"));
+            java.nio.file.Files.writeString(outside.resolve("secret.txt"), "private");
+            java.nio.file.Path dcim = java.nio.file.Files.createDirectories(internal.resolve("DCIM"));
+            byte[] photo = new byte[70_001]; new Random(5).nextBytes(photo);
+            java.nio.file.Files.write(dcim.resolve("photo.jpg"), photo);
+            java.nio.file.Files.writeString(internal.resolve("notes.txt"), "hello");
+            java.nio.file.Files.writeString(internal.resolve(Names.TEMPORARY_PREFIX + "left-over"), "partial");
+            boolean linked = true;
+            try { java.nio.file.Files.createSymbolicLink(internal.resolve("escape"), outside); } catch (Exception e) { linked = false; }
+
+            FileStore two = new FileStore(List.of(new FileStore.Root("Internal storage", internal.toFile()), new FileStore.Root("SD card", sd.toFile())));
+            List<Store.Entry> top = two.list("");
+            check(top.size() == 2 && top.get(0).name.equals("Internal storage") && top.get(1).name.equals("SD card") && top.get(0).directory, "Storage areas at the top");
+            Map<String, Store.Entry> inside = byName(two.list(top.get(0).id));
+            check(inside.keySet().equals(new LinkedHashSet<>(List.of("DCIM", "notes.txt"))), "Folders first; temporary files and symlinks hidden: " + inside.keySet());
+            check(!linked || !inside.containsKey("escape"), "Symlink out of storage is not listed");
+            Map<String, Store.Entry> photos = byName(two.list(inside.get("DCIM").id));
+            check(photos.get("photo.jpg").size == photo.length, "File size");
+
+            // End to end through the protocol handler: download, upload, collisions, aborted upload.
+            Session session = new Session(two, SECRET);
+            DataInputStream got = serve(session, request(2, photos.get("photo.jpg").id, null, 0, null));
+            check(got.readByte() == 0 && got.readLong() == photo.length && Arrays.equals(got.readAllBytes(), photo), "Download from anywhere in storage");
+            byte[] body = new byte[123_457]; new Random(9).nextBytes(body);
+            DataInputStream put = serve(session, request(3, inside.get("DCIM").id, "upload.bin", body.length, body));
+            check(put.readByte() == 0 && put.readByte() == 0, "Upload into any folder");
+            check(Arrays.equals(java.nio.file.Files.readAllBytes(dcim.resolve("upload.bin")), body), "Uploaded bytes");
+            for (String name : new String[] {"UPLOAD.BIN", "Photo.JPG", "what?.txt", Names.TEMPORARY_PREFIX + "x"}) {
+                DataInputStream refused = serve(session, request(3, inside.get("DCIM").id, name, 1, new byte[] {1}));
+                check(refused.readByte() == 1, "Rejected upload name " + name);
+            }
+            check(serve(session, request(3, "", "top.bin", 1, new byte[] {1})).readByte() == 1, "No uploads above the storage areas");
+            check(serve(session, request(1, "not-an-id", null, 0, null)).readByte() == 1, "Unknown IDs rejected");
+            try {
+                serve(session, request(3, inside.get("DCIM").id, "cut.bin", 1000, new byte[] {1, 2, 3}));
+                throw new AssertionError("Truncated upload must fail");
+            } catch (IOException expected) {
+                check(!java.nio.file.Files.exists(dcim.resolve("cut.bin")), "Aborted upload not published");
+                try (var left = java.nio.file.Files.list(dcim)) {
+                    check(left.noneMatch(p -> p.getFileName().toString().startsWith(Names.TEMPORARY_PREFIX)), "Temporary file removed");
+                }
+            }
+            // One storage area: its contents are the top level.
+            FileStore one = new FileStore(List.of(new FileStore.Root("Internal storage", internal.toFile())));
+            check(byName(one.list("")).containsKey("DCIM"), "Single storage area listed directly");
+        } finally {
+            try (var walk = java.nio.file.Files.walk(base)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(p -> p.toFile().delete());
+            }
+        }
+    }
+
+    private static DataInputStream serve(Session session, byte[] request) throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        session.serve(new ByteArrayInputStream(request), output);
+        return new DataInputStream(new ByteArrayInputStream(output.toByteArray()));
     }
 }
