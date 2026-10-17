@@ -31,7 +31,13 @@ It asks for a password twice. Use a long random one from your password manager.
 | `ANDROID_KEYSTORE_PASSWORD` | The password from step 1. |
 | `ANDROID_KEY_ALIAS` | `openbridge` |
 
-**4. Check it.** The next release's notes show **Android signing certificate (SHA-256)**. Compare it with your key:
+**4. Check it.** The release workflow refuses to publish an APK signed with any other key than the official one:
+
+```
+4E:41:B5:C8:0D:00:E4:0B:26:4A:BF:E6:5C:98:6A:8B:6D:1F:4F:DF:F7:E6:D1:7E:EB:66:10:5A:E4:BB:16:85
+```
+
+The release notes also show **Android signing certificate (SHA-256)** (lowercase, without colons). To compare with your backup:
 
 ```sh
 "$KEYTOOL" -list -v -keystore openbridge-release.p12 -alias openbridge | grep SHA256

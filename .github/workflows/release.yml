@@ -72,7 +72,10 @@ jobs:
             apk=android/app/build/outputs/apk/release/app-release.apk
             "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$apk" > certs.txt
             grep -m1 'certificate SHA-256 digest' certs.txt | sed 's/.*digest: //' > android-signing-sha256.txt
-            test -s android-signing-sha256.txt
+            # Only the project's release key may sign a published APK (see docs/releasing.md).
+            expected=4e41b5c80d00e40b264abfe65c986a8b6d1f4fdff7e6d17eeb66105ae4bb1685
+            actual="$(tr -d ': \n' < android-signing-sha256.txt | tr 'A-F' 'a-f')"
+            [ "$actual" = "$expected" ] || { echo "::error::APK signed with $actual, not the OpenBridge release key $expected. Check the ANDROID_KEYSTORE_BASE64 secret."; exit 1; }
           else
             # 1.0 and later must never ship with a throwaway key: updates would refuse to install.
             case "$VERSION" in
