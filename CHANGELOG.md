@@ -4,6 +4,16 @@ All notable changes to OpenBridge are recorded here. Every release has an entry;
 
 ## [Unreleased]
 
+## [0.12.2] - 2026-10-18
+
+Fixes from real-device testing of 0.12.1.
+
+### Fixed
+- **Mac over USB: folder sizes and search were wrong.** Android lists a folder together with what's in it, and OpenBridge took the folder for one of its own subfolders, counting and searching it again and again. Sizes came out enormous ("My files ≥ 49 TB"), search found the same files several times ("My files › My files"), stopped early, and the list showed gaps as the duplicates piled up. Each folder is now visited once, and every item counted once.
+- **Search results follow the sort order and grid view**, and the photos-and-videos filter, like a folder does; photos show previews.
+- **Back to the results.** After opening a folder or file's location from the results, a **Results** button returns to them. **Done** closes the results and stays in the folder you searched.
+- Windows: search results follow the sort order and filter, each hit once.
+
 ## [0.12.1] - 2026-10-18
 
 Fixes from real-device testing of 0.12.0: search every folder, folder sizes over USB, and a toolbar that no longer squashes its text.

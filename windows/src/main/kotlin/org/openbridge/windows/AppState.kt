@@ -344,14 +344,22 @@ class AppState {
     val sorted: List<Entry> get() = entries.filter { entry ->
         (query.isBlank() || entry.name.contains(query.trim(), ignoreCase = true)) &&
             (show == Show.ALL || Kind.of(entry).previewable)
-    }.sortedWith { a, b ->
-        if (a.directory != b.directory) return@sortedWith if (a.directory) -1 else 1
-        val order = when (sortKey) {
+    }.sortedWith(order)
+
+    /** Search hits in the chosen order, with the photos-and-videos filter, never the same item twice. */
+    val sortedResults: List<Found> get() = (results?.found ?: emptyList()).distinctBy { it.entry.id }
+        .filter { show == Show.ALL || Kind.of(it.entry).previewable }
+        .sortedWith(compareBy(order) { it.entry })
+
+    /** Folders first, then by the chosen key and direction. */
+    private val order: Comparator<Entry> get() = Comparator { a, b ->
+        if (a.directory != b.directory) return@Comparator if (a.directory) -1 else 1
+        val result = when (sortKey) {
             SortKey.NAME -> a.name.compareTo(b.name, ignoreCase = true)
             SortKey.SIZE -> sizeOf(a).compareTo(sizeOf(b)).takeIf { it != 0 } ?: a.name.compareTo(b.name, ignoreCase = true)
             SortKey.KIND -> Kind.of(a).compareTo(Kind.of(b)).takeIf { it != 0 } ?: a.name.compareTo(b.name, ignoreCase = true)
         }
-        if (ascending) order else -order
+        if (ascending) result else -result
     }
 
     /** A file's size, or a folder's measured size (0 until measured). */

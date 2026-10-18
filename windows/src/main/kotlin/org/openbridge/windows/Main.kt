@@ -386,13 +386,13 @@ private fun ResultsList(state: AppState, results: SearchResult) {
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text(S.foundCount(results.found.size, !results.complete, state.resultsFor), color = Palette.fg, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+                Text(S.foundCount(state.sortedResults.size, !results.complete, state.resultsFor), color = Palette.fg, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
                 if (!results.complete) Text(S.searchStopped, color = Palette.muted, fontSize = 12.sp)
             }
             GhostButton(S.done) { state.changeQuery("") }
         }
         LazyColumn(Modifier.fillMaxSize().padding(horizontal = 10.dp)) {
-            items(results.found, key = { it.entry.id }) { hit ->
+            items(state.sortedResults, key = { it.entry.id }) { hit ->
                 Box {
                     Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
                         .onPointerEvent(PointerEventType.Press) { event ->

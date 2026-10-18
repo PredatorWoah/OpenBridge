@@ -121,53 +121,98 @@ struct BrowserScreen: View {
     }
 }
 
-/// Search hits from every folder below the open one, with where each one is.
+/// Search hits from every folder below the open one, with where each one is: in the chosen order, as a list or a
+/// grid, like the folder itself.
 private struct ResultsList: View {
     @ObservedObject var model: BrowserModel
     let results: SearchResult
 
     var body: some View {
+        let hits = model.sortedResults
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text(results.found.isEmpty ? "Nothing found for “\(model.resultsFor)”"
-                     : "\(results.found.count)\(results.complete ? "" : "+") found for “\(model.resultsFor)”")
-                    .font(.system(size: 13, weight: .semibold))
-                if !results.complete {
-                    Text("Showing the first ones. Search a smaller folder or a longer name for the rest.").font(.system(size: 12)).foregroundStyle(Palette.muted)
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(hits.isEmpty ? "Nothing found for “\(model.resultsFor)”"
+                         : "\(hits.count)\(results.complete ? "" : "+") found for “\(model.resultsFor)”")
+                        .font(.system(size: 13, weight: .semibold))
+                    if !results.complete {
+                        Text("Stopped after the first ones. Search a smaller folder or a longer name for the rest.")
+                            .font(.system(size: 12)).foregroundStyle(Palette.muted)
+                    }
                 }
                 Spacer()
-                Button("Done") { model.query = "" }.buttonStyle(GhostButton())
+                Button("Done") { model.query = "" }.buttonStyle(GhostButton()).help("Close the results and stay in this folder")
             }
             .padding(.horizontal, 16).padding(.vertical, 8)
             ScrollView {
-                LazyVStack(spacing: 2) {
-                    ForEach(results.found) { hit in
-                        let (symbolName, color) = symbol(for: FileKind(hit.entry))
-                        HStack(spacing: 12) {
-                            Image(systemName: symbolName).foregroundStyle(color).frame(width: 26)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(hit.entry.name).lineLimit(1).truncationMode(.middle)
-                                Text(hit.location.isEmpty ? (model.path.last?.name ?? "") : hit.location.replacingOccurrences(of: "/", with: " › "))
-                                    .font(.system(size: 11.5)).foregroundStyle(Palette.muted).lineLimit(1).truncationMode(.head)
+                if model.grid {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 128), spacing: 10)], spacing: 10) {
+                        ForEach(hits) { hit in
+                            VStack(spacing: 2) {
+                                FileTile(entry: hit.entry, selected: false, thumbnail: model.thumbnails[hit.entry.id])
+                                Text(place(hit)).font(.system(size: 10.5)).foregroundStyle(Palette.muted).lineLimit(1).truncationMode(.head)
+                                    .frame(width: 120)
                             }
-                            Spacer()
-                            if !hit.entry.directory {
-                                Text(ByteCountFormatter.string(fromByteCount: hit.entry.size, countStyle: .file)).foregroundStyle(Palette.muted).monospacedDigit()
-                            }
-                        }
-                        .font(.system(size: 13.5))
-                        .padding(.horizontal, 12).padding(.vertical, 6)
-                        .contentShape(Rectangle())
-                        .onTapGesture(count: 2) { model.openFound(hit) }
-                        .contextMenu {
-                            Button(hit.entry.directory ? "Open" : "Download…") { model.openFound(hit) }
-                            Button("Show in Folder") { model.reveal(hit) }
+                            .modifier(Hit(model: model, hit: hit))
                         }
                     }
+                    .padding(12)
+                } else {
+                    LazyVStack(spacing: 2) {
+                        ForEach(hits) { hit in
+                            row(hit).modifier(Hit(model: model, hit: hit))
+                        }
+                    }
+                    .padding(10)
                 }
-                .padding(10)
             }
         }
+    }
+
+    private func place(_ hit: Found) -> String {
+        hit.location.isEmpty ? (model.path.last?.name ?? "") : hit.location.replacingOccurrences(of: "/", with: " › ")
+    }
+
+    private func row(_ hit: Found) -> some View {
+        let (symbolName, color) = symbol(for: FileKind(hit.entry))
+        return HStack(spacing: 12) {
+            Group {
+                if let thumbnail = model.thumbnails[hit.entry.id] {
+                    Image(nsImage: thumbnail).resizable().scaledToFill().frame(width: 26, height: 26)
+                        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                } else {
+                    Image(systemName: symbolName).foregroundStyle(color)
+                }
+            }
+            .frame(width: 26, height: 26)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(hit.entry.name).lineLimit(1).truncationMode(.middle)
+                Text(place(hit)).font(.system(size: 11.5)).foregroundStyle(Palette.muted).lineLimit(1).truncationMode(.head)
+            }
+            Spacer()
+            if !hit.entry.directory {
+                Text(ByteCountFormatter.string(fromByteCount: hit.entry.size, countStyle: .file)).foregroundStyle(Palette.muted).monospacedDigit()
+            }
+        }
+        .font(.system(size: 13.5))
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+    }
+}
+
+/// Double-click and context menu for a search hit, and its preview.
+private struct Hit: ViewModifier {
+    @ObservedObject var model: BrowserModel
+    let hit: Found
+    func body(content: Content) -> some View {
+        content
+            .onTapGesture(count: 2) { model.openFound(hit) }
+            .onAppear { if !hit.entry.directory { model.loadThumbnail(hit.entry) } }
+            .contextMenu {
+                Button(hit.entry.directory ? "Open" : "Download…") { model.openFound(hit) }
+                Button("Show in Folder") { model.reveal(hit) }
+            }
     }
 }
 
@@ -262,6 +307,10 @@ private struct Toolbar: View {
         HStack(spacing: 8) {
             Button(action: model.up) { Image(systemName: "chevron.left") }
                 .buttonStyle(GhostButton()).disabled(model.path.count < 2 || model.busy).help("Up one folder")
+            if model.canReturnToResults {
+                Button(action: model.returnToResults) { Label("Results", systemImage: "magnifyingglass") }
+                    .buttonStyle(GhostButton()).fixedSize().help("Back to the search results")
+            }
             PathBar(model: model, compact: compact)
         }
     }
