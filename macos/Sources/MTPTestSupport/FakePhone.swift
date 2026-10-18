@@ -230,7 +230,8 @@ public final class FakePhone: MTPTransport {
         case MTPCode.getObjectPropList:
             guard supportsPropertyLists else { respond(0x2005, t); return }
             let parent = try reader.u32(); _ = try reader.u32(); let property = try reader.u32()
-            let children = objects.filter { $0.value.parent == parent }.sorted { $0.key < $1.key }
+            // Like Android: the folder itself comes first, then what's in it.
+            let children = objects.filter { $0.value.parent == parent || $0.key == parent }.sorted { $0.key < $1.key }
             var w = MTPWriter(); w.u32(UInt32(children.count))
             for (handle, object) in children {
                 w.u32(handle); w.u16(UInt16(property))

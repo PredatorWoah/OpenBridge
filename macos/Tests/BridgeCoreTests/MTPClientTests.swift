@@ -212,10 +212,11 @@ final class MTPClientTests: XCTestCase {
             let client = client(phone)
             let top = try await client.list(id: "s:65537")
             let dcim = try XCTUnwrap(top.first { $0.name == "DCIM" })
+            // The fake phone, like Android, lists a folder along with its contents: it must not count itself.
             let size = try await client.measure(dcim)
             XCTAssertEqual(size, FolderSize(bytes: 3000, files: 1, complete: true))
             let hits = try await client.search(in: "s:65537", for: "PHOTO")
-            XCTAssertEqual(hits.found.map(\.entry.name), ["photo.jpg"])
+            XCTAssertEqual(hits.found.map(\.entry.name), ["photo.jpg"], "each hit once")
             XCTAssertEqual(hits.found.first?.location, "DCIM")
             XCTAssertTrue(hits.complete)
             let everywhere = try await client.search(in: "", for: ".mkv")

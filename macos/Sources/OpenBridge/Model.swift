@@ -404,6 +404,7 @@ final class BrowserModel: ObservableObject {
         thumbnailQueue = []; thumbnailsRunning = 0; thumbnailEpoch += 1
         sizes = [:]; sizeQueue = []; sizing = false; sizesPending = []; current = nil; query = ""
         receiver?.cancel(); receiver = nil
+        searchReturn = nil; canReturnToResults = false
         try? FileManager.default.removeItem(at: previews)
     }
 
@@ -416,20 +417,30 @@ final class BrowserModel: ObservableObject {
         let needle = query.trimmingCharacters(in: .whitespaces)
         return entries.filter { entry in
             (needle.isEmpty || entry.name.localizedCaseInsensitiveContains(needle)) && (!mediaOnly || FileKind(entry).previewable)
-        }.sorted { a, b in
-            if a.directory != b.directory { return a.directory }
-            let order: ComparisonResult
-            switch sortKey {
-            case .name: order = a.name.localizedStandardCompare(b.name)
-            case .size:
-                let (sa, sb) = (sizeOf(a), sizeOf(b))
-                order = sa == sb ? a.name.localizedStandardCompare(b.name) : (sa < sb ? .orderedAscending : .orderedDescending)
-            case .kind:
-                let (ka, kb) = (FileKind(a), FileKind(b))
-                order = ka == kb ? a.name.localizedStandardCompare(b.name) : (ka < kb ? .orderedAscending : .orderedDescending)
-            }
-            return ascending ? order == .orderedAscending : order == .orderedDescending
+        }.sorted(by: inOrder)
+    }
+
+    /// Search hits in the chosen order, with the photos-and-videos filter, never the same item twice.
+    var sortedResults: [Found] {
+        var seen = Set<Entry.ID>()
+        return (results?.found ?? []).filter { seen.insert($0.id).inserted && (!mediaOnly || FileKind($0.entry).previewable) }
+            .sorted { inOrder($0.entry, $1.entry) }
+    }
+
+    /// Folders first, then by the chosen key and direction.
+    private func inOrder(_ a: Entry, _ b: Entry) -> Bool {
+        if a.directory != b.directory { return a.directory }
+        let order: ComparisonResult
+        switch sortKey {
+        case .name: order = a.name.localizedStandardCompare(b.name)
+        case .size:
+            let (sa, sb) = (sizeOf(a), sizeOf(b))
+            order = sa == sb ? a.name.localizedStandardCompare(b.name) : (sa < sb ? .orderedAscending : .orderedDescending)
+        case .kind:
+            let (ka, kb) = (FileKind(a), FileKind(b))
+            order = ka == kb ? a.name.localizedStandardCompare(b.name) : (ka < kb ? .orderedAscending : .orderedDescending)
         }
+        return ascending ? order == .orderedAscending : order == .orderedDescending
     }
 
     /// A file's size, or a folder's measured size (0 until measured).
@@ -550,6 +561,7 @@ final class BrowserModel: ObservableObject {
     func searchEverywhere() {
         let text = query.trimmingCharacters(in: .whitespaces)
         guard let client, !text.isEmpty, let folder = path.last?.id else { return }
+        searchReturn = nil; canReturnToResults = false
         run {
             self.status = "Searching…"
             let found = try await client.search(in: folder, for: text)
@@ -563,14 +575,27 @@ final class BrowserModel: ObservableObject {
         if hit.entry.directory { reveal(hit, inside: true) } else { download([hit.entry]) }
     }
 
+    /// Where search results came from, so "Back to results" can return after opening one.
+    private var searchReturn: (query: String, results: SearchResult, path: [(id: String, name: String)], entries: [Entry])?
+    @Published private(set) var canReturnToResults = false
+
+    func returnToResults() {
+        guard let saved = searchReturn else { return }
+        searchReturn = nil; canReturnToResults = false
+        path = saved.path; entries = saved.entries; selection = []
+        query = saved.query; results = saved.results; resultsFor = saved.query
+    }
+
     /// Goes to the folder holding a hit (or into it) and selects it.
     func reveal(_ hit: Found, inside: Bool = false) {
         guard let client else { return }
+        if let results { searchReturn = (resultsFor, results, path, entries) }
         let names = trail + hit.location.split(separator: "/").map(String.init) + (inside ? [hit.entry.name] : [])
         run {
             guard let (trail, entries) = try await self.resolve(names, client) else { self.show("That folder is no longer on the phone."); return }
             self.query = ""
             self.display(entries, at: trail)
+            self.canReturnToResults = self.searchReturn != nil
             if !inside, let match = entries.first(where: { $0.name == hit.entry.name }) { self.selection = [match.id]; self.anchor = match.id }
         }
     }

@@ -208,11 +208,13 @@ public final class MTPClient: FileSource, @unchecked Sendable {
         let deadline = Date().addingTimeInterval(8)
         var bytes: Int64 = 0, files: Int64 = 0, seen = 0
         var pending = [location.handle]
+        // Every object is counted once, even if a phone reports one in two places.
+        var counted: Set<UInt32> = [location.handle]
         while let parent = pending.popLast() {
             if Date() > deadline || seen > 50_000 { return FolderSize(bytes: bytes, files: files, complete: false) }
             let children = try await run { try $0.contents(storage: storage, parent: parent, names: false) }
             seen += children.count
-            for child in children {
+            for child in children where counted.insert(child.handle).inserted {
                 if child.folder { pending.append(child.handle) } else { bytes += Int64(clamping: child.size); files += 1 }
             }
         }
@@ -232,13 +234,14 @@ public final class MTPClient: FileSource, @unchecked Sendable {
         }
         let deadline = Date().addingTimeInterval(10)
         var found: [Found] = [], seen = 0
+        var visited = Set(pending.map { "\($0.storage):\($0.handle)" })
         while !pending.isEmpty {
             let folder = pending.removeFirst()
             if Date() > deadline || seen > 50_000 || found.count >= 500 { return SearchResult(found: found, complete: false) }
             try Task.checkCancellation()
             let children = try await run { try $0.contents(storage: folder.storage, parent: folder.handle, names: true) }
             seen += children.count
-            for child in children where (try? Wire.validateName(child.name)) != nil {
+            for child in children where (try? Wire.validateName(child.name)) != nil && visited.insert("\(folder.storage):\(child.handle)").inserted {
                 if child.name.lowercased().contains(needle) {
                     found.append(Found(entry: Entry(id: "o:\(folder.storage):\(child.handle)", name: child.name, directory: child.folder,
                                                     size: Int64(clamping: child.size)), location: folder.location))

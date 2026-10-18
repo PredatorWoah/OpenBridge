@@ -100,7 +100,8 @@ public final class MTPSession {
                 let formats = try propertyList(parent, MTPCode.objectFormatProperty)
                 let sizes = try propertyList(parent, MTPCode.objectSizeProperty)
                 let named = names ? try propertyList(parent, MTPCode.objectFileNameProperty) : [:]
-                return formats.keys.sorted().map { handle in
+                // Android lists the folder itself along with what's in it: leave it out, or it would contain itself.
+                return formats.keys.filter { $0 != parent }.sorted().map { handle in
                     let size: UInt64
                     if case .number(let value)? = sizes[handle] { size = value } else { size = 0 }
                     var name = ""
