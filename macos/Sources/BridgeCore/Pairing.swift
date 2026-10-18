@@ -14,6 +14,17 @@ enum Pairing {
         return String(format: "%06u", value % 1_000_000)
     }
 
+    /// OBP2 sends the computer's name in exactly 128 bytes: UTF-8 cut at a character boundary, padded with zeros.
+    static func nameBlock(_ name: String) -> Data {
+        var block = Data()
+        for character in name {
+            let bytes = Data(String(character).utf8)
+            if bytes.contains(0) || block.count + bytes.count > 128 { break }
+            block.append(bytes)
+        }
+        return block + Data(count: 128 - block.count)
+    }
+
     private static func hash(_ label: String, _ parts: Data...) -> Data {
         var hasher = SHA256()
         hasher.update(data: Data(label.utf8))
@@ -32,13 +43,24 @@ extension BridgeClient {
         return try await pair(address: host, port: number, show: show)
     }
 
-    static func pair(address: String, port: UInt16, show: @MainActor (String) -> Void) async throws -> BridgeClient {
+    /// This Mac's name, shown on the phone when pairing and in its list of trusted computers.
+    public static var computerName: String { Host.current().localizedName ?? "Mac" }
+
+    /// Pairs, sending this Mac's name (OBP2). A phone older than 0.11.0 answers that with "Pairing rejected" at once;
+    /// then pairing starts over without the name (OBP1).
+    static func pair(address: String, port: UInt16, named: Bool = true, show: @MainActor (String) -> Void) async throws -> BridgeClient {
+        guard named else { return try await exchange(address: address, port: port, name: nil, show: show) }
+        do { return try await exchange(address: address, port: port, name: computerName, show: show) }
+        catch BridgeError.forgotten { return try await exchange(address: address, port: port, name: nil, show: show) }
+    }
+
+    private static func exchange(address: String, port: UInt16, name: String?, show: @MainActor (String) -> Void) async throws -> BridgeClient {
         // No pin yet: the handshake records the certificate, and the commitment below ties it to the phone.
         let channel = TLSChannel(host: address, port: port, fingerprint: nil)
         defer { channel.close() }
         try await channel.connect()
         guard let fingerprint = channel.peerFingerprint else { throw BridgeError.message("The phone sent no certificate.") }
-        try await channel.send(Data("OBP1".utf8))
+        try await channel.send(name.map { Data("OBP2".utf8) + Pairing.nameBlock($0) } ?? Data("OBP1".utf8))
         try await channel.status()
         let commitment = try await channel.read(32)
         var generator = SystemRandomNumberGenerator()

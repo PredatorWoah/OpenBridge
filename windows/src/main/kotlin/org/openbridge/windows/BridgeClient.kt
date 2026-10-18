@@ -98,7 +98,7 @@ class BridgeClient internal constructor(
          * Returns a client pinned to the certificate that the code covered.
          */
         fun pair(host: String, portText: String, opened: (Closeable) -> Unit = {}, show: (String) -> Unit): BridgeClient =
-            pairAt(host, checkAddress(host, portText), opened, show)
+            pairAt(host, checkAddress(host, portText), opened, show = show)
 
         /** This PC's name, shown on the phone when pairing and in its list of trusted computers. */
         val computerName: String = System.getenv("COMPUTERNAME")?.takeIf { it.isNotBlank() }

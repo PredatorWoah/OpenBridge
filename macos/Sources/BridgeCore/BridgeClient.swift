@@ -1,10 +1,12 @@
 import Foundation
 
 public struct BridgeClient {
-    private let host: String
-    private let port: UInt16
-    private let fingerprint: Data
-    private let secret: Data
+    public let host: String
+    public let port: UInt16
+    /// SHA-256 of the phone's certificate, pinned on every connection.
+    public let fingerprint: Data
+    /// This Mac's secret for the phone, given at pairing. Saved so the phone reconnects without a code.
+    public let secret: Data
     /// Report progress about once per MiB (and always at completion) instead of on every 64 KiB chunk.
     private static let progressStep: Int64 = 1 << 20
 
@@ -17,22 +19,34 @@ public struct BridgeClient {
         self.secret = try Wire.hex(secret)
     }
 
+    /// A phone saved earlier, at its current address.
+    public init(saved host: String, port: UInt16, fingerprint: Data, secret: Data) throws {
+        guard Wire.privateIPv4(host), port > 0, fingerprint.count == 32, secret.count == 32 else {
+            throw BridgeError.message("The saved phone's address isn't valid. Pair again.")
+        }
+        self.host = host; self.port = port; self.fingerprint = fingerprint; self.secret = secret
+    }
+
+    /// The short ID the phone announces on the network: the first 8 bytes of its certificate fingerprint.
+    public var phoneID: String { fingerprint.prefix(8).map { String(format: "%02x", $0) }.joined() }
+
     // Internal injection for loopback TLS interoperability tests; public initialization validates LAN addresses.
     init(testHost: String, port: UInt16, fingerprint: Data, secret: Data) {
         self.host = testHost; self.port = port; self.fingerprint = fingerprint; self.secret = secret
     }
 
-    private func open(operation: UInt8, id: String, extra: Data = Data()) async throws -> TLSChannel {
+    private func open(operation: UInt8, id: String, extra: Data = Data(), connectTimeout: TimeInterval = 30) async throws -> TLSChannel {
         let channel = TLSChannel(host: host, port: port, fingerprint: fingerprint)
         do {
-            try await channel.connect()
+            try await channel.connect(timeout: connectTimeout)
             try await channel.send(Data("OB01".utf8) + secret + Data([operation]) + Wire.string(id) + extra)
             return channel
         } catch { channel.close(); throw error }
     }
 
-    public func list(id: String = "") async throws -> [Entry] {
-        let channel = try await open(operation: 1, id: id)
+    /// Lists a folder. `quick` gives up on connecting after 3 seconds, to look for a saved phone without waiting.
+    public func list(id: String = "", quick: Bool = false) async throws -> [Entry] {
+        let channel = try await open(operation: 1, id: id, connectTimeout: quick ? 3 : 30)
         defer { channel.close() }
         try await channel.status()
         let count = try await channel.number(4)
@@ -111,6 +125,34 @@ public struct BridgeClient {
         let length = try await channel.number(4)
         guard length > 0, length <= 1 << 20 else { throw BridgeError.message("Invalid preview.") }
         return try await channel.read(Int(length))
+    }
+
+    /// Deletes a file, or a folder with everything in it.
+    public func delete(_ entry: Entry) async throws {
+        let channel = try await open(operation: 9, id: entry.id)
+        defer { channel.close() }
+        try await channel.status()
+    }
+
+    /// Renames in place; returns the item afterwards (its ID may change).
+    public func rename(_ entry: Entry, to name: String) async throws -> Entry {
+        try Wire.validateName(name)
+        let channel = try await open(operation: 10, id: entry.id, extra: Wire.string(name))
+        defer { channel.close() }
+        try await channel.status()
+        let id = try await channel.string(limit: 128)
+        guard !id.isEmpty else { throw BridgeError.message("Invalid ID.") }
+        return Entry(id: id, name: name, directory: entry.directory, size: entry.size)
+    }
+
+    /// The total size of a folder, counted on the phone.
+    public func measure(_ folder: Entry) async throws -> FolderSize {
+        let channel = try await open(operation: 11, id: folder.id)
+        defer { channel.close() }
+        try await channel.status()
+        let bytes = try await channel.number(8), files = try await channel.number(8), complete = try await channel.number(1)
+        guard bytes <= UInt64(Int64.max), files <= UInt64(Int64.max), complete <= 1 else { throw BridgeError.message("Invalid folder size.") }
+        return FolderSize(bytes: Int64(bytes), files: Int64(files), complete: complete == 1)
     }
 
     /// The phone's clipboard text.

@@ -45,6 +45,7 @@ enum MTPCode {
     static let sendObjectInfo: UInt16 = 0x100C
     static let sendObject: UInt16 = 0x100D
     static let getObjectPropValue: UInt16 = 0x9803
+    static let setObjectPropValue: UInt16 = 0x9804
 
     static let ok: UInt16 = 0x2001
     static let sessionAlreadyOpen: UInt16 = 0x201E
@@ -53,6 +54,7 @@ enum MTPCode {
     static let associationFormat: UInt16 = 0x3001
     static let genericFolder: UInt16 = 0x0001
     static let objectSizeProperty: UInt16 = 0xDC04
+    static let objectFileNameProperty: UInt16 = 0xDC07
 }
 
 enum ContainerType: UInt16 {
