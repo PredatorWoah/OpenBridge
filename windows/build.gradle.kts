@@ -26,7 +26,7 @@ dependencies {
 
 tasks.test { useJUnitPlatform() }
 
-val appVersion = providers.gradleProperty("appVersion").orElse("0.9.9")
+val appVersion = providers.gradleProperty("appVersion").orElse("0.9.10")
 
 compose.desktop {
     application {

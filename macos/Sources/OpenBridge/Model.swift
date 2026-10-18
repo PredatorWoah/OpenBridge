@@ -69,6 +69,12 @@ final class BrowserModel: ObservableObject {
     private var anchor: Entry.ID?
     private var thumbnailsPending: Set<Entry.ID> = []
     private var thumbnailsFailed: Set<Entry.ID> = []
+    /// Previews waiting their turn, the most recently shown last. They load a few at a time so browsing and
+    /// transfers never queue behind them (over USB every request shares one cable).
+    private var thumbnailQueue: [Entry] = []
+    private var thumbnailsRunning = 0
+    /// Bumped when previews are reset, so a preview from an older connection or folder is ignored.
+    private var thumbnailEpoch = 0
     private let previews = FileManager.default.temporaryDirectory.appendingPathComponent("OpenBridge Previews", isDirectory: true)
 
     /// A batch of transfers. Whatever is left after a failure can be resumed.
@@ -112,7 +118,7 @@ final class BrowserModel: ObservableObject {
         guard !busy else { return }
         busy = true; error = nil
         task = Task {
-            defer { busy = false; task = nil; pairingCode = nil }
+            defer { busy = false; task = nil; pairingCode = nil; pumpThumbnails() }
             do { try await work() }
             catch is CancellationError { status = "Cancelled."; transfer = nil }
             catch {
@@ -219,6 +225,7 @@ final class BrowserModel: ObservableObject {
         client = nil; connected = false; showBrowser = false; entries = []; path = [("", "Phone")]
         selection = []; transfer = nil; error = nil; status = reason
         thumbnails = [:]; thumbnailsPending = []; thumbnailsFailed = []
+        thumbnailQueue = []; thumbnailsRunning = 0; thumbnailEpoch += 1
         try? FileManager.default.removeItem(at: previews)
     }
 
@@ -244,6 +251,9 @@ final class BrowserModel: ObservableObject {
 
     private func display(_ entries: [Entry], at path: [(id: String, name: String)]) {
         self.path = path; self.entries = entries; selection = []; anchor = nil
+        // Previews still waiting belong to the folder just left.
+        for entry in thumbnailQueue { thumbnailsPending.remove(entry.id) }
+        thumbnailQueue = []
     }
 
     func refresh() {
@@ -326,17 +336,28 @@ final class BrowserModel: ObservableObject {
     // MARK: Previews
 
     func loadThumbnail(_ entry: Entry) {
-        guard FileKind(entry).previewable, let client, thumbnails[entry.id] == nil,
+        guard FileKind(entry).previewable, client != nil, thumbnails[entry.id] == nil,
               !thumbnailsPending.contains(entry.id), !thumbnailsFailed.contains(entry.id) else { return }
-        // Over USB the phone handles one request at a time; never interleave previews with a transfer.
-        if overUSB && busy { return }
         thumbnailsPending.insert(entry.id)
-        Task {
-            defer { thumbnailsPending.remove(entry.id) }
-            if let data = try? await client.thumbnail(entry, size: 256), let image = NSImage(data: data) {
-                thumbnails[entry.id] = image
-            } else {
-                thumbnailsFailed.insert(entry.id)
+        thumbnailQueue.append(entry)
+        pumpThumbnails()
+    }
+
+    /// Starts waiting previews: one at a time over USB, two over Wi‑Fi, the most recently shown first. None start
+    /// while a folder is loading or a file is moving, so the preview queue can never hold up what you asked for.
+    private func pumpThumbnails() {
+        let limit = overUSB ? 1 : 2
+        while thumbnailsRunning < limit, !busy, let client, let entry = thumbnailQueue.popLast() {
+            thumbnailsRunning += 1
+            let epoch = thumbnailEpoch
+            Task {
+                let data = try? await client.thumbnail(entry, size: 256)
+                guard epoch == thumbnailEpoch else { return }
+                thumbnailsRunning -= 1
+                thumbnailsPending.remove(entry.id)
+                if let data, let image = NSImage(data: data) { thumbnails[entry.id] = image }
+                else { thumbnailsFailed.insert(entry.id) }
+                pumpThumbnails()
             }
         }
     }

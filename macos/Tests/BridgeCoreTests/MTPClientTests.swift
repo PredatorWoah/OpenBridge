@@ -157,6 +157,32 @@ final class MTPClientTests: XCTestCase {
     }
 
     @MainActor
+    func testRecoversFromAUSBHiccupByItself() async throws {
+        let phone = FakePhone()
+        let client = client(phone)
+        let top = try await client.list(id: "s:65537")
+        // The cable fails once: the listing reconnects and succeeds without anyone pressing Refresh.
+        phone.breakAfterReads = 0
+        let again = try await client.list(id: "s:65537")
+        XCTAssertEqual(again.map(\.name), top.map(\.name))
+        XCTAssertNil(phone.breakAfterReads, "the failure was triggered")
+        XCTAssertTrue(phone.aborted)
+
+        // Previews that break the connection twice stay off, so they can't keep breaking browsing.
+        let photos = try await client.list(id: top[0].id)
+        for _ in 0..<2 {
+            _ = try await client.list(id: top[0].id)   // a working session, so the failure hits the preview itself
+            phone.breakAfterReads = 0
+            do { _ = try await client.thumbnail(photos[0], size: 256); XCTFail("expected a USB failure") } catch {}
+        }
+        do { _ = try await client.thumbnail(photos[0], size: 256); XCTFail("previews are off") }
+        catch { XCTAssertTrue(error.localizedDescription.contains("No preview")) }
+        let listed = try await client.list(id: top[0].id)
+        XCTAssertEqual(listed.map(\.name), ["photo.jpg"])
+        XCTAssertEqual(phone.violations, [])
+    }
+
+    @MainActor
     func testRefusesToContinueOnADifferentPhone() async throws {
         let original = FakePhone(), other = FakePhone()
         other.serialNumber = "SOMEONE-ELSE"
