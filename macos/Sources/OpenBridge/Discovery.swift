@@ -7,6 +7,8 @@ import Network
 final class PhoneDiscovery: ObservableObject {
     struct Phone: Identifiable, Equatable {
         let name: String, host: String, port: String
+        /// The phone's short ID (from its certificate), to recognize a saved phone at a new address.
+        var phoneID: String?
         var id: String { "\(host):\(port)" }
     }
 
@@ -21,7 +23,7 @@ final class PhoneDiscovery: ObservableObject {
             let found = results.compactMap { result -> Phone? in
                 guard case .service(let name, _, _, _) = result.endpoint, case .bonjour(let txt) = result.metadata,
                       let host = txt["ip"], let port = txt["port"] else { return nil }
-                return Phone(name: name, host: host, port: port)
+                return Phone(name: name, host: host, port: port, phoneID: txt["id"])
             }
             Task { @MainActor in owner.discovery?.phones = found.sorted { $0.name < $1.name } }
         }

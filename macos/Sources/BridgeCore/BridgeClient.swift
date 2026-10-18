@@ -44,8 +44,10 @@ public struct BridgeClient {
         } catch { channel.close(); throw error }
     }
 
+    public func list(id: String = "") async throws -> [Entry] { try await list(id: id, quick: false) }
+
     /// Lists a folder. `quick` gives up on connecting after 3 seconds, to look for a saved phone without waiting.
-    public func list(id: String = "", quick: Bool = false) async throws -> [Entry] {
+    public func list(id: String, quick: Bool) async throws -> [Entry] {
         let channel = try await open(operation: 1, id: id, connectTimeout: quick ? 3 : 30)
         defer { channel.close() }
         try await channel.status()

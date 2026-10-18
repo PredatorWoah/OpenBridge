@@ -183,6 +183,26 @@ final class MTPClientTests: XCTestCase {
     }
 
     @MainActor
+    func testRenameAndDeleteOverUSB() async throws {
+        let phone = FakePhone()
+        let client = client(phone)
+        let top = try await client.list(id: "s:65537")
+        let photos = try await client.list(id: top[0].id)
+        let renamed = try await client.rename(photos[0], to: "holiday.jpg")
+        XCTAssertEqual(renamed.name, "holiday.jpg")
+        let inside = try await client.list(id: top[0].id)
+        XCTAssertEqual(inside.map(\.name), ["holiday.jpg"])
+        do { _ = try await client.rename(top[1], to: "dcim"); XCTFail("name clash") }
+        catch { XCTAssertTrue(error.localizedDescription.contains("already exists")) }
+        try await client.delete(top[0])   // DCIM, with the photo inside
+        let left = try await client.list(id: "s:65537")
+        XCTAssertEqual(left.map(\.name), ["Download", "huge.mkv"])
+        XCTAssertFalse(phone.objects.values.contains { $0.name == "holiday.jpg" })
+        do { _ = try await client.measure(top[1]); XCTFail("no folder sizes over USB") } catch {}
+        XCTAssertEqual(phone.violations, [])
+    }
+
+    @MainActor
     func testRefusesToContinueOnADifferentPhone() async throws {
         let original = FakePhone(), other = FakePhone()
         other.serialNumber = "SOMEONE-ELSE"

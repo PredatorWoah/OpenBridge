@@ -81,12 +81,26 @@ final class InteropTests: XCTestCase {
         try await client.setClipboard("from the Mac ✓")
         let roundTrip = try await client.clipboard()
         XCTAssertEqual(roundTrip, "from the Mac ✓")
+        // Rename, folder size and delete.
+        let renamed = try await client.rename(uploaded, to: "renamed.bin")
+        XCTAssertEqual(renamed.name, "renamed.bin")
+        do { _ = try await client.rename(renamed, to: "hello.txt"); XCTFail("Rename must not take an existing name") }
+        catch { XCTAssertTrue(error.localizedDescription.contains("exists")) }
+        let files = try await client.list().filter { !$0.directory }
+        let measured = try await client.measure(Entry(id: "", name: "Phone", directory: true, size: 0))
+        XCTAssertEqual(measured, FolderSize(bytes: files.map(\.size).reduce(0, +), files: Int64(files.count), complete: true))
+        try await client.delete(renamed)
+        let afterDelete = try await client.list()
+        XCTAssertFalse(afterDelete.contains { $0.name == "renamed.bin" })
+        // A different certificate or an unknown secret both mean the saved pairing is gone: pair again.
         for badPin in [false, true] {
             let rejected = BridgeClient(testHost: "127.0.0.1", port: port,
                 fingerprint: badPin ? Data(repeating: 0, count: 32) : fingerprint,
                 secret: badPin ? secret : Data(repeating: 0, count: 32))
             do { _ = try await rejected.list(); XCTFail("Bad credentials must fail") }
-            catch { /* Pin rejection or authenticated protocol rejection is expected. */ }
+            catch {
+                guard case BridgeError.forgotten = error else { XCTFail("Expected forgotten, got \(error)"); continue }
+            }
         }
         do { _ = try await client.list(id: "../../etc"); XCTFail("Traversal ID must fail") }
         catch { }
