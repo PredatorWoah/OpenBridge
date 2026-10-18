@@ -198,6 +198,9 @@ struct DeviceCard: View {
                     Button(shortcut.label) { model.jump(shortcut.label, to: shortcut.candidates) }.buttonStyle(GhostButton()).disabled(model.busy)
                 }
             }
+            Button { model.importNewPhotos() } label: { Label("Import new photos", systemImage: "photo.stack") }
+                .buttonStyle(GhostButton()).disabled(model.busy)
+                .frame(maxWidth: .infinity, alignment: .leading)
             Button { model.showBrowser = true } label: { Text("Open phone  →") }
                 .buttonStyle(SunsetButton(wide: true))
                 .modifier(Breathing())

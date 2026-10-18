@@ -61,6 +61,17 @@ object S {
     val phone = t("Phone", "手机")
     fun continuing(name: String) = t("Continuing “$name”", "继续传输“$name”")
     val cancelled = t("Cancelled.", "已取消。")
+    fun received(name: String) = t("Received “$name” from the phone · in Downloads\\OpenBridge", "已从手机收到“$name” · 保存在 下载\\OpenBridge")
+    val openReceived = t("Open received files", "打开收到的文件")
+    val importNew = t("Import new photos", "导入新照片")
+    val importTo = t("Import new photos to…", "导入新照片到…")
+    val chooseImportFolder = t("Choose where to import photos", "选择照片的导入位置")
+    val noCamera = t("This phone has no DCIM folder to import from.", "这部手机没有可导入的 DCIM 文件夹。")
+    val noNewPhotos = t("No new photos or videos since the last import.", "自上次导入后没有新的照片或视频。")
+    fun imported(count: Int) = t(if (count == 1) "Imported 1 photo or video" else "Imported $count photos and videos", "已导入 $count 个照片和视频")
+    val mirrorWireless = t("Mirror over Wi‑Fi", "通过 Wi‑Fi 投屏")
+    val mirrorWirelessStarting = t("Switching the phone to Wi‑Fi… Once the window opens, you can unplug the cable.",
+        "正在把手机切换到 Wi‑Fi… 投屏窗口打开后，就可以拔掉数据线。")
     val forgotten = t("This phone no longer trusts this PC (it was forgotten on the phone, or OpenBridge was reinstalled). Pair again.",
         "这部手机已不再信任这台电脑（可能在手机上移除了它，或重新安装了 OpenBridge）。请重新配对。")
     val yourPhones = t("YOUR PHONES", "你的手机")

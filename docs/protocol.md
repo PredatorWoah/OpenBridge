@@ -8,7 +8,7 @@ All integers are big endian. A string is a signed 32-bit nonnegative UTF-8 byte 
 | --- | --- |
 | Version | four ASCII bytes `OB01` |
 | Pairing secret | 32 raw bytes, received during pairing (each computer has its own) |
-| Operation | one byte: `1` LIST, `2` GET, `3` PUT, `4` MKDIR, `5` THUMB, `6` RESUME, `7` CLIPBOARD GET, `8` CLIPBOARD SET, `9` DELETE, `10` RENAME, `11` MEASURE |
+| Operation | one byte: `1` LIST, `2` GET, `3` PUT, `4` MKDIR, `5` THUMB, `6` RESUME, `7` CLIPBOARD GET, `8` CLIPBOARD SET, `9` DELETE, `10` RENAME, `11` MEASURE, `12` PUT RESUMABLE, `13` OUTBOX, `14` OUTBOX GET, `15` OUTBOX DONE |
 | Document ID | string, maximum 128 bytes; empty for root |
 
 Authentication is checked before the operation reaches storage. There is no unauthenticated metadata endpoint. A status is one byte: `0` success, or `1` followed by an error string (client limit 512 bytes). Any unexpected status, length, EOF, TLS failure, or timeout means failure. Close the connection; do not parse additional commands.
@@ -81,10 +81,22 @@ ID names a previously listed file or folder. After the common header, send the n
 
 ID names a previously listed folder, or the empty root. Reply: status; on success, the signed 64-bit total size in bytes of every file below it, the signed 64-bit number of files, and a byte, `1` when counting finished or `0` when it stopped early (after 5 seconds or 50,000 items) and the totals are a lower bound. Links are not followed. It hands out no IDs.
 
+## PUT RESUMABLE (12)
+
+Like PUT, so an interrupted upload can continue. After the common header, send the filename, the signed 64-bit length, then a 32-byte content key: the client's summary of the file (OpenBridge uses SHA-256 over the size, the modification time in milliseconds and the first MiB). The ready status is followed by a signed 64-bit count of bytes the phone already holds from an earlier, interrupted upload of the same name, length and key into the same folder (0 if none); the client then sends exactly length minus that many bytes, from that offset, and receives the second status as with PUT. An interrupted resumable upload is kept on the phone under a hidden name (`.openbridge-part-resume-…`, derived from the name, length and key) and removed after a week if nobody continues it. A different key never continues an old part, so a file edited in place starts over.
+
+## OUTBOX (13), OUTBOX GET (14) and OUTBOX DONE (15)
+
+Files the user sent from the phone (Share › OpenBridge), waiting for a computer to collect them. The phone never connects out: the computer asks.
+
+- **OUTBOX**: the document ID is empty; after the common header, send a signed 32-bit wait in milliseconds (0 to 25,000). The phone answers at once if files are waiting, or when one arrives, or after the wait. Reply: status; on success, a 32-bit count (0 to 1,000) and that many entries of ID (string, at most 128 bytes), name (string, at most 255 bytes, a valid filename) and signed 64-bit size.
+- **OUTBOX GET**: the ID names a waiting file; send a signed 64-bit offset. Reply as RESUME: status, the full size, then the bytes from the offset.
+- **OUTBOX DONE**: the ID names a waiting file the computer has saved completely. Reply: status. The phone deletes its copy; any computer that asks later doesn't see it.
+
 ## Discovery
 
 While sharing over Wi-Fi, the phone announces itself with DNS-SD as `_openbridge._tcp` under its device name, with TXT keys `ip`, `port`, `v=1` and, from 0.11.0, `id`: the first 8 bytes of `F` in lowercase hex, so a computer recognizes a phone it saved even when its address changed. The Mac lists these so nobody types an address. The announcement reveals only the name, address and port that the phone would otherwise show on screen; pairing still needs the 6-digit code. It stops when sharing stops.
 
 ## Evolution
 
-Unknown operation/version fails closed; servers older than 0.9.6 answer operations 4–8 with an error, and those older than 0.11.0 operations 9–11 and OBP2, and the computer asks to update the phone app. Future companion features should use a new version/capability negotiation, with explicit permissions, rather than adding implicit access to this file capability. OB01 has no arbitrary path access, background synchronization, public hosting, or command execution. (Screen mirroring is separate: it uses USB debugging over the cable, not this protocol; see SECURITY.md.)
+Unknown operation/version fails closed; servers older than 0.9.6 answer operations 4–8 with an error, and those older than 0.11.0 operations 9–11 and OBP2, and those older than 0.12.0 operations 12–15 (clients then upload with PUT and don't collect files), and the computer asks to update the phone app. Future companion features should use a new version/capability negotiation, with explicit permissions, rather than adding implicit access to this file capability. OB01 has no arbitrary path access, background synchronization, public hosting, or command execution. (Screen mirroring is separate: it uses USB debugging over the cable, not this protocol; see SECURITY.md.)

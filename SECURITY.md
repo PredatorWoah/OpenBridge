@@ -34,6 +34,15 @@ Choose File transfer only on a Mac you trust, and switch the phone back to *No d
 - The Mac's key is a 2048-bit RSA key created on first use and stored at `~/Library/Application Support/OpenBridge/adbkey.der` (mode 0600). Anyone who can read that file and plug in the phone could use USB debugging as this Mac. Revoke it anytime in the phone's Developer options (**Revoke USB debugging authorizations**); turn USB debugging off when you don't need mirroring.
 - OpenBridge pushes the official scrcpy 5.0.1 server (Apache-2.0, unmodified) to `/data/local/tmp/scrcpy-server.jar` and starts it with video only, no audio. The server file is downloaded when the app is built and verified against a pinned SHA-256 (see `third_party/scrcpy`). Mirroring sends the screen over the cable unencrypted, like scrcpy and ADB.
 - While mirroring, text copied on either side is synced to the other (scrcpy's clipboard sync). Close the window to stop; the server exits when its connection closes.
+- **Mirroring over Wi‑Fi** (**Go wireless** on the Mac, **Mirror over Wi‑Fi** on Windows) starts on the cable, then restarts the phone's USB debugging in network mode on port 5555 (`adb tcpip`). While that's on, **any device on the same network can ask to debug the phone**: the phone still requires a computer it has authorized (and shows its prompt for a new one), but treat it like leaving the door ajar. The screen and your taps travel over your Wi‑Fi unencrypted: classic ADB over TCP has no encryption (Android 11's separate wireless-debugging pairing does, but OpenBridge doesn't use it). When the mirroring window closes, OpenBridge switches the phone back to cable-only debugging (`adb usb`); restarting the phone also does. Use it only on a network you trust.
+
+## Sending from the phone
+
+**Share › OpenBridge** on the phone copies the chosen files into the app's private storage (an outbox) until a paired computer collects them; the copy is deleted once a computer confirms it saved the whole file, or when you tap **Clear**. Any computer the phone trusts can collect them while sharing is on: the computer asks the phone (it never listens for connections), over the same TLS connection with its secret. Files land in `Downloads/OpenBridge` on the Mac or PC, never replacing an existing file.
+
+## Resumable uploads
+
+An interrupted upload from a computer is kept on the phone, hidden (`.openbridge-part-resume-…` next to the destination), so the same file can continue later. It's named after the file's name, size and a 32-byte content key from the computer (a hash of its size, modification time and first MiB), so a different file never continues it. Parts nobody continues are removed when the next resumable upload into that folder starts, a week later. Over USB File transfer uploads still start over.
 
 ## Deleting and renaming
 

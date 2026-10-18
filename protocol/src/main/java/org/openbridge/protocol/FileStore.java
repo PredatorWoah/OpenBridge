@@ -89,10 +89,46 @@ public final class FileStore implements Store {
         Path part = directory.resolve(Names.TEMPORARY_PREFIX + UUID.randomUUID());
         OutputStream output = Files.newOutputStream(part, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
         reserved.add(reservation);
+        return upload(directory, name, part, output, reservation, 0, false);
+    }
+
+    @Override public synchronized Upload resume(String directoryId, String name, long size, byte[] key) throws IOException {
+        Names.requireStorable(name);
+        if (directoryId.isEmpty() && roots.size() > 1) throw new IOException("Open a storage area first, then upload");
+        Path directory = directory(directoryId);
+        String reservation = directory + "/" + Names.collisionKey(name);
+        if (reserved.contains(reservation) || exists(directory, name)) throw new IOException("Filename already exists");
+        if (!Files.isWritable(directory)) throw new IOException("Folder is read-only");
+        removeAbandoned(directory);
+        Path part = directory.resolve(Names.resumable(name, size, key));
+        if (Files.exists(part, LinkOption.NOFOLLOW_LINKS) && !Files.isRegularFile(part, LinkOption.NOFOLLOW_LINKS))
+            throw new IOException("Upload is unavailable");
+        long have = Files.exists(part, LinkOption.NOFOLLOW_LINKS) ? Files.size(part) : 0;
+        if (have > size) { Files.delete(part); have = 0; }
+        OutputStream output = Files.newOutputStream(part, StandardOpenOption.CREATE, StandardOpenOption.WRITE,
+            StandardOpenOption.APPEND, LinkOption.NOFOLLOW_LINKS);
+        reserved.add(reservation);
+        return upload(directory, name, part, output, reservation, have, true);
+    }
+
+    /** Interrupted uploads in this folder that nobody continued for a week. */
+    private static void removeAbandoned(Path directory) {
+        long cutoff = System.currentTimeMillis() - ABANDONED_MILLIS;
+        try (DirectoryStream<Path> children = Files.newDirectoryStream(directory, Names.RESUMABLE_PREFIX + "*")) {
+            for (Path child : children) {
+                if (Files.isRegularFile(child, LinkOption.NOFOLLOW_LINKS)
+                        && Files.getLastModifiedTime(child, LinkOption.NOFOLLOW_LINKS).toMillis() < cutoff) Files.deleteIfExists(child);
+            }
+        } catch (IOException ignored) {}
+    }
+
+    /** Collects into `part`, then publishes it as `name` without ever replacing a file. `keep`: an interrupted part stays. */
+    private Upload upload(Path directory, String name, Path part, OutputStream output, String reservation, long existing, boolean keep) {
         Path target = directory.resolve(name);
         return new Upload() {
             private boolean committed;
             public OutputStream stream() { return output; }
+            public long existing() { return existing; }
             public void commit() throws IOException {
                 synchronized (FileStore.this) {
                     if (exists(directory, name)) throw new IOException("Filename already exists");
@@ -104,7 +140,7 @@ public final class FileStore implements Store {
             public void close() throws IOException {
                 synchronized (FileStore.this) {
                     try { output.close(); } finally {
-                        if (!committed) Files.deleteIfExists(part);
+                        if (!committed && !keep) Files.deleteIfExists(part);
                         reserved.remove(reservation);
                     }
                 }

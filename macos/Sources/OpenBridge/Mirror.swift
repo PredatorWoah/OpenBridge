@@ -18,12 +18,16 @@ final class MirrorSession: ObservableObject, @unchecked Sendable {
     @Published private(set) var phase: Phase = .connecting("Connecting to the phone…")
     @Published private(set) var videoSize = CGSize(width: 1080, height: 2400)
     @Published private(set) var deviceName = ""
+    /** Mirroring over Wi‑Fi (the cable can come out), after starting on the cable. */
+    @Published private(set) var wireless = false
     let layer = AVSampleBufferDisplayLayer()
 
     private let lock = NSLock()
     private var adb: ADBConnection?
     private var control: ADBStream?
     private var running = false
+    /// Bumped by every start, so a finished session's thread never reports into or stops the next one.
+    private var generation = 0
     private var format: CMVideoFormatDescription?
     /// After a flush the decoder needs a keyframe; frames that depend on older ones are dropped until then.
     /// Only touched on the main thread.
@@ -41,9 +45,11 @@ final class MirrorSession: ObservableObject, @unchecked Sendable {
         lock.lock()
         guard !running else { lock.unlock(); return }
         running = true
+        generation += 1
+        let session = generation
         lock.unlock()
         phase = .connecting("Connecting to the phone…")
-        Thread { self.run() }.start()
+        Thread { self.run(session) }.start()
     }
 
     func stop() {
@@ -52,18 +58,50 @@ final class MirrorSession: ObservableObject, @unchecked Sendable {
         let adb = self.adb
         self.adb = nil; control = nil
         lock.unlock()
-        adb?.close()
+        // Over Wi‑Fi, put the phone back to cable-only debugging so it doesn't stay open on the network.
+        if wireless, let adb { Thread { ADBWireless.stopListening(adb) }.start() } else { adb?.close() }
         clipboardTimer?.invalidate(); clipboardTimer = nil
+    }
+
+    /// Switches a cable session to Wi‑Fi: same picture, no cable.
+    func goWireless() {
+        stop()
+        wireless = true
+        start()
+    }
+
+    /// Back to the cable, for "Try again" after a wireless failure.
+    func useCable() {
+        wireless = false
+        start()
     }
 
     private var isRunning: Bool { lock.lock(); defer { lock.unlock() }; return running }
 
-    private func run() {
+    private func isCurrent(_ session: Int) -> Bool { lock.lock(); defer { lock.unlock() }; return running && generation == session }
+
+    private func run(_ session: Int) {
         do {
-            let transport = try USBTransport.openADB()
             let key = try ADBKey.loadOrCreate()
             let name = "OpenBridge@" + (Host.current().localizedName ?? "Mac").replacingOccurrences(of: " ", with: "-")
-            let adb = try ADBConnection.connect(transport: transport, key: key, name: name) { self.main { self.phase = .allow } }
+            let allow = { self.main { self.phase = .allow } }
+            var adb = try ADBConnection.connect(transport: try USBTransport.openADB(), key: key, name: name, allowPrompt: allow)
+            if wireless {
+                // Ask the phone where it is on Wi‑Fi, switch its debugging to the network, and reconnect there.
+                main { self.phase = .connecting("Switching the phone to Wi‑Fi…") }
+                let address = try ADBWireless.wifiAddress(adb)
+                ADBWireless.listen(adb)
+                main { self.phase = .connecting("Connecting over Wi‑Fi to \(address)…") }
+                var wifi: ADBConnection?
+                for _ in 0..<20 where isRunning && wifi == nil {
+                    Thread.sleep(forTimeInterval: 0.5)
+                    if let transport = try? TCPTransport(host: address, port: ADBWireless.port) {
+                        wifi = try? ADBConnection.connect(transport: transport, key: key, name: name, allowPrompt: allow)
+                    }
+                }
+                guard let wifi else { throw BridgeError.message("The phone didn't answer over Wi‑Fi. Check that the Mac and phone are on the same network.") }
+                adb = wifi
+            }
             lock.lock(); self.adb = adb; let stillRunning = running; lock.unlock()
             guard stillRunning else { adb.close(); return }
             main { self.phase = .connecting("Starting mirroring on the phone…") }
@@ -73,7 +111,7 @@ final class MirrorSession: ObservableObject, @unchecked Sendable {
             }
             try adb.push(jar, to: Scrcpy.serverPath)
             let scid = UInt32.random(in: 0...0x7FFF_FFFF)
-            let shell = try adb.open("shell:" + Scrcpy.command(scid: scid, maxSize: 1920))
+            let shell = try adb.open("shell:" + Scrcpy.command(scid: scid, maxSize: wireless ? 1600 : 1920))
             let log = ShellLog(shell)
 
             // The server listens once it's up: retry for about ten seconds.
@@ -99,7 +137,8 @@ final class MirrorSession: ObservableObject, @unchecked Sendable {
             Thread { self.readDeviceMessages(control) }.start()
             try readVideo(video)
         } catch {
-            if isRunning { main { self.phase = .failed(error.localizedDescription) } }
+            guard isCurrent(session) else { return }
+            main { self.phase = .failed(error.localizedDescription) }
             stop()
         }
     }
@@ -389,6 +428,14 @@ struct MirrorView: View {
                         key("power", "Power", Scrcpy.Key.power)
                         Button { session.send(Scrcpy.rotate()) } label: { Image(systemName: "rotate.right") }
                             .buttonStyle(GhostButton()).help("Rotate")
+                        Divider().frame(height: 18)
+                        if session.wireless {
+                            Label("Wi‑Fi", systemImage: "wifi").font(.system(size: 12, weight: .semibold)).foregroundStyle(Palette.ok)
+                                .help("Mirroring over Wi‑Fi: you can unplug the cable")
+                        } else {
+                            Button { session.goWireless() } label: { Label("Go wireless", systemImage: "wifi") }
+                                .buttonStyle(GhostButton()).help("Keep mirroring over Wi‑Fi, then unplug the cable")
+                        }
                     }
                 }
                 .padding(.top, 30).padding([.horizontal, .bottom], 14)
@@ -402,6 +449,9 @@ struct MirrorView: View {
                 VStack(spacing: 14) {
                     status(title: "Mirroring stopped", text: message, spinner: false)
                     Button("Try again") { session.start() }.buttonStyle(SunsetButton())
+                    if session.wireless {
+                        Button("Use the cable instead") { session.useCable() }.buttonStyle(GhostButton())
+                    }
                     Text("Mirroring needs USB debugging: Settings › About phone › tap Build number 7 times, then Settings › Developer options › USB debugging.")
                         .font(.system(size: 12)).foregroundStyle(Palette.muted).multilineTextAlignment(.center).frame(maxWidth: 300)
                 }

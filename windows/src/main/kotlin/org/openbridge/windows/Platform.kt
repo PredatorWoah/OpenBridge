@@ -68,20 +68,40 @@ object Mirror {
     private val folder: File? = System.getProperty("compose.application.resources.dir")?.let { File(it, "scrcpy") }
     val available: Boolean get() = folder?.resolve("scrcpy.exe")?.isFile == true
 
-    /** Starts scrcpy in its own window; `finished` gets an error message, or null when the window closed normally. */
-    fun start(finished: (String?) -> Unit) {
+    /**
+     * Starts scrcpy in its own window; `finished` gets an error message, or null when the window closed normally.
+     * `wireless`: with the phone on the cable, scrcpy switches it to Wi‑Fi (`--tcpip`), and the cable can come out.
+     * When the window closes, the phone goes back to USB-only debugging, so it doesn't stay open on the network.
+     */
+    fun start(wireless: Boolean = false, finished: (String?) -> Unit) {
         val exe = folder?.resolve("scrcpy.exe")?.takeIf { it.isFile } ?: return finished(S.mirrorMissing)
         Thread {
             val result = runCatching {
-                val process = ProcessBuilder(exe.path, "--window-title=OpenBridge", "--stay-awake")
+                val arguments = mutableListOf(exe.path, "--window-title=OpenBridge", "--stay-awake")
+                if (wireless) arguments += listOf("--tcpip", "--video-bit-rate=8M", "--max-size=1920")
+                val process = ProcessBuilder(arguments)
                     .directory(exe.parentFile).redirectErrorStream(true).start()
                 val log = process.inputStream.bufferedReader().readText()
                 val code = process.waitFor()
+                if (wireless) closeWireless(exe.parentFile)
                 if (code == 0) null
                 else log.lines().lastOrNull { it.contains("ERROR") }?.substringAfter("ERROR:")?.trim()
                     ?: "Screen mirroring stopped (code $code). ${S.mirrorHint}"
             }.getOrElse { it.message }
             finished(result)
         }.apply { isDaemon = true }.start()
+    }
+
+    /** Turns wireless debugging back off on phones connected over Wi‑Fi (`adb usb` restarts it on the cable only). */
+    private fun closeWireless(folder: File) {
+        val adb = File(folder, "adb.exe").path
+        runCatching {
+            val listing = ProcessBuilder(adb, "devices").redirectErrorStream(true).start()
+            val lines = listing.inputStream.bufferedReader().readLines()
+            listing.waitFor(10, TimeUnit.SECONDS)
+            lines.map { it.split('\t') }.filter { it.size == 2 && it[1] == "device" && it[0].contains(':') }.forEach { (serial, _) ->
+                ProcessBuilder(adb, "-s", serial, "usb").start().waitFor(10, TimeUnit.SECONDS)
+            }
+        }
     }
 }

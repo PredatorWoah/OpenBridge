@@ -2,7 +2,11 @@ package org.openbridge.windows
 
 import org.openbridge.protocol.Clipboard
 import org.openbridge.protocol.FileStore
+import org.openbridge.protocol.Names
+import org.openbridge.protocol.Outbox
 import org.openbridge.protocol.Session
+import org.openbridge.protocol.Store
+import org.openbridge.protocol.Trust
 import java.io.File
 import java.net.InetAddress
 import java.nio.file.Files
@@ -30,6 +34,7 @@ class BridgeClientTest {
     private lateinit var fingerprint: ByteArray
     private val secret = ByteArray(32) { 0x5a }
     private var clip = "phone clipboard"
+    private val sent = linkedMapOf("1" to ByteArray(70_000) { (it % 13).toByte() })
 
     @BeforeTest
     fun start() {
@@ -52,7 +57,16 @@ class BridgeClientTest {
             override fun read() = clip
             override fun write(text: String) { clip = text }
         }
-        val session = Session(store, secret, fingerprint, { true }, clipboard)
+        val outbox = object : Outbox {
+            override fun waitFor(millis: Long) = sent.map { (id, data) -> Store.Entry(id, "IMG_$id.jpg", false, data.size.toLong()) }
+            override fun open(id: String): Store.Read {
+                val data = sent[id] ?: throw java.io.IOException("Already collected")
+                val stream = data.inputStream()
+                return object : Store.Read { override fun size() = data.size.toLong(); override fun stream() = stream; override fun close() {} }
+            }
+            override fun done(id: String) { sent.remove(id) }
+        }
+        val session = Session(store, Trust.single(secret), fingerprint, { true }, clipboard, outbox)
         server = tls.serverSocketFactory.createServerSocket(0, 8, InetAddress.getByName("127.0.0.1")) as SSLServerSocket
         thread(isDaemon = true) {
             while (!server.isClosed) {
@@ -145,6 +159,32 @@ class BridgeClientTest {
         client.delete(client.list().first { it.name == "DCIM" })
         assertFalse(File(phone, "DCIM").exists())
         assertEquals(listOf("renamed.txt"), client.list().map { it.name })
+    }
+
+    @Test
+    fun receivesFilesSentFromThePhone() {
+        val client = client()
+        val waiting = client.outbox(0)
+        assertEquals(listOf("IMG_1.jpg"), waiting.map { it.name })
+        val target = File(base, "IMG_1.jpg")
+        Partial.location(target, 70_000).writeBytes(ByteArray(20_000) { (it % 13).toByte() })   // an earlier, cut-off copy
+        var first = -1L
+        client.receive(waiting[0], target) { done, _ -> if (first < 0) first = done }
+        assertTrue(first > 20_000 - 1 && first <= 70_000)
+        assertContentEquals(ByteArray(70_000) { (it % 13).toByte() }, target.readBytes())
+        assertTrue(sent.isEmpty())   // the phone dropped its copy
+        assertEquals(emptyList(), client.outbox(0))
+    }
+
+    @Test
+    fun interruptedUploadsContinue() {
+        val source = File(base, "movie.mp4").apply { writeBytes(ByteArray(300_000) { (it % 7).toByte() }) }
+        // What the phone kept from an earlier attempt of this same file.
+        File(phone, Names.resumable("movie.mp4", source.length(), contentKey(source))).writeBytes(ByteArray(120_000) { (it % 7).toByte() })
+        var first = -1L
+        client().upload(source, "") { done, _ -> if (first < 0) first = done }
+        assertEquals(120_000L, first)
+        assertContentEquals(source.readBytes(), File(phone, "movie.mp4").readBytes())
     }
 
     @Test

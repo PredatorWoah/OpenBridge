@@ -253,12 +253,28 @@ private fun ShareScreen(model: Sharing, tapSun: () -> Unit, onWholePhone: () -> 
                 }
             }
             BackgroundToggle(model)
+            OutboxRow()
             TrustedRow { showTrusted = true }
             if (model.cable == Cable.NONE) UsbHint()
             Spacer(Modifier.height(14.dp))
         }
         PairingSheet(model)
         TrustedSheet(showTrusted) { showTrusted = false }
+    }
+}
+
+/** Files shared to OpenBridge that a computer hasn't collected yet. */
+@Composable
+private fun OutboxRow() {
+    val waiting = PhoneOutbox.waiting
+    if (waiting.isEmpty()) return
+    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp).glass(RoundedCornerShape(14.dp)).padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Text("↑", color = Palette.amber, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.width(10.dp))
+        Text(S.waitingFiles(waiting.size), color = Palette.fg, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+        Text(S.clear, color = Palette.muted, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.clip(CircleShape).clickable(role = Role.Button) { PhoneOutbox.clear() }.padding(horizontal = 10.dp, vertical = 4.dp))
     }
 }
 

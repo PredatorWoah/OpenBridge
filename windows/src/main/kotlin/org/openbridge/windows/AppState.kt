@@ -80,6 +80,8 @@ class AppState {
     private val pendingSizes = HashSet<String>()
     /** A newer release, to offer. */
     var update by mutableStateOf<Release?>(null); private set
+    /** The last file sent from the phone, to show in Explorer. */
+    var received by mutableStateOf<File?>(null); private set
 
     private val worker = Executors.newSingleThreadExecutor { Thread(it, "openbridge-work").apply { isDaemon = true } }
     // One preview at a time: the phone serves only a few connections at once, and browsing and transfers come first.
@@ -173,11 +175,84 @@ class AppState {
             client = paired; current = phone; deviceName = phone.name
             path = listOf("" to S.phone); entries = top; selection = emptySet(); status = ""; thumbnails = emptyMap(); sizes = emptyMap()
             pendingSizes.clear(); query = ""
+            startReceiving(paired)
         }
         // An interrupted transfer continues by itself when the same phone pairs again.
         val pending = transfer?.takeIf { samePhone && !it.done && it.remaining.isNotEmpty() } ?: return
         ui { show(S.continuing(pending.remaining.first().name)) }
         perform(pending.remaining, paired, pending.connection)
+    }
+
+    // Files sent from the phone
+
+    /** Collects files shared to OpenBridge on the phone while this connection lasts, into Downloads\OpenBridge. */
+    private fun startReceiving(phone: BridgeClient) {
+        Thread {
+            while (client === phone) {
+                val waiting = try { phone.outbox(20_000) } catch (e: BridgeException) {
+                    // A phone app before 0.12.0 can't send: stop asking.
+                    if (e.message?.let { "Unsupported operation" in it || "not available" in it } == true) return@Thread
+                    Thread.sleep(3_000); continue
+                } catch (_: Exception) { Thread.sleep(3_000); continue }
+                for (item in waiting) {
+                    if (client !== phone) break
+                    val target = Names.free(File(receivedFolder.apply { mkdirs() }, item.name))
+                    try {
+                        phone.receive(item, target)
+                        ui { received = target; show(S.received(item.name)) }
+                    } catch (_: Exception) { Thread.sleep(2_000); break }
+                }
+            }
+        }.apply { isDaemon = true; name = "openbridge-receive" }.start()
+    }
+
+    fun openReceived() {
+        val file = received
+        runCatching {
+            if (file != null && file.exists()) ProcessBuilder("explorer.exe", "/select,", file.absolutePath).start()
+            else ProcessBuilder("explorer.exe", receivedFolder.apply { mkdirs() }.absolutePath).start()
+        }
+    }
+
+    // Importing photos
+
+    /** Downloads the camera's photos and videos that weren't imported from this phone before. */
+    fun importNewPhotos(chooseFolder: Boolean = false) {
+        val phone = client ?: return
+        val key = current?.id ?: return
+        val destination = Imports.folder(chooseFolder) ?: return
+        run {
+            val (folderId, at) = cameraFolder(phone) ?: throw BridgeException(S.noCamera)
+            val media = phone.list(folderId).filter { !it.directory && Kind.of(it).previewable }
+            val done = Imports.load(key)
+            // Already imported, or already in the folder (an import that was cut off): skip.
+            val fresh = media.filter { item ->
+                Imports.line(item) !in done && File(destination, item.name).let { !(it.isFile && it.length() == item.size) }
+            }
+            if (fresh.isEmpty()) {
+                Imports.save(key, done + media.map(Imports::line))
+                ui { show(S.noNewPhotos) }
+                return@run
+            }
+            ui { transfer = Transfer("…", upload = false) }
+            perform(fresh.map { Job.Download(it, Names.free(File(destination, it.name)), at) }, phone, connection)
+            Imports.save(key, done + media.map(Imports::line))
+            ui { show(S.imported(fresh.size)) }
+        }
+    }
+
+    /** DCIM/Camera (or DCIM), looking inside the first storage when the phone lists storages first. */
+    private fun cameraFolder(phone: BridgeClient): Pair<String, List<String>>? {
+        var trail = emptyList<String>()
+        var entries = phone.list("")
+        if (entries.none { it.directory && it.name.equals("DCIM", ignoreCase = true) }) {
+            val storage = entries.firstOrNull { it.directory } ?: return null
+            entries = phone.list(storage.id); trail = listOf(storage.name)
+        }
+        val dcim = entries.firstOrNull { it.directory && it.name.equals("DCIM", ignoreCase = true) } ?: return null
+        val camera = phone.list(dcim.id).firstOrNull { it.directory && it.name.equals("Camera", ignoreCase = true) }
+            ?: return dcim.id to trail + dcim.name
+        return camera.id to trail + dcim.name + camera.name
     }
 
     // Saved phones
@@ -254,11 +329,11 @@ class AppState {
         runCatching { pairing?.close() }
     }
 
-    fun mirror() {
+    fun mirror(wireless: Boolean = false) {
         if (mirroring) return
         mirroring = true
-        show(S.mirrorStarting)
-        Mirror.start { problem -> ui { mirroring = false; if (problem != null) error = problem } }
+        show(if (wireless) S.mirrorWirelessStarting else S.mirrorStarting)
+        Mirror.start(wireless) { problem -> ui { mirroring = false; if (problem != null) error = problem } }
     }
 
     // Browsing

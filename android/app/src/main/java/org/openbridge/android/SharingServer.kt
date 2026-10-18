@@ -108,7 +108,7 @@ class SharingServer(context: Context, private val store: Store, private val trus
             generateKeyPair()
         }
         fingerprint = MessageDigest.getInstance("SHA-256").digest(keyStore.getCertificate(IDENTITY).encoded)
-        session = Session(store, trust, fingerprint, approver, clipboard)
+        session = Session(store, trust, fingerprint, approver, clipboard, PhoneOutbox)
         val managers = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm()).apply { init(keyStore, null) }
         val tls = SSLContext.getInstance("TLS").apply { init(managers.keyManagers, null, SecureRandom()) }
         fun socket() = (tls.serverSocketFactory.createServerSocket() as SSLServerSocket).apply {

@@ -23,6 +23,25 @@ public final class Names {
 
     public static boolean isTemporary(String name) { return name.startsWith(TEMPORARY_PREFIX); }
 
+    /** Prefix of interrupted uploads kept so they can continue. */
+    public static final String RESUMABLE_PREFIX = TEMPORARY_PREFIX + "resume-";
+
+    /**
+     * The hidden file an upload collects into, so an interrupted upload of the same file to the same folder can
+     * continue. `key` is the computer's 32-byte summary of the file's contents, so a changed file never continues an
+     * old one. It's hidden from listings like any upload in progress.
+     */
+    public static String resumable(String name, long size, byte[] key) {
+        try {
+            java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
+            digest.update((collisionKey(name) + "\u0000" + size + "\u0000").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            byte[] hash = digest.digest(key);
+            StringBuilder hex = new StringBuilder(RESUMABLE_PREFIX);
+            for (int i = 0; i < 12; i++) hex.append(String.format("%02x", hash[i]));
+            return hex.toString();
+        } catch (java.security.NoSuchAlgorithmException e) { throw new IllegalStateException(e); }
+    }
+
     /** Shared storage is case-insensitive, so collisions are compared using this key. */
     public static String collisionKey(String name) { return name.toLowerCase(Locale.ROOT); }
 }

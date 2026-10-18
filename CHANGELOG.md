@@ -4,6 +4,20 @@ All notable changes to OpenBridge are recorded here. Every release has an entry;
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-18
+
+Send from the phone: share photos and files to your computer from any app, import only the new photos, uploads that survive a dropped connection, and mirroring without the cable.
+
+### Added
+- **Send from the phone.** In the gallery, Files or any app, tap **Share › OpenBridge**. The files arrive in **Downloads/OpenBridge** on your Mac or PC as soon as it's connected (or the next time it connects), and the phone drops its copy once they're safely there. If sharing is off, OpenBridge starts it, or asks you to tap the sun. Files waiting to send are listed on the phone's main screen, with **Clear**.
+- **Import new photos.** One click copies the camera's photos and videos that you haven't imported from that phone yet, into a folder you pick once. OpenBridge remembers what it imported, and an import that's cut off never makes duplicates. On the Mac it works over USB too.
+- **Uploads continue after a dropped connection.** If an upload from your computer is cut off, the phone keeps what arrived and the next upload of the same file continues from there, over Wi‑Fi. A file you've changed since starts over, so old and new bytes never mix.
+- **Mirroring over Wi‑Fi (beta).** Start mirroring on the cable, then click **Go wireless** (Mac) or **Mirror over Wi‑Fi** (Windows) and unplug. Closing the window switches the phone back to cable-only debugging.
+
+### Notes
+- Update the phone and computer apps together. Older phone apps can't send from the phone or continue uploads; everything else works as before.
+- Mirroring over Wi‑Fi uses classic ADB over the network, which isn't encrypted and lets other devices on the network ask to debug the phone while it's on. Use it on a trusted network (see SECURITY.md).
+
 ## [0.11.0] - 2026-10-18
 
 It remembers you: pair once, and your computer reconnects by itself. Plus rename and delete, folder sizes, search, update alerts, Chinese on the phone and Intel Macs.

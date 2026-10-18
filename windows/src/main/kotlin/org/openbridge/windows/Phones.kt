@@ -12,6 +12,30 @@ data class SavedPhone(val name: String, val fingerprint: ByteArray, val host: St
     override fun hashCode() = fingerprint.contentHashCode()
 }
 
+/** Where photos are imported to, and which ones were imported from each phone (%APPDATA%\OpenBridge\imported-<id>.txt). */
+object Imports {
+    private val preferences = java.util.prefs.Preferences.userRoot().node("org/openbridge")
+    private val base = File(System.getenv("APPDATA") ?: System.getProperty("user.home"), "OpenBridge")
+
+    /** The import folder; asks the first time, or when `choose` is set. */
+    fun folder(choose: Boolean): File? {
+        val saved = preferences.get("importFolder", null)?.let(::File)
+        if (!choose && saved != null && saved.isDirectory) return saved
+        val picked = Dialogs.chooseFolder(S.chooseImportFolder) ?: return null
+        preferences.put("importFolder", picked.absolutePath)
+        return picked
+    }
+
+    fun line(entry: Entry) = "${entry.name}\t${entry.size}"
+    fun load(phone: String): Set<String> = runCatching { File(base, "imported-$phone.txt").readLines().toSet() }.getOrDefault(emptySet())
+    fun save(phone: String, lines: Set<String>) {
+        runCatching { base.mkdirs(); File(base, "imported-$phone.txt").writeText(lines.joinToString("\n")) }
+    }
+}
+
+/** Files sent from the phone land here. */
+val receivedFolder = File(System.getProperty("user.home"), "Downloads/OpenBridge")
+
 /**
  * Saved phones, in %APPDATA%\OpenBridge\phones.dat. On Windows the whole file is encrypted with DPAPI, so only this
  * Windows account can read the secrets; elsewhere (development builds) it's a private file.

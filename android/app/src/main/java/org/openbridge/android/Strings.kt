@@ -64,6 +64,22 @@ object S {
     }
     val done get() = t("Done", "完成")
 
+    // Sending from the phone
+    val shareFilesOnly get() = t("Share photos or files to send them to your computer.", "分享照片或文件，即可发送到电脑。")
+    val sendingToComputer get() = t("Sending to your computer", "正在发送到电脑")
+    fun ofCount(index: Int, count: Int) = t("$index of $count", "第 $index / $count 个")
+    val couldNotRead get() = t("Couldn't read those files.", "无法读取这些文件。")
+    fun queued(count: Int, computer: String?) = when {
+        computer != null -> t(if (count == 1) "Sending to $computer" else "Sending $count files to $computer", if (count == 1) "正在发送到 $computer" else "正在把 $count 个文件发送到 $computer")
+        else -> t(if (count == 1) "Ready for your computer" else "$count files ready for your computer", if (count == 1) "已准备好发送到电脑" else "$count 个文件已准备好发送到电脑")
+    }
+    fun tapToSend(count: Int) = t(if (count == 1) "Tap the sun to send the file to your computer." else "Tap the sun to send $count files to your computer.",
+        if (count == 1) "点一下太阳，把文件发送到电脑。" else "点一下太阳，把 $count 个文件发送到电脑。")
+    fun waitingFiles(count: Int) = t(if (count == 1) "1 file waiting for your computer" else "$count files waiting for your computer",
+        "$count 个文件等待电脑接收")
+    val clear get() = t("Clear", "清除")
+    fun sentTo(computer: String?) = if (computer == null) t("Sent to your computer", "已发送到电脑") else t("Sent to $computer", "已发送到 $computer")
+
     // Updates
     fun update(version: String) = t("Update available: $version", "有新版本：$version")
 

@@ -136,6 +136,61 @@ class SafStore(private val resolver: ContentResolver, private val root: Document
         }
     }
 
+    /** Like [create], keeping an interrupted upload (under a hidden name derived from the file) so it can continue. */
+    @Synchronized
+    override fun resume(directoryId: String, name: String, size: Long, key: ByteArray): Store.Upload = storage {
+        Names.requireStorable(name)
+        val parent = document(directoryId, true)
+        val reservation = parent.uri to Names.collisionKey(name)
+        if (reservation in reserved || exists(parent, name)) throw IOException("Filename already exists")
+        if (!parent.canWrite()) throw IOException("Folder is read-only")
+        val partName = Names.resumable(name, size, key)
+        val cutoff = System.currentTimeMillis() - Store.ABANDONED_MILLIS
+        val kept = parent.listFiles().filter { it.name?.startsWith(Names.RESUMABLE_PREFIX) == true }
+        // Interrupted uploads nobody continued for a week go.
+        kept.filter { it.name != partName && it.lastModified() in 1 until cutoff }.forEach { it.delete() }
+        var found = kept.firstOrNull { it.name == partName && it.isFile }
+        var have = found?.length() ?: 0L
+        if (found != null && have > size) { found.delete(); found = null; have = 0 }
+        val part = found ?: parent.createFile("application/octet-stream", partName) ?: throw IOException("Cannot create upload")
+        if (part.name != partName) { part.delete(); throw IOException("Cannot create upload") }
+        val partUri = part.uri
+        reserved.add(reservation)
+        temporary.add(partUri)
+        val existing = have
+        try {
+            // "wa": append, so the upload continues after the bytes already kept.
+            val output = resolver.openOutputStream(partUri, if (existing > 0) "wa" else "w") ?: throw IOException("Cannot open upload")
+            object : Store.Upload {
+                var committed = false
+                override fun stream(): OutputStream = output
+                override fun existing() = existing
+                override fun commit() {
+                    synchronized(this@SafStore) {
+                        storage {
+                            if (exists(parent, name)) throw IOException("Filename already exists")
+                            if (!part.renameTo(name) || part.name != name) throw IOException("Provider could not publish filename")
+                            temporary.remove(partUri)
+                            committed = true
+                        }
+                    }
+                }
+                override fun close() {
+                    synchronized(this@SafStore) {
+                        try { output.close() } finally {
+                            // Not committed: keep what arrived, for the next attempt.
+                            temporary.remove(partUri)
+                            reserved.remove(reservation)
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            temporary.remove(partUri); reserved.remove(reservation)
+            throw e
+        }
+    }
+
     @Synchronized
     override fun createDirectory(parentId: String, name: String): String = storage {
         Names.requireStorable(name)

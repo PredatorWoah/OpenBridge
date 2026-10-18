@@ -22,6 +22,16 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- Share › OpenBridge: files sent from any app wait here for a paired computer to collect them. -->
+        <activity android:name=".ShareReceiver" android:exported="true" android:label="OpenBridge"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" android:excludeFromRecents="true" android:taskAffinity="">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+        </activity>
         <service android:name=".ShareService" android:exported="false" android:foregroundServiceType="dataSync" />
     </application>
 </manifest>

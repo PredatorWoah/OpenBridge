@@ -61,6 +61,11 @@ object Sharing {
         app = context.applicationContext as Application
         inBackground = app.getSharedPreferences("openbridge", Context.MODE_PRIVATE).getBoolean("inBackground", true)
         Trusted.attach(app)
+        PhoneOutbox.attach(app)
+        PhoneOutbox.onCollected = { name -> main.post {
+            if (PhoneOutbox.waiting.isEmpty()) android.widget.Toast.makeText(app, S.sentTo(computer), android.widget.Toast.LENGTH_SHORT).show()
+            if (note?.let { it == lastWaitingNote } == true) note = null
+        } }
         // A remembered computer reconnecting lights the sun like a fresh pairing does.
         Trusted.onSeen = { name -> main.post { if (server != null && (!paired || computer != name)) { paired = true; computer = name; ShareService.refresh(app) } } }
     }
@@ -97,6 +102,11 @@ object Sharing {
         pairingCode = null
         ShareService.clearPairing(app)
     }
+
+    private var lastWaitingNote: String? = null
+
+    /** Files are waiting to be sent and sharing needs a tap to start (shown on the main screen). */
+    fun waitingNote(text: String) { note = text; lastWaitingNote = text }
 
     fun keepInBackground(enabled: Boolean) {
         inBackground = enabled
@@ -159,7 +169,9 @@ object Sharing {
                     if (generation != current) created.close() else {
                         server = created; busy = false
                         created.start()
-                        if (inBackground) ShareService.start(app)
+                        // Android refuses a background service to an app that isn't visible; sharing then simply
+                        // stops when the app is left, as with background sharing off.
+                        if (inBackground) runCatching { ShareService.start(app) }
                     }
                 }
             } catch (e: Exception) {
