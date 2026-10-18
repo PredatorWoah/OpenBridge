@@ -61,6 +61,27 @@ object S {
     val phone = t("Phone", "手机")
     fun continuing(name: String) = t("Continuing “$name”", "继续传输“$name”")
     val cancelled = t("Cancelled.", "已取消。")
+    val forgotten = t("This phone no longer trusts this PC (it was forgotten on the phone, or OpenBridge was reinstalled). Pair again.",
+        "这部手机已不再信任这台电脑（可能在手机上移除了它，或重新安装了 OpenBridge）。请重新配对。")
+    val yourPhones = t("YOUR PHONES", "你的手机")
+    val reconnects = t("Reconnects by itself while the phone is sharing", "手机共享时会自动重新连接")
+    val nearbyNow = t("On this Wi‑Fi now", "当前在此 Wi‑Fi 中")
+    val connect = t("Connect", "连接")
+    val forget = t("Forget", "移除")
+    fun forgetConfirm(name: String) = t("Forget $name? You'll need to pair with a code again.", "移除 $name？之后需要重新用数字配对。")
+    val search = t("Search this folder", "在此文件夹中搜索")
+    val showAll = t("All files", "所有文件")
+    val showMedia = t("Photos and videos", "照片和视频")
+    val delete = t("Delete…", "删除…")
+    val rename = t("Rename…", "重命名…")
+    val newName = t("New name", "新名称")
+    fun deleteConfirm(count: Int, first: String) = if (count == 1) t("Delete “$first” from the phone? Folders are deleted with everything in them. This can't be undone.",
+        "要从手机上删除“$first”吗？文件夹会连同里面的所有内容一起删除，且无法撤销。")
+        else t("Delete $count items from the phone? Folders are deleted with everything in them. This can't be undone.",
+        "要从手机上删除 $count 项吗？文件夹会连同里面的所有内容一起删除，且无法撤销。")
+    fun deleted(count: Int) = t(if (count == 1) "Deleted" else "Deleted $count items", if (count == 1) "已删除" else "已删除 $count 项")
+    fun update(version: String) = t("Update available: $version", "有新版本：$version")
+    fun folderSize(bytes: String, files: Long, complete: Boolean) = (if (complete) "" else "≥ ") + bytes + t(" · $files files", " · $files 个文件")
     val certificateChanged = t("The phone restarted sharing, so it has a new identity. Pair again.", "手机重新开始了共享，身份已更新。请重新配对。")
     fun unreachable(address: String) = t(
         "Couldn't reach the phone at $address. Check that sharing is on and both are on the same Wi‑Fi. If a VPN or proxy is on, allow local network (LAN) traffic or turn it off.",

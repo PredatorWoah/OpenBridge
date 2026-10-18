@@ -38,6 +38,15 @@ public final class MemoryStore implements Store {
         if (!id.equals("file:hello.txt")) throw new IOException("No preview");
         return new byte[] {(byte) 0xFF, (byte) 0xD8, (byte) size, (byte) 0xFF, (byte) 0xD9};
     }
+    @Override public synchronized void delete(String id) throws IOException {
+        if (!id.startsWith("file:") || files.remove(id.substring(5)) == null) throw new IOException("Unknown file");
+    }
+    @Override public synchronized String rename(String id, String name) throws IOException {
+        if (!id.startsWith("file:") || !files.containsKey(id.substring(5))) throw new IOException("Unknown file");
+        if (files.containsKey(name)) throw new IOException("A file or folder with that name already exists");
+        files.put(name, files.remove(id.substring(5)));
+        return "file:" + name;
+    }
     @Override public synchronized Upload create(String id, String name) throws IOException {
         if (!id.isEmpty()) throw new IOException("Unknown directory");
         if (files.containsKey(name)) throw new IOException("Filename already exists");

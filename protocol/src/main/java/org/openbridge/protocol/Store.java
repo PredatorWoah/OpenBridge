@@ -38,4 +38,38 @@ public interface Store {
     default byte[] thumbnail(String fileId, int size) throws IOException {
         throw new IOException("No preview");
     }
+
+    /** Deletes a file, or a folder with everything in it. The shared storage itself can't be deleted. */
+    default void delete(String id) throws IOException {
+        throw new IOException("This phone can't delete files; update OpenBridge on the phone");
+    }
+
+    /** Renames a file or folder where it is, never to a name that exists. Returns its ID afterwards. */
+    default String rename(String id, String name) throws IOException {
+        throw new IOException("This phone can't rename files; update OpenBridge on the phone");
+    }
+
+    /** What a folder holds, counted until `deadline` (System.currentTimeMillis) or MEASURE_LIMIT items. */
+    final class Size {
+        public final long bytes, files;
+        public final boolean complete;
+        public Size(long bytes, long files, boolean complete) { this.bytes = bytes; this.files = files; this.complete = complete; }
+    }
+    int MEASURE_LIMIT = 50_000;
+
+    /** Adds up a folder through {@link #list}; stores override it to count without handing out IDs. */
+    default Size measure(String directoryId, long deadline) throws IOException {
+        long[] totals = new long[3];   // bytes, files, items seen
+        boolean complete = measure(this, directoryId, deadline, totals);
+        return new Size(totals[0], totals[1], complete);
+    }
+
+    static boolean measure(Store store, String directoryId, long deadline, long[] totals) throws IOException {
+        for (Entry entry : store.list(directoryId)) {
+            if (++totals[2] > MEASURE_LIMIT || System.currentTimeMillis() > deadline) return false;
+            if (entry.directory) { if (!measure(store, entry.id, deadline, totals)) return false; }
+            else { totals[0] += entry.size; totals[1]++; }
+        }
+        return true;
+    }
 }

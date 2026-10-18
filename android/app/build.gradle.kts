@@ -36,7 +36,7 @@ android {
             if (releaseKeystore != null) signingConfig = signingConfigs.getByName("release")
         }
     }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
     // The animated sun and the palette are shared with the Windows app.
     sourceSets["main"].java.srcDir("../../shared/compose")
     compileOptions {

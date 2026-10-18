@@ -21,6 +21,8 @@ dependencies {
     implementation(compose.desktop.currentOs)
     implementation(compose.materialIconsExtended)
     implementation("org.jmdns:jmdns:3.5.12")
+    // DPAPI, to keep saved phones' secrets readable only by this Windows account.
+    implementation("net.java.dev.jna:jna-platform:5.14.0")
     testImplementation(kotlin("test"))
 }
 

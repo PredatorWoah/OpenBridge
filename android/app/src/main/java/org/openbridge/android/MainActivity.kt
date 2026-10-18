@@ -54,7 +54,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.openbridge.ui.Palette
+import org.openbridge.ui.Release
+import org.openbridge.ui.Updates
 import org.openbridge.ui.SunEngine
 import org.openbridge.ui.drawSunArch
 
@@ -125,8 +129,14 @@ class MainActivity : ComponentActivity() {
                 if (sharing) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             }
+            // One quiet check per launch for a newer release (see Updates).
+            var update by remember { mutableStateOf<Release?>(null) }
+            LaunchedEffect(Unit) {
+                update = withContext(Dispatchers.IO) { Updates.newerThan(BuildConfig.VERSION_NAME) }
+            }
             MaterialTheme(colorScheme = darkColorScheme(primary = Palette.pink, background = Palette.night, surface = Palette.dusk)) {
-                ShareScreen(model, tapSun, onWholePhone = model::chooseWholePhone, onFolder = chooseFolder)
+                ShareScreen(model, tapSun, onWholePhone = model::chooseWholePhone, onFolder = chooseFolder, update = update,
+                    onUpdate = { runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(it.page))) } })
             }
         }
     }
@@ -155,7 +165,9 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun ShareScreen(model: Sharing, tapSun: () -> Unit, onWholePhone: () -> Unit, onFolder: () -> Unit) {
+private fun ShareScreen(model: Sharing, tapSun: () -> Unit, onWholePhone: () -> Unit, onFolder: () -> Unit,
+                        update: Release?, onUpdate: (Release) -> Unit) {
+    var showTrusted by remember { mutableStateOf(false) }
     val sharing = model.server
     val sharingActive = sharing != null || model.busy
     val byCable = model.cable == Cable.FILE_TRANSFER
@@ -197,50 +209,103 @@ private fun ShareScreen(model: Sharing, tapSun: () -> Unit, onWholePhone: () -> 
             Spacer(Modifier.height(18.dp))
             Text("OpenBridge", color = Palette.fg, fontSize = 26.sp, fontWeight = FontWeight.Bold)
             Text(when {
-                byCable -> "Connected to your computer by cable"
-                model.paired -> "Your computer is connected"
-                sharing != null -> "Waiting for your computer"
-                model.busy -> "Starting…"
-                else -> "Tap the sun to share with your computer"
+                byCable -> S.byCable
+                model.paired -> S.connectedTo(model.computer)
+                sharing != null -> S.waiting
+                model.busy -> S.starting
+                else -> S.tapSun
             }, color = Palette.muted, fontSize = 14.sp)
+            update?.let { release ->
+                Spacer(Modifier.height(8.dp))
+                Text(S.update(release.version), color = Palette.night, fontSize = 12.5.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clip(CircleShape).background(Palette.amber).clickable { onUpdate(release) }.padding(horizontal = 12.dp, vertical = 5.dp))
+            }
             // The sun's tap area. The arch itself is drawn by the full-screen canvas behind, so ripples are never clipped.
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Box(Modifier.size(250.dp).clip(CircleShape)
                     .onGloballyPositioned { anchor = it.boundsInRoot().center }
                     .clickable(remember { MutableInteractionSource() }, indication = null, role = Role.Button, onClick = tapSun)
-                    .semantics { contentDescription = if (sharingActive) "Sharing" else "Start sharing" })
+                    .semantics { contentDescription = if (sharingActive) S.sharing else S.startSharing })
             }
             StatusPill(model)
             Spacer(Modifier.height(12.dp))
             if (sharing != null && !model.paired) {
-                Text("On your computer, type", color = Palette.muted, fontSize = 13.sp)
+                Text(S.typeOnComputer, color = Palette.muted, fontSize = 13.sp)
                 SelectionContainer {
                     Text(sharing.host, color = Palette.fg, fontSize = 30.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
                 }
-                Text("port ${sharing.port}", color = Palette.muted, fontSize = 15.sp, fontFamily = FontFamily.Monospace)
+                Text(S.port(sharing.port), color = Palette.muted, fontSize = 15.sp, fontFamily = FontFamily.Monospace)
             }
             if (byCable && (sharing == null || model.paired)) {
-                Text("Open OpenBridge on your Mac, or File Explorer on a PC, to browse this phone.", color = Palette.muted, fontSize = 13.sp, textAlign = TextAlign.Center)
+                Text(S.openOnComputer, color = Palette.muted, fontSize = 13.sp, textAlign = TextAlign.Center)
             } else if (model.cable == Cable.CHARGING && sharing == null) {
-                Text("Cable connected, but only charging. Choose File transfer in the USB notification to browse from your computer.",
-                    color = Palette.muted, fontSize = 13.sp, textAlign = TextAlign.Center)
+                Text(S.chargingOnly, color = Palette.muted, fontSize = 13.sp, textAlign = TextAlign.Center)
             }
             model.note?.let { Text(it, color = Palette.amber, fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp)) }
             Spacer(Modifier.height(16.dp))
             if (sharingActive) {
-                GhostButton("Stop sharing", model::stop, Modifier.fillMaxWidth())
+                GhostButton(S.stopSharing, model::stop, Modifier.fillMaxWidth())
             } else {
                 Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    ChoiceTile("Whole phone", "Every folder, like a USB drive", model.wholePhone, onWholePhone, Modifier.weight(1f).fillMaxHeight())
-                    ChoiceTile("One folder", model.folder?.lastPathSegment?.substringAfterLast(':')?.ifEmpty { "Storage" } ?: "Only the folder you pick",
+                    ChoiceTile(S.wholePhone, S.wholePhoneDetail, model.wholePhone, onWholePhone, Modifier.weight(1f).fillMaxHeight())
+                    ChoiceTile(S.oneFolder, model.folder?.lastPathSegment?.substringAfterLast(':')?.ifEmpty { S.storage } ?: S.oneFolderDetail,
                         !model.wholePhone, onFolder, Modifier.weight(1f).fillMaxHeight())
                 }
             }
             BackgroundToggle(model)
+            TrustedRow { showTrusted = true }
             if (model.cable == Cable.NONE) UsbHint()
             Spacer(Modifier.height(14.dp))
         }
         PairingSheet(model)
+        TrustedSheet(showTrusted) { showTrusted = false }
+    }
+}
+
+/** How many computers reconnect by themselves; opens the list to forget one. */
+@Composable
+private fun TrustedRow(onOpen: () -> Unit) {
+    val count = Trusted.computers.size
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(onClick = onOpen, role = Role.Button).padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(S.trusted, color = Palette.fg, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+            Text(if (count == 0) S.noTrusted else S.trustedCount(count), color = Palette.muted, fontSize = 12.sp, maxLines = 2)
+        }
+        Text("›", color = Palette.muted, fontSize = 22.sp)
+    }
+}
+
+@Composable
+private fun BoxScope.TrustedSheet(visible: Boolean, onClose: () -> Unit) {
+    BackHandler(enabled = visible, onBack = onClose)
+    AnimatedVisibility(visible, Modifier.align(Alignment.BottomCenter),
+        enter = slideInVertically(spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)) { it } + fadeIn(),
+        exit = slideOutVertically { it } + fadeOut()) {
+        Column(Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp))
+            .background(Brush.verticalGradient(listOf(Color(0xF23C2878), Color(0xF7140E32))))
+            .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp))
+            .navigationBarsPadding().padding(24.dp)) {
+            Box(Modifier.size(40.dp, 5.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.3f)).align(Alignment.CenterHorizontally))
+            Spacer(Modifier.height(16.dp))
+            Text(S.trusted, color = Palette.fg, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            Text(if (Trusted.computers.isEmpty()) S.noTrusted else S.forgetHint, color = Palette.muted, fontSize = 13.sp)
+            Spacer(Modifier.height(12.dp))
+            Trusted.computers.forEach { computer ->
+                Row(Modifier.fillMaxWidth().padding(vertical = 6.dp).glass(RoundedCornerShape(14.dp)).padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(computer.name, color = Palette.fg, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                        Text(S.lastSeen((System.currentTimeMillis() - computer.seen) / 86_400_000), color = Palette.muted, fontSize = 12.sp)
+                    }
+                    Text(S.forget, color = Palette.amber, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clip(CircleShape).clickable(role = Role.Button) { Trusted.forget(computer.id) }.padding(horizontal = 10.dp, vertical = 6.dp))
+                }
+            }
+            Spacer(Modifier.height(14.dp))
+            GhostButton(S.done, onClose, Modifier.fillMaxWidth())
+        }
     }
 }
 
@@ -259,11 +324,11 @@ private fun StatusPill(model: Sharing) {
         Box(Modifier.size(8.dp).clip(CircleShape).background(if (on) Palette.ok else Color(0xFF8E8E9C)))
         Spacer(Modifier.width(8.dp))
         Text(when {
-            model.paired -> "Connected to your computer"
-            on -> "Connected by cable · File transfer"
-            model.server != null -> if (model.wholePhone) "Sharing whole phone" else "Sharing one folder"
-            model.busy -> "Starting…"
-            else -> "Not sharing"
+            model.paired -> model.computer ?: S.connectedComputer
+            on -> S.cableFileTransfer
+            model.server != null -> if (model.wholePhone) S.sharingWholePhone else S.sharingOneFolder
+            model.busy -> S.starting
+            else -> S.notSharing
         }, color = Palette.fg, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
     }
 }
@@ -286,8 +351,8 @@ private fun ChoiceTile(title: String, detail: String, selected: Boolean, onClick
 private fun BackgroundToggle(model: Sharing) {
     Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
-            Text("Keep sharing in the background", color = Palette.fg, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
-            Text(if (model.inBackground) "A notification lets you stop it anytime." else "Leaving the app stops sharing.",
+            Text(S.keepInBackground, color = Palette.fg, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+            Text(if (model.inBackground) S.backgroundOn else S.backgroundOff,
                 color = Palette.muted, fontSize = 12.sp)
         }
         Switch(model.inBackground, model::keepInBackground, colors = SwitchDefaults.colors(
@@ -299,9 +364,8 @@ private fun BackgroundToggle(model: Sharing) {
 @Composable
 private fun UsbHint() {
     Column(Modifier.fillMaxWidth().glass().padding(horizontal = 16.dp, vertical = 12.dp)) {
-        Text("Using a cable?", color = Palette.fg, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
-        Text("Plug into your Mac or PC and choose File transfer in the USB notification. OpenBridge on the Mac, or File Explorer on Windows, opens your phone. No need to tap the sun for a cable.",
-            color = Palette.muted, fontSize = 12.5.sp)
+        Text(S.usingCable, color = Palette.fg, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+        Text(S.cableHint, color = Palette.muted, fontSize = 12.5.sp)
     }
 }
 
@@ -340,8 +404,8 @@ private fun BoxScope.PairingSheet(model: Sharing) {
             horizontalAlignment = Alignment.CenterHorizontally) {
             Box(Modifier.size(40.dp, 5.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.3f)))
             Spacer(Modifier.height(18.dp))
-            Text("Pair with this computer?", color = Palette.fg, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-            Text("Check that your computer shows the same code", color = Palette.muted, fontSize = 13.sp)
+            Text(S.pairWith(model.pairingComputer), color = Palette.fg, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+            Text(S.sameCode, color = Palette.muted, fontSize = 13.sp)
             Spacer(Modifier.height(20.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 shown.forEachIndexed { index, digit ->
@@ -352,11 +416,11 @@ private fun BoxScope.PairingSheet(model: Sharing) {
                 }
             }
             Spacer(Modifier.height(10.dp))
-            Text("Codes differ? Tap Cancel: another device may be trying to connect.", color = Palette.muted, fontSize = 12.sp, textAlign = TextAlign.Center)
+            Text(S.codesDiffer, color = Palette.muted, fontSize = 12.sp, textAlign = TextAlign.Center)
             Spacer(Modifier.height(18.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                GhostButton("Cancel", { model.decidePairing(false) }, Modifier.weight(1f))
-                SunsetButton("Pair", { model.decidePairing(true) }, Modifier.weight(1.4f))
+                GhostButton(S.cancel, { model.decidePairing(false) }, Modifier.weight(1f))
+                SunsetButton(S.pair, { model.decidePairing(true) }, Modifier.weight(1.4f))
             }
         }
     }

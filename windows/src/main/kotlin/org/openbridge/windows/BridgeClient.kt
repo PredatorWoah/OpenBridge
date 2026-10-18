@@ -21,15 +21,21 @@ import javax.net.ssl.X509TrustManager
 
 data class Entry(val id: String, val name: String, val directory: Boolean, val size: Long)
 
-/** A problem to show the user as is. `lost` means the phone can't be reached any more (stopped sharing, left the Wi‑Fi). */
-class BridgeException(message: String, val lost: Boolean = false) : IOException(message)
+/**
+ * A problem to show the user as is. `lost` means the phone can't be reached any more (stopped sharing, left the
+ * Wi‑Fi); `forgotten` that it no longer trusts this PC (Forget on the phone, or the app reinstalled): pair again.
+ */
+class BridgeException(message: String, val lost: Boolean = false, val forgotten: Boolean = false) : IOException(message)
+
+/** What MEASURE found in a folder; `complete` is false when the phone stopped counting early. */
+data class FolderSize(val bytes: Long, val files: Long, val complete: Boolean)
 
 /**
  * The OB01 client (see docs/protocol.md): one authenticated request per TLS connection, pinned to the phone's
  * certificate learned by 6-digit pairing. Blocking: call from a background thread.
  */
 class BridgeClient internal constructor(
-    val host: String, val port: Int, private val fingerprint: ByteArray, private val secret: ByteArray,
+    val host: String, val port: Int, val fingerprint: ByteArray, internal val secret: ByteArray,
 ) {
     companion object {
         private const val TIMEOUT = 30_000
@@ -69,11 +75,15 @@ class BridgeClient internal constructor(
                 socket.startHandshake()
             } catch (e: Exception) {
                 socket.close()
-                throw if (e is javax.net.ssl.SSLHandshakeException && e.cause is CertificateException) BridgeException(S.certificateChanged, lost = true)
+                throw if (e is javax.net.ssl.SSLHandshakeException && e.cause is CertificateException) BridgeException(S.certificateChanged, lost = true, forgotten = true)
                 else BridgeException(S.unreachable("$host:$port"), lost = true)
             }
             return socket
         }
+
+        /** Whether anything listens at the address, checked quickly, before trying a saved phone for real. */
+        fun reachable(host: String, port: Int, timeout: Int = 1_500): Boolean =
+            runCatching { java.net.Socket().use { it.connect(InetSocketAddress(host, port), timeout) }; true }.getOrDefault(false)
 
         /** Only private Wi‑Fi addresses, as on the phone and the Mac. */
         fun checkAddress(host: String, port: String): Int {
@@ -90,14 +100,30 @@ class BridgeClient internal constructor(
         fun pair(host: String, portText: String, opened: (Closeable) -> Unit = {}, show: (String) -> Unit): BridgeClient =
             pairAt(host, checkAddress(host, portText), opened, show)
 
-        /** Pairing without the address check, for loopback tests. `opened` gets the connection, so Cancel can close it. */
-        internal fun pairAt(host: String, port: Int, opened: (Closeable) -> Unit = {}, show: (String) -> Unit): BridgeClient {
+        /** This PC's name, shown on the phone when pairing and in its list of trusted computers. */
+        val computerName: String = System.getenv("COMPUTERNAME")?.takeIf { it.isNotBlank() }
+            ?: runCatching { InetAddress.getLocalHost().hostName }.getOrNull() ?: "Windows PC"
+
+        /**
+         * Pairing without the address check, for loopback tests. `opened` gets the connection, so Cancel can close it.
+         * Sends this PC's name (OBP2); a phone older than 0.11.0 answers that with "Pairing rejected" at once, and
+         * pairing starts over without the name (OBP1).
+         */
+        internal fun pairAt(host: String, port: Int, opened: (Closeable) -> Unit = {}, named: Boolean = true, show: (String) -> Unit): BridgeClient {
+            try { return exchange(host, port, opened, if (named) computerName else null, show) }
+            catch (e: BridgeException) { if (named && e.message == REJECTED) return exchange(host, port, opened, null, show); throw e }
+        }
+
+        private const val REJECTED = "Pairing rejected"
+
+        private fun exchange(host: String, port: Int, opened: (Closeable) -> Unit, name: String?, show: (String) -> Unit): BridgeClient {
             var fingerprint: ByteArray? = null
             connect(host, port, null) { fingerprint = it }.also(opened).use { socket ->
                 val f = fingerprint ?: throw BridgeException("The phone sent no certificate.")
                 val input = DataInputStream(socket.inputStream.buffered())
                 val output = DataOutputStream(socket.outputStream.buffered())
-                output.write(Pairing.MAGIC); output.flush()
+                if (name != null) { output.write(Pairing.MAGIC2); output.write(Pairing.nameBlock(name)) } else output.write(Pairing.MAGIC)
+                output.flush()
                 status(input)
                 val commitment = ByteArray(32).also(input::readFully)
                 val macNonce = ByteArray(Pairing.NONCE).also { SecureRandom().nextBytes(it) }
@@ -116,7 +142,10 @@ class BridgeClient internal constructor(
         private fun status(input: DataInputStream) {
             when (input.readUnsignedByte()) {
                 0 -> return
-                1 -> throw BridgeException(Wire.readString(input, 512))
+                1 -> Wire.readString(input, 512).let { message ->
+                    // Only the authentication check answers this: the phone no longer knows this PC's secret.
+                    throw if (message == REJECTED) BridgeException(message, lost = true, forgotten = true) else BridgeException(message)
+                }
                 else -> throw BridgeException("The phone sent an invalid reply.")
             }
         }
@@ -235,6 +264,25 @@ class BridgeClient internal constructor(
         val length = input.readInt()
         if (length !in 1..Wire.MAX_THUMBNAIL) throw BridgeException("Invalid preview.")
         ByteArray(length).also(input::readFully)
+    }
+
+    fun delete(entry: Entry) = request(9, entry.id) { input, _ -> status(input) }
+
+    /** Renames in place and returns the item afterwards (its ID may change). */
+    fun rename(entry: Entry, name: String): Entry {
+        Wire.validateName(name)
+        return request(10, entry.id, { Wire.writeString(it, name) }) { input, _ ->
+            status(input)
+            entry.copy(id = Wire.readString(input, 128), name = name)
+        }
+    }
+
+    fun measure(folder: Entry): FolderSize = request(11, folder.id) { input, _ ->
+        status(input)
+        val bytes = input.readLong(); val files = input.readLong()
+        val complete = when (input.readUnsignedByte()) { 0 -> false; 1 -> true; else -> throw BridgeException("The phone sent an invalid reply.") }
+        if (bytes < 0 || files < 0) throw BridgeException("The phone sent an invalid reply.")
+        FolderSize(bytes, files, complete)
     }
 
     fun clipboard(): String = request(7, "") { input, _ -> status(input); Wire.readString(input, Wire.MAX_CLIPBOARD) }
