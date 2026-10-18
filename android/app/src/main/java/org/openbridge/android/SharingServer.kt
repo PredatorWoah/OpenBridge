@@ -113,7 +113,9 @@ class SharingServer(context: Context, private val store: Store, private val trus
         val tls = SSLContext.getInstance("TLS").apply { init(managers.keyManagers, null, SecureRandom()) }
         fun socket() = (tls.serverSocketFactory.createServerSocket() as SSLServerSocket).apply {
             enabledProtocols = supportedProtocols.filter { it == "TLSv1.2" || it == "TLSv1.3" }.toTypedArray()
-            reuseAddress = false
+            // Lets sharing restart on the same port while the last session's closed connections linger (TIME_WAIT).
+            // It never lets a second listener take a port that's in use.
+            reuseAddress = true
         }
         listener = socket()
         try {
