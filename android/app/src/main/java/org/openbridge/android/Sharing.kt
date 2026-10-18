@@ -169,7 +169,9 @@ object Sharing {
                     if (generation != current) created.close() else {
                         server = created; busy = false
                         created.start()
-                        if (inBackground) ShareService.start(app)
+                        // Android refuses a background service to an app that isn't visible; sharing then simply
+                        // stops when the app is left, as with background sharing off.
+                        if (inBackground) runCatching { ShareService.start(app) }
                     }
                 }
             } catch (e: Exception) {

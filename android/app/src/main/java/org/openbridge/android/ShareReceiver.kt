@@ -63,9 +63,18 @@ class ShareReceiver : ComponentActivity() {
         when {
             Sharing.server != null -> Toast.makeText(this, S.queued(added, Sharing.computer), Toast.LENGTH_SHORT).show()
             Sharing.wholePhone && AllFiles.granted(this) -> {
-                // Background sharing keeps it going after this screen closes.
                 Sharing.start()
                 Toast.makeText(this, S.queued(added, null), Toast.LENGTH_SHORT).show()
+                // Stay on screen until sharing is up: Android only lets a visible app start the background service
+                // that keeps it going after this closes.
+                val main = android.os.Handler(mainLooper)
+                val started = System.currentTimeMillis()
+                main.post(object : Runnable {
+                    override fun run() {
+                        if (Sharing.busy && System.currentTimeMillis() - started < 8_000) main.postDelayed(this, 100) else finish()
+                    }
+                })
+                return
             }
             else -> {
                 Sharing.waitingNote(S.tapToSend(added))
