@@ -193,14 +193,14 @@ struct DeviceCard: View {
                 Spacer()
                 Button("Disconnect", action: model.disconnect).buttonStyle(GhostButton()).disabled(model.busy)
             }
-            HStack(spacing: 8) {
+            // Chips wrap onto another row rather than shortening their names.
+            FlowLayout(spacing: 8) {
                 ForEach(shortcuts, id: \.label) { shortcut in
                     Button(shortcut.label) { model.jump(shortcut.label, to: shortcut.candidates) }.buttonStyle(GhostButton()).disabled(model.busy)
                 }
+                Button { model.importNewPhotos() } label: { Label("Import new photos", systemImage: "photo.stack") }
+                    .buttonStyle(GhostButton()).disabled(model.busy)
             }
-            Button { model.importNewPhotos() } label: { Label("Import new photos", systemImage: "photo.stack") }
-                .buttonStyle(GhostButton()).disabled(model.busy)
-                .frame(maxWidth: .infinity, alignment: .leading)
             Button { model.showBrowser = true } label: { Text("Open phone  →") }
                 .buttonStyle(SunsetButton(wide: true))
                 .modifier(Breathing())
@@ -247,6 +247,48 @@ struct SavedPhonesCard: View {
         .confirmationDialog("Forget \(forgetting?.name ?? "this phone")?", isPresented: Binding(get: { forgetting != nil }, set: { if !$0 { forgetting = nil } })) {
             Button("Forget", role: .destructive) { if let forgetting { model.forget(forgetting) }; forgetting = nil }
         } message: { Text("You'll need to pair with a code again.") }
+    }
+}
+
+/// Lays views out left to right at their natural size, starting a new row when one doesn't fit.
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let rows = arrange(subviews, width: proposal.width ?? .infinity)
+        let height = rows.last.map { $0.y + $0.height } ?? 0
+        let width = rows.map { $0.width }.max() ?? 0
+        return CGSize(width: proposal.width ?? width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        for row in arrange(subviews, width: bounds.width) {
+            var x = bounds.minX
+            for index in row.items {
+                let size = subviews[index].sizeThatFits(.unspecified)
+                subviews[index].place(at: CGPoint(x: x, y: bounds.minY + row.y), proposal: ProposedViewSize(size))
+                x += size.width + spacing
+            }
+        }
+    }
+
+    private struct Row { var items: [Int] = []; var y: CGFloat = 0; var width: CGFloat = 0; var height: CGFloat = 0 }
+
+    private func arrange(_ subviews: Subviews, width: CGFloat) -> [Row] {
+        var rows = [Row()]
+        for index in subviews.indices {
+            let size = subviews[index].sizeThatFits(.unspecified)
+            if !rows[rows.count - 1].items.isEmpty && rows[rows.count - 1].width + spacing + size.width > width {
+                let last = rows[rows.count - 1]
+                rows.append(Row(y: last.y + last.height + spacing))
+            }
+            var row = rows[rows.count - 1]
+            row.width += (row.items.isEmpty ? 0 : spacing) + size.width
+            row.height = max(row.height, size.height)
+            row.items.append(index)
+            rows[rows.count - 1] = row
+        }
+        return rows
     }
 }
 

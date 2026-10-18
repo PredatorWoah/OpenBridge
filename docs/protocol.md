@@ -8,7 +8,7 @@ All integers are big endian. A string is a signed 32-bit nonnegative UTF-8 byte 
 | --- | --- |
 | Version | four ASCII bytes `OB01` |
 | Pairing secret | 32 raw bytes, received during pairing (each computer has its own) |
-| Operation | one byte: `1` LIST, `2` GET, `3` PUT, `4` MKDIR, `5` THUMB, `6` RESUME, `7` CLIPBOARD GET, `8` CLIPBOARD SET, `9` DELETE, `10` RENAME, `11` MEASURE, `12` PUT RESUMABLE, `13` OUTBOX, `14` OUTBOX GET, `15` OUTBOX DONE |
+| Operation | one byte: `1` LIST, `2` GET, `3` PUT, `4` MKDIR, `5` THUMB, `6` RESUME, `7` CLIPBOARD GET, `8` CLIPBOARD SET, `9` DELETE, `10` RENAME, `11` MEASURE, `12` PUT RESUMABLE, `13` OUTBOX, `14` OUTBOX GET, `15` OUTBOX DONE, `16` SEARCH |
 | Document ID | string, maximum 128 bytes; empty for root |
 
 Authentication is checked before the operation reaches storage. There is no unauthenticated metadata endpoint. A status is one byte: `0` success, or `1` followed by an error string (client limit 512 bytes). Any unexpected status, length, EOF, TLS failure, or timeout means failure. Close the connection; do not parse additional commands.
@@ -93,10 +93,14 @@ Files the user sent from the phone (Share › OpenBridge), waiting for a compute
 - **OUTBOX GET**: the ID names a waiting file; send a signed 64-bit offset. Reply as RESUME: status, the full size, then the bytes from the offset.
 - **OUTBOX DONE**: the ID names a waiting file the computer has saved completely. Reply: status. The phone deletes its copy; any computer that asks later doesn't see it.
 
+## SEARCH (16)
+
+ID names a previously listed folder, or the empty root. After the common header, send the text to find (a string of 1 to 255 bytes; surrounding spaces are ignored). The phone looks through every folder below for files and folders whose names contain the text, ignoring case, for up to 8 seconds, 50,000 items or 500 hits. Reply: status; on success, a 32-bit count, then for each hit its ID, name, directory byte and size (as in LIST) and its folder as a string of at most 1,024 bytes: folder names joined by `/`, relative to the searched folder (empty for a hit directly inside it); then a byte, `1` when the search finished or `0` when it stopped early. Hit IDs work like listed ones.
+
 ## Discovery
 
 While sharing over Wi-Fi, the phone announces itself with DNS-SD as `_openbridge._tcp` under its device name, with TXT keys `ip`, `port`, `v=1` and, from 0.11.0, `id`: the first 8 bytes of `F` in lowercase hex, so a computer recognizes a phone it saved even when its address changed. The Mac lists these so nobody types an address. The announcement reveals only the name, address and port that the phone would otherwise show on screen; pairing still needs the 6-digit code. It stops when sharing stops.
 
 ## Evolution
 
-Unknown operation/version fails closed; servers older than 0.9.6 answer operations 4–8 with an error, and those older than 0.11.0 operations 9–11 and OBP2, and those older than 0.12.0 operations 12–15 (clients then upload with PUT and don't collect files), and the computer asks to update the phone app. Future companion features should use a new version/capability negotiation, with explicit permissions, rather than adding implicit access to this file capability. OB01 has no arbitrary path access, background synchronization, public hosting, or command execution. (Screen mirroring is separate: it uses USB debugging over the cable, not this protocol; see SECURITY.md.)
+Unknown operation/version fails closed; servers older than 0.9.6 answer operations 4–8 with an error, and those older than 0.11.0 operations 9–11 and OBP2, and those older than 0.12.0 operations 12–15 (clients then upload with PUT and don't collect files), and those older than 0.12.1 operation 16, and the computer asks to update the phone app. Future companion features should use a new version/capability negotiation, with explicit permissions, rather than adding implicit access to this file capability. OB01 has no arbitrary path access, background synchronization, public hosting, or command execution. (Screen mirroring is separate: it uses USB debugging over the cable, not this protocol; see SECURITY.md.)

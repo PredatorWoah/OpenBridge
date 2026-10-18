@@ -74,6 +74,9 @@ class AppState {
     /** Off after Disconnect, so the phone doesn't reconnect straight away; on again with the next connection. */
     @Volatile private var autoConnect = true
     var query by mutableStateOf("")
+    /** Results of searching every folder below the open one; null while browsing. */
+    var results by mutableStateOf<SearchResult?>(null); private set
+    var resultsFor by mutableStateOf(""); private set
     var show by mutableStateOf(Show.ALL)
     /** Folder sizes measured on the phone, by entry ID. */
     var sizes by mutableStateOf(emptyMap<String, FolderSize>()); private set
@@ -378,7 +381,43 @@ class AppState {
     }
 
     private fun display(listed: List<Entry>, at: List<Pair<String, String>>) {
-        entries = listed; path = at; selection = emptySet(); anchor = null; query = ""
+        entries = listed; path = at; selection = emptySet(); anchor = null; query = ""; results = null
+    }
+
+    fun changeQuery(text: String) { query = text; if (text.isBlank()) results = null }
+
+    /** Searches every folder below the open one for names containing the query. */
+    fun searchEverywhere() {
+        val phone = client ?: return
+        val text = query.trim()
+        if (text.isEmpty()) return
+        val folder = path.last().first
+        run {
+            ui { status = S.searching }
+            val found = phone.search(folder, text)
+            ui { status = ""; results = found; resultsFor = text }
+        }
+    }
+
+    /** A folder hit opens; a file hit downloads. */
+    fun openFound(hit: Found) { if (hit.entry.directory) reveal(hit, inside = true) else download(listOf(hit.entry)) }
+
+    /** Goes to the folder holding a hit (or into it) and selects it. */
+    fun reveal(hit: Found, inside: Boolean = false) {
+        val phone = client ?: return
+        val names = path.drop(1).map { it.second } + hit.location.split('/').filter { it.isNotEmpty() } + (if (inside) listOf(hit.entry.name) else emptyList())
+        run {
+            var trail = listOf("" to S.phone)
+            var listed = phone.list("")
+            for (name in names) {
+                val next = listed.firstOrNull { it.directory && it.name == name } ?: throw BridgeException(S.folderGone)
+                listed = phone.list(next.id); trail = trail + (next.id to next.name)
+            }
+            ui {
+                display(listed, trail)
+                if (!inside) listed.firstOrNull { it.name == hit.entry.name }?.let { selection = setOf(it.id); anchor = it.id }
+            }
+        }
     }
 
     /** Click selects, Ctrl-click adds or removes, Shift-click selects a range, like File Explorer. */

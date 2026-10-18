@@ -205,6 +205,44 @@ public final class FileStore implements Store {
         return id(target);
     }
 
+    @Override public List<Store.Found> search(String directoryId, String query, long deadline, boolean[] complete) throws IOException {
+        Path start;
+        synchronized (this) {
+            if (directoryId.isEmpty() && roots.size() > 1) return Store.super.search(directoryId, query, deadline, complete);
+            start = directory(directoryId);
+        }
+        String needle = query.toLowerCase(Locale.ROOT);
+        List<Store.Found> found = new ArrayList<>();
+        long[] seen = {0};
+        complete[0] = true;
+        // Walks the filesystem directly, skipping links and hidden uploads, and hands out IDs only for matches.
+        Files.walkFileTree(start, new SimpleFileVisitor<Path>() {
+            private FileVisitResult visit(Path item, boolean folder, long size) throws IOException {
+                if (++seen[0] > MEASURE_LIMIT || System.currentTimeMillis() > deadline || found.size() >= SEARCH_LIMIT) {
+                    complete[0] = false; return FileVisitResult.TERMINATE;
+                }
+                String name = item.getFileName().toString();
+                if (Names.isTemporary(name)) return folder ? FileVisitResult.SKIP_SUBTREE : FileVisitResult.CONTINUE;
+                if (name.toLowerCase(Locale.ROOT).contains(needle)) {
+                    try {
+                        Wire.validateName(name);
+                        String location = start.relativize(item.getParent()).toString().replace(java.io.File.separatorChar, '/');
+                        synchronized (FileStore.this) { found.add(new Store.Found(new Entry(id(item), name, folder, size), location)); }
+                    } catch (IOException unsupported) { /* a name the protocol can't carry */ }
+                }
+                return FileVisitResult.CONTINUE;
+            }
+            @Override public FileVisitResult preVisitDirectory(Path directory, java.nio.file.attribute.BasicFileAttributes attributes) throws IOException {
+                return directory.equals(start) ? FileVisitResult.CONTINUE : visit(directory, true, 0);
+            }
+            @Override public FileVisitResult visitFile(Path file, java.nio.file.attribute.BasicFileAttributes attributes) throws IOException {
+                return attributes.isRegularFile() ? visit(file, false, attributes.size()) : FileVisitResult.CONTINUE;
+            }
+            @Override public FileVisitResult visitFileFailed(Path file, IOException error) { return FileVisitResult.CONTINUE; }
+        });
+        return found;
+    }
+
     @Override public Store.Size measure(String directoryId, long deadline) throws IOException {
         Path directory;
         synchronized (this) {

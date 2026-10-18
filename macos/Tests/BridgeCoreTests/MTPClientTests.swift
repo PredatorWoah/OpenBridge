@@ -198,8 +198,32 @@ final class MTPClientTests: XCTestCase {
         let left = try await client.list(id: "s:65537")
         XCTAssertEqual(left.map(\.name), ["Download", "huge.mkv"])
         XCTAssertFalse(phone.objects.values.contains { $0.name == "holiday.jpg" })
-        do { _ = try await client.measure(top[1]); XCTFail("no folder sizes over USB") } catch {}
+        let empty = try await client.measure(top[1])
+        XCTAssertEqual(empty, FolderSize(bytes: 0, files: 0, complete: true))
         XCTAssertEqual(phone.violations, [])
+    }
+
+    @MainActor
+    func testSizesAndSearchOverUSB() async throws {
+        // Phones that answer for a whole folder at once, and phones asked object by object, give the same answers.
+        for lists in [true, false] {
+            let phone = FakePhone()
+            phone.supportsPropertyLists = lists
+            let client = client(phone)
+            let top = try await client.list(id: "s:65537")
+            let dcim = try XCTUnwrap(top.first { $0.name == "DCIM" })
+            let size = try await client.measure(dcim)
+            XCTAssertEqual(size, FolderSize(bytes: 3000, files: 1, complete: true))
+            let hits = try await client.search(in: "s:65537", for: "PHOTO")
+            XCTAssertEqual(hits.found.map(\.entry.name), ["photo.jpg"])
+            XCTAssertEqual(hits.found.first?.location, "DCIM")
+            XCTAssertTrue(hits.complete)
+            let everywhere = try await client.search(in: "", for: ".mkv")
+            XCTAssertEqual(everywhere.found.map(\.entry.name), ["huge.mkv"])
+            XCTAssertEqual(everywhere.found.first?.entry.size, 5 << 30)
+            XCTAssertEqual(everywhere.found.first?.location, "Internal shared storage")
+            XCTAssertEqual(phone.violations, [])
+        }
     }
 
     @MainActor

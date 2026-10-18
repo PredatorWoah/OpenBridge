@@ -14,8 +14,10 @@ public protocol FileSource {
     func delete(_ entry: Entry) async throws
     /// Renames in place; returns the item afterwards.
     func rename(_ entry: Entry, to name: String) async throws -> Entry
-    /// A folder's total size; sources that can't count cheaply throw.
+    /// A folder's total size.
     func measure(_ folder: Entry) async throws -> FolderSize
+    /// Files and folders whose names contain `query`, anywhere below `folderID`.
+    func search(in folderID: String, for query: String) async throws -> SearchResult
     func disconnect() async
 }
 
@@ -194,9 +196,59 @@ public final class MTPClient: FileSource, @unchecked Sendable {
         return Entry(id: entry.id, name: name, directory: entry.directory, size: entry.size)
     }
 
+    /// Adds up a folder over the cable, one folder per request batch so browsing never waits long behind it.
     public func measure(_ folder: Entry) async throws -> FolderSize {
-        // MTP has no folder sizes, and walking a folder over the cable would hold up browsing.
-        throw BridgeError.message("Folder sizes aren't available over USB.")
+        let location = try Location(folder.id)
+        guard let storage = location.storage else { throw BridgeError.message("Choose a folder.") }
+        if location.handle == MTPSession.root {
+            // A whole storage: its used space, straight from the phone.
+            let used = try await run { session in try session.storages().first { $0.id == storage }.map { $0.capacity &- $0.freeSpace } }
+            return FolderSize(bytes: Int64(clamping: used ?? 0), files: 0, complete: true)
+        }
+        let deadline = Date().addingTimeInterval(8)
+        var bytes: Int64 = 0, files: Int64 = 0, seen = 0
+        var pending = [location.handle]
+        while let parent = pending.popLast() {
+            if Date() > deadline || seen > 50_000 { return FolderSize(bytes: bytes, files: files, complete: false) }
+            let children = try await run { try $0.contents(storage: storage, parent: parent, names: false) }
+            seen += children.count
+            for child in children {
+                if child.folder { pending.append(child.handle) } else { bytes += Int64(clamping: child.size); files += 1 }
+            }
+        }
+        return FolderSize(bytes: bytes, files: files, complete: true)
+    }
+
+    /// Searches names below a folder over the cable, a folder at a time.
+    public func search(in folderID: String, for query: String) async throws -> SearchResult {
+        let needle = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !needle.isEmpty else { throw BridgeError.message("Type something to search for.") }
+        let start = try Location(folderID)
+        var pending: [(storage: UInt32, handle: UInt32, location: String)] = []
+        if let storage = start.storage { pending.append((storage, start.handle, "")) }
+        else {
+            let storages = try await run { try $0.storages() }
+            pending = storages.map { ($0.id, MTPSession.root, $0.name) }
+        }
+        let deadline = Date().addingTimeInterval(10)
+        var found: [Found] = [], seen = 0
+        while !pending.isEmpty {
+            let folder = pending.removeFirst()
+            if Date() > deadline || seen > 50_000 || found.count >= 500 { return SearchResult(found: found, complete: false) }
+            try Task.checkCancellation()
+            let children = try await run { try $0.contents(storage: folder.storage, parent: folder.handle, names: true) }
+            seen += children.count
+            for child in children where (try? Wire.validateName(child.name)) != nil {
+                if child.name.lowercased().contains(needle) {
+                    found.append(Found(entry: Entry(id: "o:\(folder.storage):\(child.handle)", name: child.name, directory: child.folder,
+                                                    size: Int64(clamping: child.size)), location: folder.location))
+                }
+                if child.folder {
+                    pending.append((folder.storage, child.handle, folder.location.isEmpty ? child.name : folder.location + "/" + child.name))
+                }
+            }
+        }
+        return SearchResult(found: found, complete: true)
     }
 
     public func upload(_ source: URL, directoryID: String, progress: @MainActor (Int64, Int64) -> Void) async throws {

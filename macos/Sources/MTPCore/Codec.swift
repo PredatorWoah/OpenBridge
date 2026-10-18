@@ -46,6 +46,8 @@ enum MTPCode {
     static let sendObject: UInt16 = 0x100D
     static let getObjectPropValue: UInt16 = 0x9803
     static let setObjectPropValue: UInt16 = 0x9804
+    static let getObjectPropList: UInt16 = 0x9805
+    static let objectFormatProperty: UInt16 = 0xDC02
 
     static let ok: UInt16 = 0x2001
     static let sessionAlreadyOpen: UInt16 = 0x201E
@@ -209,13 +211,14 @@ public struct MTPStorage: Equatable {
     public let id: UInt32
     public let name: String
     public let freeSpace: UInt64
+    public let capacity: UInt64
 
     init(id: UInt32, parsing data: Data) throws {
         var reader = MTPReader(data)
         _ = try reader.u16()              // storage type
         _ = try reader.u16()              // filesystem type
         _ = try reader.u16()              // access capability
-        _ = try reader.u64()              // max capacity
+        capacity = try reader.u64()
         freeSpace = try reader.u64()
         _ = try reader.u32()              // free space in objects
         let description = try reader.string()

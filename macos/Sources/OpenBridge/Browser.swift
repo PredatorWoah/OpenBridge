@@ -18,9 +18,16 @@ struct BrowserScreen: View {
             VStack(spacing: 0) {
                 Toolbar(model: model, searching: $searching)
                 ZStack {
-                    if model.grid { grid } else { list }
-                    if model.sorted.isEmpty && !model.entries.isEmpty {
-                        Text("Nothing here matches.").foregroundStyle(Palette.muted)
+                    if let results = model.results { ResultsList(model: model, results: results) }
+                    else if model.grid { grid } else { list }
+                    if model.results == nil && model.sorted.isEmpty && !model.entries.isEmpty {
+                        VStack(spacing: 10) {
+                            Text("Nothing in this folder matches.").foregroundStyle(Palette.muted)
+                            if !model.query.isEmpty {
+                                Button("Search all folders for “\(model.query)”", action: model.searchEverywhere)
+                                    .buttonStyle(SunsetButton()).disabled(model.busy)
+                            }
+                        }
                     }
                     if model.entries.isEmpty && !model.busy {
                         Text(model.path.count > 1 ? "This folder is empty. Drop files here to upload them." : "Nothing to show.")
@@ -114,6 +121,56 @@ struct BrowserScreen: View {
     }
 }
 
+/// Search hits from every folder below the open one, with where each one is.
+private struct ResultsList: View {
+    @ObservedObject var model: BrowserModel
+    let results: SearchResult
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text(results.found.isEmpty ? "Nothing found for “\(model.resultsFor)”"
+                     : "\(results.found.count)\(results.complete ? "" : "+") found for “\(model.resultsFor)”")
+                    .font(.system(size: 13, weight: .semibold))
+                if !results.complete {
+                    Text("Showing the first ones. Search a smaller folder or a longer name for the rest.").font(.system(size: 12)).foregroundStyle(Palette.muted)
+                }
+                Spacer()
+                Button("Done") { model.query = "" }.buttonStyle(GhostButton())
+            }
+            .padding(.horizontal, 16).padding(.vertical, 8)
+            ScrollView {
+                LazyVStack(spacing: 2) {
+                    ForEach(results.found) { hit in
+                        let (symbolName, color) = symbol(for: FileKind(hit.entry))
+                        HStack(spacing: 12) {
+                            Image(systemName: symbolName).foregroundStyle(color).frame(width: 26)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(hit.entry.name).lineLimit(1).truncationMode(.middle)
+                                Text(hit.location.isEmpty ? (model.path.last?.name ?? "") : hit.location.replacingOccurrences(of: "/", with: " › "))
+                                    .font(.system(size: 11.5)).foregroundStyle(Palette.muted).lineLimit(1).truncationMode(.head)
+                            }
+                            Spacer()
+                            if !hit.entry.directory {
+                                Text(ByteCountFormatter.string(fromByteCount: hit.entry.size, countStyle: .file)).foregroundStyle(Palette.muted).monospacedDigit()
+                            }
+                        }
+                        .font(.system(size: 13.5))
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .contentShape(Rectangle())
+                        .onTapGesture(count: 2) { model.openFound(hit) }
+                        .contextMenu {
+                            Button(hit.entry.directory ? "Open" : "Download…") { model.openFound(hit) }
+                            Button("Show in Folder") { model.reveal(hit) }
+                        }
+                    }
+                }
+                .padding(10)
+            }
+        }
+    }
+}
+
 /// Click, double-click, context menu, drag to Finder and preview loading, shared by rows and tiles.
 private struct Item: ViewModifier {
     @ObservedObject var model: BrowserModel
@@ -175,23 +232,58 @@ private struct Sidebar: View {
     }
 }
 
+/// One row when everything fits; when the window is narrower, the controls move to a second row instead of
+/// squeezing the path and buttons until their text breaks.
 private struct Toolbar: View {
     @ObservedObject var model: BrowserModel
     var searching: FocusState<Bool>.Binding
     var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                navigation(compact: false)
+                Spacer(minLength: 8)
+                controls
+                download
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    navigation(compact: true)
+                    Spacer(minLength: 8)
+                    download
+                }
+                HStack(spacing: 8) { controls; Spacer(minLength: 0) }
+            }
+        }
+        .padding(.horizontal, 16).padding(.top, 40).padding(.bottom, 10)
+        .overlay(alignment: .bottom) { Rectangle().fill(.white.opacity(0.08)).frame(height: 1) }
+    }
+
+    private func navigation(compact: Bool) -> some View {
         HStack(spacing: 8) {
             Button(action: model.up) { Image(systemName: "chevron.left") }
                 .buttonStyle(GhostButton()).disabled(model.path.count < 2 || model.busy).help("Up one folder")
-            PathBar(model: model)
-            Spacer(minLength: 8)
+            PathBar(model: model, compact: compact)
+        }
+    }
+
+    private var download: some View {
+        Button(model.selection.count > 1 ? "Download \(model.selection.count)" : "Download") { model.download(model.selected) }
+            .buttonStyle(SunsetButton()).disabled(model.busy || model.selection.isEmpty)
+            .fixedSize()
+    }
+
+    private var controls: some View {
+        HStack(spacing: 8) {
             HStack(spacing: 5) {
                 Image(systemName: "magnifyingglass").foregroundStyle(Palette.muted)
                 TextField("Search", text: $model.query).textFieldStyle(.plain).focused(searching)
+                    .onSubmit { model.searchEverywhere() }
                 if !model.query.isEmpty {
                     Button { model.query = "" } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain).foregroundStyle(Palette.muted)
                 }
             }
-            .font(.system(size: 13)).padding(.horizontal, 9).padding(.vertical, 5).frame(width: 170).glass(8)
+            .font(.system(size: 13)).padding(.horizontal, 9).padding(.vertical, 5).frame(width: 180).glass(8)
+            .help("Type to filter this folder. Press Return to search every folder inside it.")
             Button { model.mediaOnly.toggle() } label: { Image(systemName: model.mediaOnly ? "photo.fill.on.rectangle.fill" : "photo.on.rectangle") }
                 .buttonStyle(.plain).foregroundStyle(model.mediaOnly ? Palette.amber : .white).frame(width: 28)
                 .help(model.mediaOnly ? "Showing only photos and videos" : "Show only photos and videos")
@@ -231,29 +323,46 @@ private struct Toolbar: View {
                 Button("Refresh", action: model.refresh)
             } label: { Image(systemName: "ellipsis.circle") }
                 .menuStyle(.borderlessButton).frame(width: 34).disabled(model.busy)
-            Button(model.selection.count > 1 ? "Download \(model.selection.count)" : "Download") { model.download(model.selected) }
-                .buttonStyle(SunsetButton()).disabled(model.busy || model.selection.isEmpty)
         }
-        .padding(.horizontal, 16).padding(.top, 40).padding(.bottom, 10)
-        .overlay(alignment: .bottom) { Rectangle().fill(.white.opacity(0.08)).frame(height: 1) }
     }
 }
 
-/// Clickable folder trail: "Phone › Internal storage › DCIM".
+/// Clickable folder trail: "vivo X300 Pro › Internal shared storage › DCIM". Deep paths keep the first and last two
+/// folders and put the rest behind "…". Names never break mid-word; `compact` lets long ones shorten with an ellipsis.
 private struct PathBar: View {
     @ObservedObject var model: BrowserModel
+    var compact: Bool
+
     var body: some View {
+        let path = Array(model.path.enumerated())
+        let hidden = path.count > 3 ? Array(path[1..<(path.count - 2)]) : []
+        let shown = hidden.isEmpty ? path : [path[0]] + path.suffix(2)
         HStack(spacing: 4) {
-            ForEach(Array(model.path.enumerated()), id: \.offset) { index, crumb in
-                if index > 0 { Image(systemName: "chevron.right").font(.system(size: 10, weight: .bold)).foregroundStyle(Palette.muted) }
-                Button(crumb.name) { model.go(to: index) }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 14, weight: index == model.path.count - 1 ? .bold : .medium))
-                    .foregroundStyle(index == model.path.count - 1 ? .white : Palette.muted)
-                    .lineLimit(1)
+            ForEach(shown, id: \.offset) { index, crumb in
+                if index > 0 { chevron }
+                if index == path.count - 2 && !hidden.isEmpty {
+                    Menu {
+                        ForEach(hidden, id: \.offset) { hiddenIndex, folder in Button(folder.name) { model.go(to: hiddenIndex) } }
+                    } label: { Text("…").font(.system(size: 14, weight: .medium)).foregroundStyle(Palette.muted) }
+                        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("Folders in between")
+                    chevron
+                }
+                crumbButton(index, crumb.name, last: index == path.count - 1)
             }
         }
-        .truncationMode(.head)
+    }
+
+    private var chevron: some View {
+        Image(systemName: "chevron.right").font(.system(size: 10, weight: .bold)).foregroundStyle(Palette.muted)
+    }
+
+    @ViewBuilder private func crumbButton(_ index: Int, _ name: String, last: Bool) -> some View {
+        let button = Button(name) { model.go(to: index) }
+            .buttonStyle(.plain)
+            .font(.system(size: 14, weight: last ? .bold : .medium))
+            .foregroundStyle(last ? .white : Palette.muted)
+            .lineLimit(1)
+        if compact { button.truncationMode(.middle).layoutPriority(last ? 1 : 0) } else { button.fixedSize() }
     }
 }
 
@@ -319,7 +428,7 @@ struct FileRow: View {
             Spacer()
             Text(entry.directory ? folderText(folderSize) : ByteCountFormatter.string(fromByteCount: entry.size, countStyle: .file))
                 .foregroundStyle(Palette.muted).monospacedDigit()
-                .help(folderSize.map { "\($0.files) files" } ?? "")
+                .help(folderSize.map { $0.files > 0 ? "\($0.files) files" : "" } ?? "")
         }
         .font(.system(size: 13.5))
         .padding(.horizontal, 12).padding(.vertical, 6)

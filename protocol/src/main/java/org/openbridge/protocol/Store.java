@@ -68,6 +68,36 @@ public interface Store {
     }
     int MEASURE_LIMIT = 50_000;
 
+    /** A search hit: the item, and the folder it's in by name relative to where the search started ("DCIM/Camera"). */
+    final class Found {
+        public final Entry entry;
+        public final String location;
+        public Found(Entry entry, String location) { this.entry = entry; this.location = location; }
+    }
+    int SEARCH_LIMIT = 500;
+
+    /**
+     * Files and folders below `directoryId` whose names contain `query` (ignoring case), up to SEARCH_LIMIT, until
+     * `deadline`. `complete` is set false when it stopped early. Walks through {@link #list}; stores may do better.
+     */
+    default List<Found> search(String directoryId, String query, long deadline, boolean[] complete) throws IOException {
+        List<Found> found = new java.util.ArrayList<>();
+        String needle = query.toLowerCase(java.util.Locale.ROOT);
+        java.util.ArrayDeque<String[]> pending = new java.util.ArrayDeque<>();
+        pending.add(new String[] {directoryId, ""});
+        long seen = 0;
+        complete[0] = true;
+        while (!pending.isEmpty()) {
+            String[] folder = pending.removeFirst();
+            for (Entry entry : list(folder[0])) {
+                if (++seen > MEASURE_LIMIT || System.currentTimeMillis() > deadline || found.size() >= SEARCH_LIMIT) { complete[0] = false; return found; }
+                if (entry.name.toLowerCase(java.util.Locale.ROOT).contains(needle)) found.add(new Found(entry, folder[1]));
+                if (entry.directory) pending.add(new String[] {entry.id, folder[1].isEmpty() ? entry.name : folder[1] + "/" + entry.name});
+            }
+        }
+        return found;
+    }
+
     /** Adds up a folder through {@link #list}; stores override it to count without handing out IDs. */
     default Size measure(String directoryId, long deadline) throws IOException {
         long[] totals = new long[3];   // bytes, files, items seen
