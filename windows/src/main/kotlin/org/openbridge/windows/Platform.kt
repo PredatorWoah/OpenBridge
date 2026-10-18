@@ -38,19 +38,6 @@ class Discovery(private val changed: (List<NearbyPhone>) -> Unit) {
             runCatching { JmmDNS.Factory.getInstance().also { dns = it; it.addServiceListener(type, listener) } }
         }.apply { isDaemon = true }.start()
     }
-
-    /** Turns wireless debugging back off on phones connected over Wi‑Fi (`adb usb` restarts it on the cable only). */
-    private fun closeWireless(folder: File) {
-        val adb = File(folder, "adb.exe").path
-        runCatching {
-            val listing = ProcessBuilder(adb, "devices").redirectErrorStream(true).start()
-            val lines = listing.inputStream.bufferedReader().readLines()
-            listing.waitFor(10, TimeUnit.SECONDS)
-            lines.map { it.split('\t') }.filter { it.size == 2 && it[1] == "device" && it[0].contains(':') }.forEach { (serial, _) ->
-                ProcessBuilder(adb, "-s", serial, "usb").start().waitFor(10, TimeUnit.SECONDS)
-            }
-        }
-    }
 }
 
 /** Windows talks to phones in File transfer mode itself (MTP, through File Explorer). */
@@ -103,5 +90,18 @@ object Mirror {
             }.getOrElse { it.message }
             finished(result)
         }.apply { isDaemon = true }.start()
+    }
+
+    /** Turns wireless debugging back off on phones connected over Wi‑Fi (`adb usb` restarts it on the cable only). */
+    private fun closeWireless(folder: File) {
+        val adb = File(folder, "adb.exe").path
+        runCatching {
+            val listing = ProcessBuilder(adb, "devices").redirectErrorStream(true).start()
+            val lines = listing.inputStream.bufferedReader().readLines()
+            listing.waitFor(10, TimeUnit.SECONDS)
+            lines.map { it.split('\t') }.filter { it.size == 2 && it[1] == "device" && it[0].contains(':') }.forEach { (serial, _) ->
+                ProcessBuilder(adb, "-s", serial, "usb").start().waitFor(10, TimeUnit.SECONDS)
+            }
+        }
     }
 }

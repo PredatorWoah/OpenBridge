@@ -215,6 +215,10 @@ private struct Toolbar: View {
                 Button("New Folder…", action: model.newFolder)
                 Button("Upload…", action: model.chooseUploads)
                 Divider()
+                Button("Import New Photos") { model.importNewPhotos() }
+                Button("Import New Photos To…") { model.importNewPhotos(choosingFolder: true) }
+                Button("Show Files Sent from the Phone", action: model.showReceived).disabled(model.overUSB)
+                Divider()
                 Button("Rename…") { model.renaming = model.selected.first }.disabled(model.selection.count != 1)
                 Button("Delete…") { model.confirmDelete(model.selected) }.disabled(model.selection.isEmpty)
                 Divider()

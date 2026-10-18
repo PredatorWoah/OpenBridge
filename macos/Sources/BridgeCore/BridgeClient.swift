@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 public struct BridgeClient {
     public let host: String
@@ -129,6 +130,50 @@ public struct BridgeClient {
         return try await channel.read(Int(length))
     }
 
+    /// Files sent from the phone (Share › OpenBridge), waiting up to `wait` milliseconds for one to arrive.
+    public func outbox(wait: Int32) async throws -> [Entry] {
+        let channel = try await open(operation: 13, id: "", extra: Wire.integer(min(max(wait, 0), 25_000)))
+        defer { channel.close() }
+        try await channel.status(timeout: 35)
+        let count = try await channel.number(4)
+        guard count <= 1_000 else { throw BridgeError.message("Invalid reply.") }
+        var result: [Entry] = []
+        for _ in 0..<Int(count) {
+            let id = try await channel.string(limit: 128)
+            let name = try await channel.string(limit: 255)
+            try Wire.validateName(name)
+            let size = try await channel.number(8)
+            guard !id.isEmpty, size <= UInt64(Wire.maxFile) else { throw BridgeError.message("Invalid reply.") }
+            result.append(Entry(id: id, name: name, directory: false, size: Int64(size)))
+        }
+        return result
+    }
+
+    /// Saves a file sent from the phone, continuing an interrupted copy, then lets the phone drop it.
+    public func receive(_ entry: Entry, to destination: URL) async throws {
+        let partial = try PartialFile.open(for: destination, size: entry.size)
+        do {
+            let channel = try await open(operation: 14, id: entry.id, extra: Wire.integer(partial.offset))
+            defer { channel.close() }
+            try await channel.status()
+            guard Int64(try await channel.number(8)) == entry.size else { throw BridgeError.fileChanged }
+            var received = partial.offset
+            while received < entry.size {
+                try Task.checkCancellation()
+                let chunk = try await channel.read(Int(min(65_536, entry.size - received)))
+                try partial.write(chunk)
+                received += Int64(chunk.count)
+            }
+            try partial.finish(at: destination)
+        } catch {
+            partial.end(after: error)
+            throw error
+        }
+        let done = try await open(operation: 15, id: entry.id)
+        defer { done.close() }
+        try await done.status()
+    }
+
     /// Deletes a file, or a folder with everything in it.
     public func delete(_ entry: Entry) async throws {
         let channel = try await open(operation: 9, id: entry.id)
@@ -173,23 +218,51 @@ public struct BridgeClient {
         try await channel.status()
     }
 
+    /// Uploads `source`. If an earlier upload of the same file to the same folder was cut off, the phone kept what
+    /// arrived and this continues from there (phones before 0.12.0 start over).
     public func upload(_ source: URL, directoryID: String, progress: @MainActor (Int64, Int64) -> Void) async throws {
         let name = source.lastPathComponent
         try Wire.validateName(name)
-        let values = try source.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey, .isSymbolicLinkKey])
+        let values = try source.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey, .isSymbolicLinkKey, .contentModificationDateKey])
         guard values.isRegularFile == true, values.isSymbolicLink != true,
               let rawSize = values.fileSize, rawSize >= 0, rawSize <= Wire.maxFile else {
             throw BridgeError.message("Choose a regular file no larger than 64 GiB.")
         }
         let size = Int64(rawSize)
+        let key = try Self.contentKey(source, size: size, modified: values.contentModificationDate)
+        do {
+            try await send(source, operation: 12, directoryID: directoryID, header: Wire.string(name) + Wire.integer(size) + key,
+                           size: size, resumable: true, progress: progress)
+        } catch BridgeError.message(let text) where text.contains("Unsupported operation") {
+            try await send(source, operation: 3, directoryID: directoryID, header: Wire.string(name) + Wire.integer(size),
+                           size: size, resumable: false, progress: progress)
+        }
+    }
+
+    /// A 32-byte summary of a file for resumable uploads: size, modification time and first MiB. A file changed since
+    /// an upload was cut off gets a new one, so the phone starts over instead of mixing old and new bytes.
+    static func contentKey(_ source: URL, size: Int64, modified: Date?) throws -> Data {
+        var hasher = SHA256()
+        hasher.update(data: Data("\(size):\(Int64((modified?.timeIntervalSince1970 ?? 0) * 1000)):".utf8))
         let file = try FileHandle(forReadingFrom: source)
         defer { try? file.close() }
-        let channel = try await open(operation: 3, id: directoryID)
+        if let start = try file.read(upToCount: 1 << 20) { hasher.update(data: start) }
+        return Data(hasher.finalize())
+    }
+
+    private func send(_ source: URL, operation: UInt8, directoryID: String, header: Data, size: Int64, resumable: Bool,
+                      progress: @MainActor (Int64, Int64) -> Void) async throws {
+        let file = try FileHandle(forReadingFrom: source)
+        defer { try? file.close() }
+        let channel = try await open(operation: operation, id: directoryID)
         defer { channel.close() }
-        try await channel.send(Wire.string(name) + Wire.integer(size))
+        try await channel.send(header)
         try await channel.status()
-        var sent: Int64 = 0, reported: Int64 = 0
-        await progress(0, size)
+        let have = resumable ? Int64(clamping: try await channel.number(8)) : 0
+        guard have >= 0, have <= size else { throw BridgeError.message("Invalid resume position.") }
+        try file.seek(toOffset: UInt64(have))
+        var sent = have, reported = have
+        await progress(have, size)
         while sent < size {
             try Task.checkCancellation()
             guard let chunk = try file.read(upToCount: Int(min(65_536, size - sent))), !chunk.isEmpty else {

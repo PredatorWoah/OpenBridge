@@ -81,6 +81,10 @@ final class BrowserModel: ObservableObject {
     private var sizeQueue: [Entry] = []
     private var sizing = false
     private var sizesPending: Set<Entry.ID> = []
+    /// Collects files sent from the phone while a Wi‑Fi connection lasts.
+    private var receiver: Task<Void, Never>?
+    /// The last file sent from the phone.
+    @Published private(set) var received: URL?
     private(set) var client: (any FileSource)?
     private var task: Task<Void, Never>?
     private var watcher: Task<Void, Never>?
@@ -255,7 +259,80 @@ final class BrowserModel: ObservableObject {
         current = phone; autoConnect = true
         saved = [phone] + saved.filter { $0.id != phone.id }
         SavedPhones.save(saved)
+        startReceiving(client)
         didConnect(to: phone.name)
+    }
+
+    // MARK: Files sent from the phone
+
+    static var receivedFolder: URL {
+        (FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first ?? FileManager.default.homeDirectoryForCurrentUser)
+            .appendingPathComponent("OpenBridge", isDirectory: true)
+    }
+
+    /// Collects files shared to OpenBridge on the phone while this connection lasts, into Downloads/OpenBridge.
+    private func startReceiving(_ phone: BridgeClient) {
+        receiver?.cancel()
+        receiver = Task {
+            while !Task.isCancelled {
+                let waiting: [Entry]
+                do { waiting = try await phone.outbox(wait: 20_000) }
+                catch BridgeError.message(let text) where text.contains("Unsupported operation") || text.contains("not available") {
+                    return   // a phone app before 0.12.0 can't send: stop asking
+                } catch {
+                    try? await Task.sleep(nanoseconds: 3_000_000_000); continue
+                }
+                for item in waiting {
+                    guard !Task.isCancelled else { return }
+                    try? FileManager.default.createDirectory(at: Self.receivedFolder, withIntermediateDirectories: true)
+                    let target = Self.free(Self.receivedFolder.appendingPathComponent(item.name))
+                    do {
+                        try await phone.receive(item, to: target)
+                        received = target
+                        show("Received “\(item.name)” from the phone")
+                    } catch {
+                        try? await Task.sleep(nanoseconds: 2_000_000_000); break
+                    }
+                }
+            }
+        }
+    }
+
+    func showReceived() {
+        if let received, FileManager.default.fileExists(atPath: received.path) { NSWorkspace.shared.activateFileViewerSelecting([received]) }
+        else {
+            try? FileManager.default.createDirectory(at: Self.receivedFolder, withIntermediateDirectories: true)
+            NSWorkspace.shared.open(Self.receivedFolder)
+        }
+    }
+
+    // MARK: Importing photos
+
+    /// Downloads the camera's photos and videos that weren't imported from this phone before.
+    func importNewPhotos(choosingFolder: Bool = false) {
+        guard let client, !busy, let destination = Imports.folder(choosing: choosingFolder) else { return }
+        let key = current?.id ?? deviceName
+        run {
+            self.status = "Looking for new photos…"
+            var found = try await self.resolve(["DCIM", "Camera"], client)
+            if found == nil { found = try await self.resolve(["DCIM"], client) }
+            guard let (trail, entries) = found else { self.show("This phone has no DCIM folder to import from."); return }
+            let media = entries.filter { !$0.directory && FileKind($0).previewable }
+            let done = Imports.load(key)
+            // Already imported, or already in the folder (an import that was cut off): skip.
+            let fresh = media.filter { !done.contains(Imports.line($0)) && !Imports.present($0, in: destination) }
+            self.status = ""
+            guard !fresh.isEmpty else {
+                Imports.save(key, done.union(media.map(Imports.line)))
+                self.show("No new photos or videos since the last import.")
+                return
+            }
+            self.transfer = Transfer(name: "Preparing…", upload: false)
+            let at = trail.dropFirst().map(\.name)
+            try await self.perform(fresh.map { .download($0, to: Self.free(destination.appendingPathComponent($0.name)), at: at) }, client: client)
+            Imports.save(key, done.union(media.map(Imports.line)))
+            self.show(fresh.count == 1 ? "Imported 1 photo or video" : "Imported \(fresh.count) photos and videos")
+        }
     }
 
     /// USB cable in File transfer (MTP) mode: no app or pairing needed on the phone.
@@ -323,6 +400,7 @@ final class BrowserModel: ObservableObject {
         thumbnails = [:]; thumbnailsPending = []; thumbnailsFailed = []
         thumbnailQueue = []; thumbnailsRunning = 0; thumbnailEpoch += 1
         sizes = [:]; sizeQueue = []; sizing = false; sizesPending = []; current = nil; query = ""
+        receiver?.cancel(); receiver = nil
         try? FileManager.default.removeItem(at: previews)
     }
 
