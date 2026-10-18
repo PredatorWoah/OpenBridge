@@ -20,6 +20,8 @@ public interface Store {
     }
     interface Upload extends AutoCloseable {
         OutputStream stream();
+        /** Bytes already received by an earlier, interrupted upload of this file; the stream continues after them. */
+        default long existing() { return 0; }
         /** Publish only after the entire body was received and the output stream closed. */
         void commit() throws IOException;
         /** Abort deletes partial content. Must also be safe after commit. */
@@ -28,6 +30,15 @@ public interface Store {
     List<Entry> list(String directoryId) throws IOException;
     Read open(String fileId) throws IOException;
     Upload create(String directoryId, String name) throws IOException;
+
+    /**
+     * Like {@link #create}, but an interrupted upload is kept so the same file (same name and size, same folder) can
+     * continue later from where it stopped. Stores that can't keep one start over every time.
+     */
+    default Upload resume(String directoryId, String name, long size, byte[] key) throws IOException { return create(directoryId, name); }
+
+    /** Interrupted uploads nobody continued are removed after this long. */
+    long ABANDONED_MILLIS = 7L * 24 * 60 * 60 * 1000;
 
     /** Creates a new, empty folder and returns its ID. Never reuses or replaces an existing name. */
     default String createDirectory(String parentId, String name) throws IOException {

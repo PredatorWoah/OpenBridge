@@ -104,6 +104,7 @@ public final class ProtocolTest {
         fileStoreTests();
         trustTests();
         editingTests();
+        resumeAndOutboxTests();
         System.out.println("Protocol tests passed: " + checks + " assertions");
     }
 
@@ -346,6 +347,74 @@ public final class ProtocolTest {
         } finally {
             try (var walk = java.nio.file.Files.walk(base)) { walk.sorted(Comparator.reverseOrder()).forEach(p -> p.toFile().delete()); }
         }
+    }
+
+    /** PUT_RESUMABLE continues an interrupted upload; OUTBOX hands over files sent from the phone. */
+    private static void resumeAndOutboxTests() throws Exception {
+        java.nio.file.Path base = java.nio.file.Files.createTempDirectory("openbridge-resume");
+        try {
+            java.nio.file.Path internal = java.nio.file.Files.createDirectories(base.resolve("internal"));
+            FileStore files = new FileStore(List.of(new FileStore.Root("Internal storage", internal.toFile())));
+            Session session = new Session(files, SECRET);
+            byte[] body = new byte[150_000]; new Random(3).nextBytes(body);
+            byte[] key = new byte[32]; Arrays.fill(key, (byte) 9);
+            // The connection drops after 60,000 bytes: the phone keeps them.
+            try {
+                serve(session, simple(12, "", out -> { Wire.writeString(out, "video.mp4"); out.writeLong(body.length); out.write(key); out.write(body, 0, 60_000); }));
+                check(false, "A cut upload must fail");
+            } catch (IOException expected) { check(true, "Cut upload fails"); }
+            check(!java.nio.file.Files.exists(internal.resolve("video.mp4")), "Nothing published from a cut upload");
+            check(!byName(files.list("")).containsKey(Names.resumable("video.mp4", body.length, key)), "The kept part is hidden");
+            // The same file continues from there.
+            DataInputStream resumed = serve(session, simple(12, "", out -> {
+                Wire.writeString(out, "video.mp4"); out.writeLong(body.length); out.write(key); out.write(body, 60_000, body.length - 60_000); }));
+            check(resumed.readByte() == 0 && resumed.readLong() == 60_000 && resumed.readByte() == 0, "Upload continues from the kept bytes");
+            check(Arrays.equals(java.nio.file.Files.readAllBytes(internal.resolve("video.mp4")), body), "Continued upload is exact");
+            // A changed file (same name and size, different contents) never continues an old part.
+            byte[] otherKey = key.clone(); otherKey[0] ^= 1;
+            try { serve(session, simple(12, "", out -> { Wire.writeString(out, "clip.mp4"); out.writeLong(body.length); out.write(key); out.write(body, 0, 1000); })); }
+            catch (IOException expected) { check(true, "Second cut upload"); }
+            DataInputStream fresh = serve(session, simple(12, "", out -> {
+                Wire.writeString(out, "clip.mp4"); out.writeLong(body.length); out.write(otherKey); out.write(body); }));
+            check(fresh.readByte() == 0 && fresh.readLong() == 0 && fresh.readByte() == 0, "A different file starts over");
+            check(Arrays.equals(java.nio.file.Files.readAllBytes(internal.resolve("clip.mp4")), body), "Started-over upload is exact");
+            check(serve(session, simple(12, "", out -> { Wire.writeString(out, "video.mp4"); out.writeLong(1); out.write(key); out.write(1); })).readByte() == 1,
+                "Resumable uploads never replace a file");
+        } finally {
+            try (var walk = java.nio.file.Files.walk(base)) { walk.sorted(Comparator.reverseOrder()).forEach(p -> p.toFile().delete()); }
+        }
+        // A store that can't keep parts starts over: the ready status says 0.
+        MemoryStore memory = new MemoryStore();
+        DataInputStream plain = serve(memory, simple(12, "", out -> { Wire.writeString(out, "new.bin"); out.writeLong(3); out.write(new byte[32]); out.write(new byte[] {1, 2, 3}); }));
+        check(plain.readByte() == 0 && plain.readLong() == 0 && plain.readByte() == 0 && memory.files.get("new.bin").length == 3, "Resumable PUT on a simple store");
+
+        // OUTBOX
+        Map<String, byte[]> sent = new LinkedHashMap<>();
+        sent.put("out-1", "photo bytes".getBytes(StandardCharsets.UTF_8));
+        Outbox outbox = new Outbox() {
+            public List<Store.Entry> waitFor(long millis) {
+                List<Store.Entry> entries = new ArrayList<>();
+                sent.forEach((id, data) -> entries.add(new Store.Entry(id, "IMG_" + id + ".jpg", false, data.length)));
+                return entries;
+            }
+            public Store.Read open(String id) throws IOException {
+                byte[] data = sent.get(id);
+                if (data == null) throw new IOException("Already collected");
+                InputStream stream = new ByteArrayInputStream(data);
+                return new Store.Read() { public long size() { return data.length; } public InputStream stream() { return stream; } public void close() {} };
+            }
+            public void done(String id) { sent.remove(id); }
+        };
+        Session phone = new Session(new MemoryStore(), Trust.single(SECRET), null, null, null, outbox);
+        DataInputStream waiting = serve(phone, simple(13, "", out -> out.writeInt(1000)));
+        check(waiting.readByte() == 0 && waiting.readInt() == 1, "One file waiting");
+        check(Wire.readString(waiting, 128).equals("out-1") && Wire.readString(waiting, 255).equals("IMG_out-1.jpg") && waiting.readLong() == 11, "Outbox entry");
+        DataInputStream got = serve(phone, simple(14, "out-1", out -> out.writeLong(6)));
+        check(got.readByte() == 0 && got.readLong() == 11 && new String(got.readAllBytes(), StandardCharsets.UTF_8).equals("bytes"), "Outbox file from an offset");
+        check(serve(phone, simple(15, "out-1", out -> {})).readByte() == 0 && sent.isEmpty(), "Collected files are dropped");
+        check(serve(phone, simple(14, "out-1", out -> out.writeLong(0))).readByte() == 1, "A collected file is gone");
+        check(serve(phone, simple(13, "", out -> out.writeInt(60_000))).readByte() == 1, "Waits are capped");
+        check(serve(memory, simple(13, "", out -> out.writeInt(0))).readByte() == 1, "No outbox unless shared");
     }
 
     interface Body { void write(DataOutputStream out) throws IOException; }

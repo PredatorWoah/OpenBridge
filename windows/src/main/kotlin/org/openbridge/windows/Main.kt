@@ -256,6 +256,7 @@ private fun UsbCard(state: AppState) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 SunsetButton(S.openExplorer, modifier = Modifier.weight(1f)) { Usb.openExplorer() }
                 GhostButton(S.mirror, enabled = !state.mirroring) { state.mirror() }
+                GhostButton(S.mirrorWireless, enabled = !state.mirroring) { state.mirror(wireless = true) }
             }
         } else {
             Text(S.cableHint, color = Palette.muted, fontSize = 12.5.sp)
@@ -347,10 +348,16 @@ private fun Toolbar(state: AppState) {
                 DropdownMenuItem({ moreMenu = false; state.upload(Dialogs.chooseUploads()) }) { Text(S.upload) }
                 DropdownMenuItem({ moreMenu = false; promptRename(state) }, enabled = state.selection.size == 1) { Text(S.rename) }
                 DropdownMenuItem({ moreMenu = false; confirmDelete(state) }, enabled = state.selection.isNotEmpty()) { Text(S.delete, color = if (state.selection.isNotEmpty()) Palette.pink else Palette.muted) }
+                DropdownMenuItem({ moreMenu = false; state.importNewPhotos() }) { Text(S.importNew) }
+                DropdownMenuItem({ moreMenu = false; state.importNewPhotos(chooseFolder = true) }) { Text(S.importTo) }
+                DropdownMenuItem({ moreMenu = false; state.openReceived() }) { Text(S.openReceived) }
                 DropdownMenuItem({ moreMenu = false; state.sendClipboard() }) { Text(S.sendClipboard) }
                 DropdownMenuItem({ moreMenu = false; state.fetchClipboard() }) { Text(S.getClipboard) }
                 DropdownMenuItem({ moreMenu = false; state.refresh() }) { Text(S.refresh) }
-                if (state.usbPhones.isNotEmpty()) DropdownMenuItem({ moreMenu = false; state.mirror() }) { Text(S.mirror) }
+                if (state.usbPhones.isNotEmpty()) {
+                    DropdownMenuItem({ moreMenu = false; state.mirror() }) { Text(S.mirror) }
+                    DropdownMenuItem({ moreMenu = false; state.mirror(wireless = true) }) { Text(S.mirrorWireless) }
+                }
                 DropdownMenuItem({ moreMenu = false; state.disconnect() }) { Text(S.disconnect) }
             }
         }

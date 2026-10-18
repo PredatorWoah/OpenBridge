@@ -225,18 +225,38 @@ class BridgeClient internal constructor(
         }
     }
 
+    /**
+     * Uploads `source`. If an earlier upload of the same file to the same folder was cut off, the phone kept what
+     * arrived and this continues from there (phones before 0.12.0 start over).
+     */
     fun upload(source: File, directoryId: String, cancelled: () -> Boolean = { false }, progress: (Long, Long) -> Unit) {
         val name = source.name
         Wire.validateName(name)
         if (!source.isFile) throw BridgeException("Choose a regular file.")
         val size = source.length()
         if (size > Wire.MAX_FILE) throw BridgeException("Files up to 64 GiB can be sent.")
-        request(3, directoryId, { Wire.writeString(it, name); it.writeLong(size) }) { input, output ->
+        val key = contentKey(source)
+        try {
+            send(12, source, directoryId, { Wire.writeString(it, name); it.writeLong(size); it.write(key) }, resumable = true, cancelled, progress)
+        } catch (e: BridgeException) {
+            if (e.message?.contains("Unsupported operation") != true) throw e
+            send(3, source, directoryId, { Wire.writeString(it, name); it.writeLong(size) }, resumable = false, cancelled, progress)
+        }
+    }
+
+    private fun send(operation: Int, source: File, directoryId: String, header: (DataOutputStream) -> Unit, resumable: Boolean,
+                     cancelled: () -> Boolean, progress: (Long, Long) -> Unit) {
+        val name = source.name
+        val size = source.length()
+        request(operation, directoryId, header) { input, output ->
             status(input)   // ready: the phone checked the name and space before any data is sent
+            val have = if (resumable) input.readLong() else 0L
+            if (have < 0 || have > size) throw BridgeException("The phone sent an invalid reply.")
             source.inputStream().buffered(1 shl 16).use { stream ->
                 val buffer = ByteArray(1 shl 16)
-                var sent = 0L; var reported = 0L
-                progress(0, size)
+                Wire.skip(stream, have)
+                var sent = have; var reported = have
+                progress(have, size)
                 while (sent < size) {
                     if (cancelled()) throw InterruptedException()
                     val read = stream.read(buffer, 0, minOf(buffer.size.toLong(), size - sent).toInt())
@@ -249,6 +269,49 @@ class BridgeClient internal constructor(
             output.flush()
             status(input)   // published: a completed send is not success until the phone confirms
         }
+    }
+
+    /** Files sent from the phone (Share › OpenBridge), waiting up to `wait` milliseconds for one. */
+    fun outbox(wait: Int): List<Entry> = request(13, "", { it.writeInt(wait.coerceIn(0, 25_000)) }) { input, _ ->
+        status(input)
+        val count = input.readInt()
+        if (count !in 0..1_000) throw BridgeException("The phone sent an invalid reply.")
+        List(count) {
+            val id = Wire.readString(input, 128)
+            val name = Wire.readString(input, 255)
+            Wire.validateName(name)
+            val size = input.readLong()
+            if (id.isEmpty() || size !in 0..Wire.MAX_FILE) throw BridgeException("The phone sent an invalid reply.")
+            Entry(id, name, false, size)
+        }
+    }
+
+    /** Saves a file sent from the phone, continuing an interrupted copy, then tells the phone it can drop it. */
+    fun receive(entry: Entry, destination: File, progress: (Long, Long) -> Unit = { _, _ -> }) {
+        if (destination.exists()) throw BridgeException("${destination.name} already exists.")
+        val partial = Partial.location(destination, entry.size)
+        val offset = if (partial.exists() && partial.length() in 1 until entry.size) partial.length() else 0L
+        if (offset == 0L) partial.delete()
+        request(14, entry.id, { it.writeLong(offset) }) { input, _ ->
+            status(input)
+            val total = input.readLong()
+            if (total != entry.size) throw BridgeException(Partial.CHANGED)
+            RandomAccessFile(partial, "rw").use { file ->
+                file.seek(offset)
+                var received = offset
+                val buffer = ByteArray(1 shl 16)
+                while (received < total) {
+                    val read = input.read(buffer, 0, minOf(buffer.size.toLong(), total - received).toInt())
+                    if (read < 0) throw BridgeException(S.dropped, lost = true)
+                    file.write(buffer, 0, read)
+                    received += read
+                    progress(received, total)
+                }
+                file.fd.sync()
+            }
+        }
+        Files.move(partial.toPath(), destination.toPath())
+        request(15, entry.id) { input, _ -> status(input) }
     }
 
     fun makeFolder(name: String, directoryId: String): Entry {
@@ -291,6 +354,25 @@ class BridgeClient internal constructor(
         if (text.toByteArray().size > Wire.MAX_CLIPBOARD) throw BridgeException("That text is too long for the phone's clipboard.")
         request(8, "", { Wire.writeString(it, text) }) { input, _ -> status(input) }
     }
+}
+
+/**
+ * A 32-byte summary of a file for resumable uploads: its size, modification time and first MiB. A file changed since
+ * an upload was cut off gets a new one, so the phone starts over instead of mixing old and new bytes.
+ */
+fun contentKey(file: File): ByteArray {
+    val digest = MessageDigest.getInstance("SHA-256")
+    digest.update("${file.length()}:${file.lastModified()}:".toByteArray())
+    file.inputStream().use { input ->
+        val buffer = ByteArray(1 shl 16)
+        var left = 1 shl 20
+        while (left > 0) {
+            val read = input.read(buffer, 0, minOf(buffer.size, left))
+            if (read < 0) break
+            digest.update(buffer, 0, read); left -= read
+        }
+    }
+    return digest.digest()
 }
 
 /** An interrupted download, kept beside its destination: `.<name>.<size>.openbridge-part`, as on the Mac. */

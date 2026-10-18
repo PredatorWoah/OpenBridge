@@ -13,6 +13,7 @@ public final class Session {
     private final byte[] fingerprint;
     private final Pairing.Approver approver;
     private final Clipboard clipboard;
+    private final Outbox outbox;
     private final SecureRandom random = new SecureRandom();
 
     /** A session that only accepts clients that already hold the secret. */
@@ -33,12 +34,20 @@ public final class Session {
 
     /** Each paired computer has its own secret, kept by `trust`. */
     public Session(Store store, Trust trust, byte[] fingerprint, Pairing.Approver approver, Clipboard clipboard) {
-        this.store = store; this.trust = trust; this.approver = approver; this.clipboard = clipboard;
+        this(store, trust, fingerprint, approver, clipboard, null);
+    }
+
+    /** Also hands files sent from the phone to computers that ask (null: OUTBOX requests fail). */
+    public Session(Store store, Trust trust, byte[] fingerprint, Pairing.Approver approver, Clipboard clipboard, Outbox outbox) {
+        this.store = store; this.trust = trust; this.approver = approver; this.clipboard = clipboard; this.outbox = outbox;
         this.fingerprint = fingerprint == null ? null : fingerprint.clone();
     }
 
     /** How long MEASURE may count before answering with what it has. */
     static final long MEASURE_MILLIS = 5_000;
+    /** The longest OUTBOX wait, safely under the 30-second socket timeouts on both sides. */
+    static final int MAX_WAIT_MILLIS = 25_000;
+    static final int MAX_OUTBOX = 1_000;
 
     public void serve(InputStream input, OutputStream output) throws IOException {
         DataInputStream in = new DataInputStream(new BufferedInputStream(input));
@@ -169,6 +178,65 @@ public final class Session {
                     out.writeLong(size.bytes);
                     out.writeLong(size.files);
                     out.writeBoolean(size.complete);
+                    break;
+                }
+                case 12: {   // PUT_RESUMABLE: like PUT; the ready status carries the bytes already received earlier
+                    String name = Wire.readString(in, 255);
+                    Wire.validateName(name);
+                    long size = in.readLong();
+                    if (size < 0 || size > Wire.MAX_FILE) throw new IOException("Unsupported file size");
+                    byte[] key = new byte[32];
+                    in.readFully(key);
+                    try (Store.Upload upload = store.resume(id, name, size, key)) {
+                        long have = upload.existing();
+                        if (have < 0 || have > size) throw new IOException("Invalid resume position");
+                        out.writeByte(0); out.writeLong(have); out.flush(); responseStarted = true;
+                        try (OutputStream destination = upload.stream()) {
+                            Wire.copy(in, destination, size - have);
+                        }
+                        try {
+                            upload.commit();
+                            out.writeByte(0);
+                        } catch (IOException e) { error(out, e); }
+                    }
+                    break;
+                }
+                case 13: {   // OUTBOX: files sent from the phone, waiting up to the given time for one
+                    if (outbox == null) throw new IOException("Sending from the phone is not available");
+                    int wait = in.readInt();
+                    if (wait < 0 || wait > MAX_WAIT_MILLIS) throw new IOException("Invalid wait");
+                    List<Store.Entry> waiting;
+                    try { waiting = outbox.waitFor(wait); }
+                    catch (InterruptedException e) { Thread.currentThread().interrupt(); throw new IOException("Sharing stopped", e); }
+                    int count = Math.min(waiting.size(), MAX_OUTBOX);
+                    out.writeByte(0); responseStarted = true;
+                    out.writeInt(count);
+                    for (Store.Entry entry : waiting.subList(0, count)) {
+                        Wire.writeString(out, entry.id);
+                        Wire.writeString(out, entry.name);
+                        out.writeLong(entry.size);
+                    }
+                    break;
+                }
+                case 14: {   // OUTBOX GET from an offset: replies with the full size, then the rest
+                    if (outbox == null) throw new IOException("Sending from the phone is not available");
+                    long offset = in.readLong();
+                    try (Store.Read file = outbox.open(id)) {
+                        long size = file.size();
+                        if (size < 0 || size > Wire.MAX_FILE) throw new IOException("Unsupported file size");
+                        if (offset < 0 || offset > size) throw new IOException("Invalid resume position");
+                        InputStream stream = file.stream();
+                        Wire.skip(stream, offset);
+                        out.writeByte(0); responseStarted = true;
+                        out.writeLong(size);
+                        Wire.copy(stream, out, size - offset);
+                    }
+                    break;
+                }
+                case 15: {   // OUTBOX DONE: the computer has the file
+                    if (outbox == null) throw new IOException("Sending from the phone is not available");
+                    outbox.done(id);
+                    out.writeByte(0);
                     break;
                 }
                 default: throw new IOException("Unsupported operation; update OpenBridge on the phone");
