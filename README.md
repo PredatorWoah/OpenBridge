@@ -18,9 +18,11 @@
 - 📁 **One folder or the whole phone**, your choice. Sharing can keep running in the background, with a notification to stop it.
 - 📶 **No addresses to type.** Phones sharing on your Wi‑Fi show up by themselves, and a phone you paired before connects on its own.
 - 🗂️ **A real file browser.** Thumbnails and a grid view, Quick Look with the space bar, folder sizes, search, a photos-and-videos filter, sorting, multi-select, whole folders both ways, drag and drop, new folders, and rename and delete (with a confirmation).
-- 📋 **Shared clipboard.** Send text from Mac to phone and back.
-- 📺 **Screen mirroring (beta).** See and control your phone in a window on the Mac, over the cable, powered by [scrcpy](https://github.com/Genymobile/scrcpy).
-- 🐘 **Big files are fine.** Files of 4 GB and more work both ways. Unplug mid-download, plug back in, and it carries on from where it stopped. A 7.83 GB file has been copied from a real phone.
+- 📤 **Send from the phone.** In the gallery or any app, tap Share › OpenBridge: the files land in Downloads/OpenBridge on your computer.
+- 📸 **Import new photos.** One click copies only the camera photos and videos you haven't imported yet.
+- 📋 **Shared clipboard.** Send text from computer to phone and back.
+- 📺 **Screen mirroring (beta).** See and control your phone in a window on your computer, powered by [scrcpy](https://github.com/Genymobile/scrcpy). Start on the cable, then **go wireless** and unplug.
+- 🐘 **Big files are fine.** Files of 4 GB and more work both ways. Interrupted downloads and uploads carry on from where they stopped. A 7.83 GB file has been copied from a real phone.
 - 🪟 **Now on Windows too (beta).** A Phone Link alternative that works with any Android phone, Xiaomi, OPPO, vivo, OnePlus and Honor included, with no Microsoft account. In English and 简体中文.
 - 🔔 **Tells you about updates.** Each app checks GitHub once per launch and shows a link when a new version is out.
 - 🛡️ **Never overwrites.** Existing files are never replaced on either side; copies get a new name like "photo 2.jpg".
@@ -58,9 +60,8 @@ Apple and Android don't talk to each other out of the box, so most Mac users end
 - **No Finder drive.** Your phone opens in OpenBridge's own window, not as a disk in Finder's sidebar. That needs Apple's File Provider system and a paid Apple developer account; it is on the list after 1.0.
 - **No sync or backup.** It moves files you choose; it doesn't mirror folders or back up the phone.
 - **No notifications or SMS on the Mac.** Clipboard and mirroring are in; messages are deliberately out.
-- **Mirroring needs USB debugging** turned on in the phone's Developer options, and works over the cable only.
+- **Mirroring needs USB debugging** turned on in the phone's Developer options, and starts on the cable (it can then continue over Wi‑Fi).
 - **Not notarized and not on Google Play (yet).** macOS asks you to confirm the first launch, and Android asks you to allow installing the APK.
-- **Uploads don't resume.** An interrupted download continues; an interrupted upload starts that file over.
 - **Dragging files out to Finder** downloads them first, so large files take a moment before they appear.
 - **Young.** Tested on one phone and one Mac so far. Reports from other phones are very welcome.
 
@@ -144,6 +145,14 @@ Good to know:
 - Large files work both ways, including files of 4 GiB and more. Uploads check the phone's free space first.
 - Keep the phone unlocked. Some phones close the connection when the screen locks.
 
+### Send from the phone
+
+In the gallery, Files or any app, select photos or files and tap **Share › OpenBridge**. If your computer is connected (or connects later), they land in **Downloads/OpenBridge**, and the phone drops its copy once they've arrived. If sharing is off, OpenBridge starts it (whole phone mode) or asks you to tap the sun. Files waiting to send are listed on the phone's main screen.
+
+### Import new photos
+
+Click **Import new photos** on the phone's card (Mac) or in the **⋯** menu. The first time, pick a folder. OpenBridge copies the camera's photos and videos (DCIM/Camera) that it hasn't imported from that phone before, and remembers them, so next time only the new ones come over. It works over Wi‑Fi, and on the Mac over USB too.
+
 ### Screen mirroring (beta)
 
 See your phone's screen in a window on the Mac and use it with the mouse, trackpad and keyboard. It runs the open-source [scrcpy](https://github.com/Genymobile/scrcpy) server on the phone, built into OpenBridge, so there is nothing else to install.
@@ -151,6 +160,7 @@ See your phone's screen in a window on the Mac and use it with the mouse, trackp
 1. Once: turn on USB debugging. On the phone, open Settings › About phone and tap **Build number** seven times, then Settings › System › Developer options › **USB debugging**.
 2. Plug in the phone, open it in OpenBridge, and click **Mirror screen** in the sidebar.
 3. The first time, the phone asks **Allow USB debugging?** Tick *Always allow from this computer* and tap **Allow**.
+4. Want it without the cable? Click **Go wireless** under the screen: the phone switches to Wi‑Fi and you can unplug. Closing the window switches the phone back to cable-only debugging. Use it on a network you trust (see [SECURITY.md](SECURITY.md#screen-mirroring-usb-debugging)).
 
 Click to tap, drag to swipe, scroll to scroll, and type with the keyboard. If the picture ever stalls, it recovers on its own within a second. Right click is Back, and the buttons below the screen are Back, Home, Recent apps, volume, power and rotate. Text you copy on either side is copied to the other. USB debugging gives a trusted computer broad control of the phone; see [SECURITY.md](SECURITY.md#screen-mirroring-usb-debugging) and turn it off when you don't need mirroring.
 
