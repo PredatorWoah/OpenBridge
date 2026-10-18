@@ -4,6 +4,22 @@ All notable changes to OpenBridge are recorded here. Every release has an entry;
 
 ## [Unreleased]
 
+## [0.9.10] - 2026-10-18
+
+Folders over USB open the first time.
+
+### Fixed
+- **Mac: "Unable to send IO." when opening folders over USB**, until you pressed Refresh a few times. Every photo that scrolled into view queued a preview request on the cable, so opening a folder waited behind all of them; and when the phone choked on one preview, the reset connection failed the folder you had asked for. Now:
+  - Previews load one at a time over USB (two over Wi‑Fi), most recently shown first, and pause while a folder loads or a file transfers. Previews for a folder you've left are dropped.
+  - If the cable hiccups while opening a folder, the Mac reconnects and tries again by itself.
+  - If a phone's previews break the connection twice, previews stay off until you reconnect, so browsing stays reliable.
+  - USB errors say what happened in plain words, with the system's error code for bug reports, instead of macOS's "Unable to send IO."
+- **Mac: folders open faster in photo-heavy folders**, over USB and Wi‑Fi, since they no longer wait behind previews.
+- Mac over Wi‑Fi: previews no longer open dozens of connections at once, which made some of them fail for good.
+
+### Notes
+- Installs over 0.9.9. The phone and Windows apps are unchanged apart from the version number.
+
 ## [0.9.9] - 2026-10-17
 
 A proper Windows installer, and sturdier connections on Windows and with every computer.

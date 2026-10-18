@@ -28,6 +28,9 @@ public final class MTPClient: FileSource, @unchecked Sendable {
     private var session: MTPSession?
     private static let chunk = 1 << 20
     private static let progressStep: Int64 = 1 << 20
+    /// Previews that broke the USB connection. Some phones choke on GetThumb for some files; after two,
+    /// previews stay off for this connection so browsing stays reliable. Only touched on `queue`.
+    private var previewFailures = 0
 
     init(name: String, identity: MTPDeviceIdentity, session: MTPSession?, reconnect: @escaping () throws -> MTPSession) {
         self.name = name; self.identity = identity; self.session = session; self.reconnect = reconnect
@@ -56,7 +59,17 @@ public final class MTPClient: FileSource, @unchecked Sendable {
 
     public func list(id: String = "") async throws -> [Entry] {
         let location = try Location(id)
-        return try await run { session in
+        do { return try await list(location) }
+        catch where !MTPClient.keepsSession(error) {
+            // A USB hiccup drops the session; listing is safe to repeat, so reconnect once and try again
+            // instead of making you press Refresh.
+            try await Task.sleep(nanoseconds: 500_000_000)
+            return try await list(location)
+        }
+    }
+
+    private func list(_ location: Location) async throws -> [Entry] {
+        try await run { session in
             guard let storage = location.storage else {
                 return try session.storages().map { Entry(id: "s:\($0.id)", name: $0.name, directory: true, size: 0) }
             }
@@ -143,7 +156,14 @@ public final class MTPClient: FileSource, @unchecked Sendable {
     public func thumbnail(_ entry: Entry, size: Int) async throws -> Data {
         let location = try Location(entry.id)
         guard location.storage != nil, !entry.directory else { throw BridgeError.message("No preview.") }
-        return try await run { try $0.thumbnail(location.handle) }
+        return try await run { session in
+            guard self.previewFailures < 2 else { throw BridgeError.message("No preview.") }
+            do { return try session.thumbnail(location.handle) }
+            catch {
+                if !MTPClient.keepsSession(error) { self.previewFailures += 1 }
+                throw error
+            }
+        }
     }
 
     public func upload(_ source: URL, directoryID: String, progress: @MainActor (Int64, Int64) -> Void) async throws {

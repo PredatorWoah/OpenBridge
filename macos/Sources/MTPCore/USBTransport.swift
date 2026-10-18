@@ -53,15 +53,26 @@ public final class USBTransport: MTPTransport {
     public func write(_ data: Data) throws {
         let buffer = NSMutableData(data: data)   // empty for a zero-length packet
         var transferred = 0
-        try guarded { try output.__sendIORequest(with: buffer, bytesTransferred: &transferred, completionTimeout: USBTransport.timeout) }
+        try readable { try guarded { try output.__sendIORequest(with: buffer, bytesTransferred: &transferred, completionTimeout: USBTransport.timeout) } }
         guard transferred == data.count else { throw MTPError.transport("The phone stopped receiving data. Unplug it and try again.") }
     }
 
     public func read(maximum: Int) throws -> Data {
         guard let buffer = NSMutableData(length: maximum) else { throw MTPError.transport("Not enough memory to read from the phone.") }
         var transferred = 0
-        try guarded { try input.__sendIORequest(with: buffer, bytesTransferred: &transferred, completionTimeout: readTimeout) }
+        try readable { try guarded { try input.__sendIORequest(with: buffer, bytesTransferred: &transferred, completionTimeout: readTimeout) } }
         return Data(bytes: buffer.bytes, count: min(transferred, maximum))
+    }
+
+    /// IOUSBHost reports failed transfers as "Unable to send IO." whatever went wrong. Say what it means,
+    /// and keep the IOKit code so a bug report shows the real cause (timeout, stall, unplugged…).
+    private func readable(_ body: () throws -> Void) throws {
+        do { try body() }
+        catch let error as MTPError { throw error }
+        catch let error as NSError {
+            let code = String(UInt32(truncatingIfNeeded: error.code), radix: 16)
+            throw MTPError.transport("The USB connection to the phone was interrupted (IOKit 0x\(code)). Keep the phone unlocked and try again.")
+        }
     }
 
     /// PTP class "Device Reset" request: abandons a half-finished transfer on the phone.
