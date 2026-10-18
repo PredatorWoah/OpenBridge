@@ -7,7 +7,7 @@ import javax.jmdns.ServiceEvent
 import javax.jmdns.ServiceListener
 
 /** A phone announcing itself while sharing on this Wi‑Fi (DNS-SD `_openbridge._tcp`). */
-data class NearbyPhone(val name: String, val host: String, val port: String)
+data class NearbyPhone(val name: String, val host: String, val port: String, val id: String? = null)
 
 /** Lists phones sharing with OpenBridge on the local network, so nobody types an address. */
 class Discovery(private val changed: (List<NearbyPhone>) -> Unit) {
@@ -22,7 +22,7 @@ class Discovery(private val changed: (List<NearbyPhone>) -> Unit) {
             val info = event.info
             val host = info.getPropertyString("ip") ?: return
             val port = info.getPropertyString("port") ?: info.port.toString()
-            update { phones[event.name] = NearbyPhone(event.name, host, port) }
+            update { phones[event.name] = NearbyPhone(event.name, host, port, info.getPropertyString("id")) }
         }
     }
 

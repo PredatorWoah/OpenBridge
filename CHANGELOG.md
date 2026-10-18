@@ -4,6 +4,28 @@ All notable changes to OpenBridge are recorded here. Every release has an entry;
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-18
+
+It remembers you: pair once, and your computer reconnects by itself. Plus rename and delete, folder sizes, search, update alerts, Chinese on the phone and Intel Macs.
+
+### Added
+- **Remembered pairing.** Pair once with the 6-digit code; after that the Mac or PC reconnects by itself whenever the phone is sharing, even at a new address or on a Wi‑Fi where phones don't show up. Your phones are listed under **Your phones** on the computer, and the phone lists the computers it trusts under **Trusted computers**, with **Forget** on both sides.
+- **The phone shows who's asking.** Pairing requests and the status say the computer's name, like "Pair with Aditya's MacBook Air?" and "Aditya's MacBook Air is connected".
+- **Rename and delete** files and folders on the phone, from the Mac (right-click, the ⋯ menu, or ⌘⌫) and Windows (the ⋯ menu, F2 and Delete). Deleting always asks first, since the phone has no bin. On the Mac this works over USB File transfer too.
+- **Folder sizes.** Folders show their total size over Wi‑Fi, counted on the phone in the background, and sort by size. Very large folders show "≥" once the phone has counted for a few seconds.
+- **Search and a photos-and-videos filter** in every folder, on the Mac and Windows.
+- **Update alerts.** All three apps check GitHub once per launch and show a link when a new version is out. Nothing is installed automatically.
+- **简体中文 on the phone.** The Android app follows the phone's language, like the Windows app.
+- **Intel Macs.** The Mac app is now a universal app for Apple Silicon and Intel.
+
+### Changed
+- The phone keeps one identity for as long as the app is installed, and gives each computer its own secret, stored only as a hash. It prefers port 41987, so saved computers find it again.
+- A computer the phone no longer trusts (forgotten, or the app reinstalled) is told so straight away and asked to pair again, instead of timing out.
+
+### Notes
+- Update the phone app and the computer apps together. Computers still pair with older phone apps, but can't rename, delete or measure folders on them.
+- After updating, pair once more: phones on 0.9.10 and earlier made a new identity every time they started sharing.
+
 ## [0.9.10] - 2026-10-18
 
 Folders over USB open the first time.

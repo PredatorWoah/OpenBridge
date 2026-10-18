@@ -59,6 +59,28 @@ final class BrowserModel: ObservableObject {
     @Published var grid = UserDefaults.standard.bool(forKey: "gridView") {
         didSet { UserDefaults.standard.set(grid, forKey: "gridView") }
     }
+    /// Phones paired before, which reconnect by themselves while sharing.
+    @Published private(set) var saved: [SavedPhone] = SavedPhones.load()
+    /// Phones sharing on this Wi‑Fi; runs for the whole session.
+    let discovery = PhoneDiscovery()
+    /// Filters for the open folder.
+    @Published var query = ""
+    @Published var mediaOnly = false
+    /// Folder sizes counted on the phone (Wi‑Fi only).
+    @Published private(set) var sizes: [Entry.ID: FolderSize] = [:]
+    /// Items waiting for the user to confirm deletion, and the item being renamed.
+    @Published var pendingDelete: [Entry] = []
+    @Published var renaming: Entry?
+    @Published private(set) var update: AvailableUpdate?
+    /// The saved phone connected now, when the connection came from one.
+    private var current: SavedPhone?
+    /// Off after Disconnect, so a saved phone doesn't reconnect straight away.
+    private var autoConnect = true
+    private var probing = false
+    private var polls = 0
+    private var sizeQueue: [Entry] = []
+    private var sizing = false
+    private var sizesPending: Set<Entry.ID> = []
     private(set) var client: (any FileSource)?
     private var task: Task<Void, Never>?
     private var watcher: Task<Void, Never>?
@@ -118,9 +140,15 @@ final class BrowserModel: ObservableObject {
         guard !busy else { return }
         busy = true; error = nil
         task = Task {
-            defer { busy = false; task = nil; pairingCode = nil; pumpThumbnails() }
+            defer { busy = false; task = nil; pairingCode = nil; pumpThumbnails(); pumpSizes() }
             do { try await work() }
             catch is CancellationError { status = "Cancelled."; transfer = nil }
+            catch BridgeError.forgotten {
+                // The phone no longer trusts this Mac: forget it here too, and offer to pair again.
+                if let current { forget(current) }
+                if connected && !overUSB { drop(BridgeError.forgotten.localizedDescription) }
+                else { self.error = BridgeError.forgotten.localizedDescription }
+            }
             catch {
                 self.error = error.localizedDescription
                 status = overUSB
@@ -141,6 +169,10 @@ final class BrowserModel: ObservableObject {
     /// Watches for a phone being plugged in or unplugged, so USB needs no button.
     func startWatching() {
         guard watcher == nil else { return }
+        discovery.start()
+        if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String {
+            Task { self.update = await Updates.newer(than: version) }
+        }
         // The model lives as long as the window, so the loop holds it strongly.
         watcher = Task {
             while !Task.isCancelled {
@@ -158,7 +190,72 @@ final class BrowserModel: ObservableObject {
             if overUSB && attached == nil { drop("The phone was unplugged.") }
             return
         }
-        if let attached, attached != skipped { connectUSB() }
+        if let attached, attached != skipped { connectUSB(); return }
+        // About every 4.5 seconds, look for a saved phone that's sharing.
+        polls += 1
+        if polls % 3 == 0, autoConnect, !saved.isEmpty, !probing { reconnectSaved() }
+    }
+
+    // MARK: Saved phones
+
+    /// Where a saved phone is now: its announced address on this Wi‑Fi, or where it was last time.
+    private func located(_ phone: SavedPhone) -> SavedPhone {
+        guard let seen = discovery.phones.first(where: { $0.phoneID == phone.id }), let port = UInt16(seen.port) else { return phone }
+        var moved = phone
+        moved.host = seen.host; moved.port = port
+        return moved
+    }
+
+    func isNearby(_ phone: SavedPhone) -> Bool { discovery.phones.contains { $0.phoneID == phone.id } }
+
+    /// Tries each saved phone quietly; the first that answers opens.
+    private func reconnectSaved() {
+        probing = true
+        let phones = saved.map(located)
+        Task {
+            defer { probing = false }
+            for phone in phones {
+                guard let client = try? phone.client() else { continue }
+                do {
+                    let entries = try await client.list(id: "", quick: true)
+                    guard !connected, !busy, autoConnect else { return }
+                    adopt(client, as: phone, entries: entries)
+                    return
+                } catch BridgeError.forgotten {
+                    forget(phone)
+                    error = "\(phone.name): \(BridgeError.forgotten.localizedDescription)"
+                } catch { continue }
+            }
+        }
+    }
+
+    /// Opens a saved phone now (the user clicked it).
+    func connect(_ phone: SavedPhone) {
+        guard !busy else { return }
+        overUSB = false
+        run {
+            self.status = "Connecting to \(phone.name)…"
+            let target = self.located(phone)
+            let client = try target.client()
+            self.adopt(client, as: target, entries: try await client.list())
+        }
+    }
+
+    func forget(_ phone: SavedPhone) {
+        saved.removeAll { $0.id == phone.id }
+        SavedPhones.save(saved)
+    }
+
+    /// Shows a connected Wi‑Fi phone and remembers it.
+    private func adopt(_ client: BridgeClient, as phone: SavedPhone, entries: [Entry]) {
+        overUSB = false
+        self.client = client; deviceName = phone.name; host = phone.host
+        path = [("", "Phone")]; self.entries = entries
+        connected = true; status = ""; error = nil
+        current = phone; autoConnect = true
+        saved = [phone] + saved.filter { $0.id != phone.id }
+        SavedPhones.save(saved)
+        didConnect(to: phone.name)
     }
 
     /// USB cable in File transfer (MTP) mode: no app or pairing needed on the phone.
@@ -195,16 +292,15 @@ final class BrowserModel: ObservableObject {
             }
             self.pairingCode = nil
             let entries = try await paired.list()
-            self.client = paired; self.deviceName = name ?? "Phone at \(self.host)"
-            self.path = [("", "Phone")]; self.entries = entries
-            self.connected = true; self.status = ""
-            self.didConnect(to: self.deviceName)
+            let phone = SavedPhone(name: name ?? "Phone at \(paired.host)", host: paired.host, port: paired.port,
+                                   fingerprint: paired.fingerprint, secret: paired.secret)
+            self.adopt(paired, as: phone, entries: entries)
         }
     }
 
     func disconnect() {
         guard !busy else { return }
-        if overUSB { skipped = MTPClient.attachedPhone() }
+        if overUSB { skipped = MTPClient.attachedPhone() } else { autoConnect = false }
         drop("")
     }
 
@@ -226,6 +322,7 @@ final class BrowserModel: ObservableObject {
         selection = []; transfer = nil; error = nil; status = reason
         thumbnails = [:]; thumbnailsPending = []; thumbnailsFailed = []
         thumbnailQueue = []; thumbnailsRunning = 0; thumbnailEpoch += 1
+        sizes = [:]; sizeQueue = []; sizing = false; sizesPending = []; current = nil; query = ""
         try? FileManager.default.removeItem(at: previews)
     }
 
@@ -235,12 +332,17 @@ final class BrowserModel: ObservableObject {
 
     /// Folders first, then in the chosen order.
     var sorted: [Entry] {
-        entries.sorted { a, b in
+        let needle = query.trimmingCharacters(in: .whitespaces)
+        return entries.filter { entry in
+            (needle.isEmpty || entry.name.localizedCaseInsensitiveContains(needle)) && (!mediaOnly || FileKind(entry).previewable)
+        }.sorted { a, b in
             if a.directory != b.directory { return a.directory }
             let order: ComparisonResult
             switch sortKey {
             case .name: order = a.name.localizedStandardCompare(b.name)
-            case .size: order = a.size == b.size ? a.name.localizedStandardCompare(b.name) : (a.size < b.size ? .orderedAscending : .orderedDescending)
+            case .size:
+                let (sa, sb) = (sizeOf(a), sizeOf(b))
+                order = sa == sb ? a.name.localizedStandardCompare(b.name) : (sa < sb ? .orderedAscending : .orderedDescending)
             case .kind:
                 let (ka, kb) = (FileKind(a), FileKind(b))
                 order = ka == kb ? a.name.localizedStandardCompare(b.name) : (ka < kb ? .orderedAscending : .orderedDescending)
@@ -249,8 +351,13 @@ final class BrowserModel: ObservableObject {
         }
     }
 
+    /// A file's size, or a folder's measured size (0 until measured).
+    func sizeOf(_ entry: Entry) -> Int64 { entry.directory ? sizes[entry.id]?.bytes ?? 0 : entry.size }
+
     private func display(_ entries: [Entry], at path: [(id: String, name: String)]) {
-        self.path = path; self.entries = entries; selection = []; anchor = nil
+        self.path = path; self.entries = entries; selection = []; anchor = nil; query = ""
+        for entry in sizeQueue { sizesPending.remove(entry.id) }
+        sizeQueue = []
         // Previews still waiting belong to the folder just left.
         for entry in thumbnailQueue { thumbnailsPending.remove(entry.id) }
         thumbnailQueue = []
@@ -334,6 +441,54 @@ final class BrowserModel: ObservableObject {
     func selectAll() { selection = Set(entries.map(\.id)) }
 
     // MARK: Previews
+
+    /// Counts a folder's size on the phone, one at a time, when nothing else is running. Wi‑Fi only: MTP can't.
+    func loadSize(_ entry: Entry) {
+        guard entry.directory, !overUSB, client != nil, sizes[entry.id] == nil, !sizesPending.contains(entry.id) else { return }
+        sizesPending.insert(entry.id)
+        sizeQueue.append(entry)
+        pumpSizes()
+    }
+
+    private func pumpSizes() {
+        guard !sizing, !busy, let client, let entry = sizeQueue.popLast() else { return }
+        sizing = true
+        let epoch = thumbnailEpoch
+        Task {
+            let size = try? await client.measure(entry)
+            guard epoch == thumbnailEpoch else { return }
+            sizing = false
+            if let size { sizes[entry.id] = size }
+            pumpSizes()
+        }
+    }
+
+    // MARK: Editing
+
+    /// Asks before deleting: there's no bin on the phone.
+    func confirmDelete(_ items: [Entry]) { if !items.isEmpty && !busy { pendingDelete = items } }
+
+    func deleteConfirmed() {
+        let items = pendingDelete
+        pendingDelete = []
+        guard let client, !items.isEmpty, let folder = path.last?.id else { return }
+        run {
+            for item in items { try await client.delete(item) }
+            self.entries = try await client.list(id: folder)
+            self.selection = []; self.sizes = [:]; self.sizesPending = []
+            self.show(items.count == 1 ? "Deleted “\(items[0].name)”" : "Deleted \(items.count) items")
+        }
+    }
+
+    func rename(_ entry: Entry, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let client, !trimmed.isEmpty, trimmed != entry.name, let folder = path.last?.id else { return }
+        run {
+            let renamed = try await client.rename(entry, to: trimmed)
+            self.entries = try await client.list(id: folder)
+            self.selection = [renamed.id]; self.anchor = renamed.id
+        }
+    }
 
     func loadThumbnail(_ entry: Entry) {
         guard FileKind(entry).previewable, client != nil, thumbnails[entry.id] == nil,

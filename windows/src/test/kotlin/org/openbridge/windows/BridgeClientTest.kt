@@ -119,10 +119,40 @@ class BridgeClientTest {
 
     @Test
     fun refusesAnotherCertificateOrSecret() {
+        // Either means the saved pairing is no longer any good: the PC forgets the phone and asks to pair again.
         val wrongPin = BridgeClient("127.0.0.1", server.localPort, ByteArray(32), secret)
-        assertFailsWith<BridgeException> { wrongPin.list() }
+        assertTrue(assertFailsWith<BridgeException> { wrongPin.list() }.forgotten)
         val wrongSecret = BridgeClient("127.0.0.1", server.localPort, fingerprint, ByteArray(32))
-        assertFailsWith<BridgeException> { wrongSecret.list() }
+        assertTrue(assertFailsWith<BridgeException> { wrongSecret.list() }.forgotten)
+    }
+
+    @Test
+    fun renamesMeasuresAndDeletes() {
+        val client = client()
+        File(phone, "DCIM/Camera").mkdirs()
+        File(phone, "DCIM/Camera/a.jpg").writeBytes(ByteArray(1500))
+        File(phone, "DCIM/b.jpg").writeBytes(ByteArray(500))
+        val dcim = client.list().first { it.name == "DCIM" }
+        assertEquals(FolderSize(2000, 2, true), client.measure(dcim))
+
+        val notes = client.list().first { it.name == "notes.txt" }
+        val renamed = client.rename(notes, "renamed.txt")
+        assertEquals("renamed.txt", renamed.name)
+        assertTrue(File(phone, "renamed.txt").isFile)
+        assertFalse(File(phone, "notes.txt").exists())
+        assertFailsWith<BridgeException> { client.rename(renamed, "DCIM") }   // never takes an existing name
+
+        client.delete(client.list().first { it.name == "DCIM" })
+        assertFalse(File(phone, "DCIM").exists())
+        assertEquals(listOf("renamed.txt"), client.list().map { it.name })
+    }
+
+    @Test
+    fun savedPhonesKeepTheirPairing() {
+        val saved = SavedPhone("vivo X300 Pro", fingerprint, "127.0.0.1", server.localPort, secret)
+        assertEquals(fingerprint.take(8).joinToString("") { "%02x".format(it) }, saved.id)
+        assertEquals(listOf("DCIM", "notes.txt"), saved.client().list().map { it.name })
+        assertTrue(BridgeClient.reachable("127.0.0.1", server.localPort))
     }
 
     @Test

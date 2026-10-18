@@ -15,8 +15,8 @@ android {
         applicationId = "org.openbridge.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = 15
-        versionName = "0.9.10"
+        versionCode = 16
+        versionName = "0.11.0"
     }
     signingConfigs {
         if (releaseKeystore != null) {
@@ -36,7 +36,7 @@ android {
             if (releaseKeystore != null) signingConfig = signingConfigs.getByName("release")
         }
     }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
     // The animated sun and the palette are shared with the Windows app.
     sourceSets["main"].java.srcDir("../../shared/compose")
     compileOptions {

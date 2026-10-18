@@ -14,14 +14,15 @@
 
 - 🔌 **Plug in and it opens.** Choose File transfer on the phone and the Mac app finds it by itself, with shortcuts straight to Camera, Download, Screenshots, WhatsApp or Documents. No driver, no kernel extension, no macFUSE.
 - ☀️ **Tap the sun to share over Wi‑Fi.** The arch from the icon is the button. It turns gold when your Mac connects, by Wi‑Fi or by cable.
-- 🔒 **Encrypted, with 6-digit pairing.** Every Wi‑Fi request uses TLS. To pair, check that both screens show the same 6-digit code and tap Pair on the phone, like Bluetooth.
+- 🔒 **Encrypted, with 6-digit pairing, once.** Every Wi‑Fi request uses TLS. Pair once by checking that both screens show the same 6-digit code, like Bluetooth; after that your computer reconnects by itself whenever the phone is sharing. Forget a computer anytime on the phone.
 - 📁 **One folder or the whole phone**, your choice. Sharing can keep running in the background, with a notification to stop it.
-- 📶 **No addresses to type.** Phones sharing on your Wi‑Fi show up on the Mac; click one and compare the code.
-- 🗂️ **A real file browser.** Thumbnails and a grid view, Quick Look with the space bar, sorting, multi-select, whole folders both ways, drag and drop from Finder, and new folders.
+- 📶 **No addresses to type.** Phones sharing on your Wi‑Fi show up by themselves, and a phone you paired before connects on its own.
+- 🗂️ **A real file browser.** Thumbnails and a grid view, Quick Look with the space bar, folder sizes, search, a photos-and-videos filter, sorting, multi-select, whole folders both ways, drag and drop, new folders, and rename and delete (with a confirmation).
 - 📋 **Shared clipboard.** Send text from Mac to phone and back.
 - 📺 **Screen mirroring (beta).** See and control your phone in a window on the Mac, over the cable, powered by [scrcpy](https://github.com/Genymobile/scrcpy).
 - 🐘 **Big files are fine.** Files of 4 GB and more work both ways. Unplug mid-download, plug back in, and it carries on from where it stopped. A 7.83 GB file has been copied from a real phone.
 - 🪟 **Now on Windows too (beta).** A Phone Link alternative that works with any Android phone, Xiaomi, OPPO, vivo, OnePlus and Honor included, with no Microsoft account. In English and 简体中文.
+- 🔔 **Tells you about updates.** Each app checks GitHub once per launch and shows a link when a new version is out.
 - 🛡️ **Never overwrites.** Existing files are never replaced on either side; copies get a new name like "photo 2.jpg".
 
 **Download:** get the Android APK, the Mac app (`.dmg`) and the Windows installer (`-Windows-Setup.exe`, or the portable `-Windows.zip`) from the [latest release](https://github.com/PredatorWoah/OpenBridge/releases/latest). See the [changelog](CHANGELOG.md) for what's new.
@@ -50,7 +51,7 @@ Apple and Android don't talk to each other out of the box, so most Mac users end
 | Safety | Never overwrites a file; partial uploads are removed | Varies; overwrite prompts are easy to click through |
 | Trust | Every line is public and reviewable | Closed source |
 | Extras | Clipboard sharing and screen mirroring included | Often separate apps or paid add-ons |
-| Size | A few MB, native Apple Silicon | Often much larger |
+| Size | A few MB, native on Apple Silicon and Intel | Often much larger |
 
 **What it lacks compared with paid apps (stated plainly):**
 
@@ -61,7 +62,6 @@ Apple and Android don't talk to each other out of the box, so most Mac users end
 - **Not notarized and not on Google Play (yet).** macOS asks you to confirm the first launch, and Android asks you to allow installing the APK.
 - **Uploads don't resume.** An interrupted download continues; an interrupted upload starts that file over.
 - **Dragging files out to Finder** downloads them first, so large files take a moment before they appear.
-- **Apple Silicon Macs only, for now.** The release is built for M-series Macs; Intel Macs need a universal build, which is planned.
 - **Young.** Tested on one phone and one Mac so far. Reports from other phones are very welcome.
 
 ## On Windows (beta)
@@ -79,7 +79,7 @@ The Windows app follows Windows' display language: English or Simplified Chinese
 ## Requirements
 
 - Android 8.0/API 26 or later, private IPv4 Wi-Fi or USB tethering (see below), and a writable folder in internal storage or an SD card.
-- A Mac with Apple Silicon (M1 or later) and macOS 13 or later, or a 64-bit Windows 10 or 11 PC. Both devices must be reachable on the same local network; guest Wi-Fi/client isolation can prevent connections.
+- A Mac (Apple Silicon or Intel) with macOS 13 or later, or a 64-bit Windows 10 or 11 PC. Both devices must be reachable on the same local network; guest Wi-Fi/client isolation can prevent connections.
 - Development: JDK **17**, Gradle **8.13**, Android SDK platform **35**, and Android Studio or the command-line SDK. Mac builds need Xcode command-line tools/Swift 5.9 or later. These tools and dependency downloads are build-time requirements only.
 
 ## Install a release
@@ -118,13 +118,14 @@ The script makes an application bundle with a **local ad-hoc signature**. It doe
 2. **Tap the sun.** It circles the arch while sharing starts, then the phone shows its address and port. With **Keep sharing in the background** on (the default), you can leave the app: a notification shows that sharing is on and has a Stop button.
 3. On the Mac, click **Pair over Wi‑Fi**. Your phone appears under **Phones nearby**; click it (or type the address and port) and press **Pair**. Both screens show a 6-digit code: tap **Pair** on the phone **only if they match**. If they differ, tap Cancel; another device may be trying to connect. When pairing succeeds the sun lights up gold on both devices.
 4. Click **Open phone** to browse:
-   - Double-click a folder to open it; click the path to go back. Switch between list and grid, and sort by name, size or kind.
+   - Double-click a folder to open it; click the path to go back. Switch between list and grid, sort by name, size or kind, search the folder, or show only photos and videos. Folders show their total size over Wi‑Fi.
    - Select files (⌘-click and ⇧-click work like Finder, ⌘A selects all) and press **Download**. Several files or folders go into a folder you choose, keeping the folder structure.
    - Drop files or folders from Finder onto the window to upload them, or use **⋯ › Upload…**. Drag a file out to Finder to copy it.
    - Press the space bar to Quick Look a photo, video or document.
+   - Right-click to **Rename…** or **Delete…**, or press ⌘⌫ to delete. OpenBridge asks first: the phone has no bin.
    - **⋯ › New Folder…**, and **⋯ › Send Mac clipboard to phone / Copy phone clipboard to Mac** (over Wi‑Fi; reading the phone's clipboard needs OpenBridge on screen on the phone).
    - Progress shows in the bar at the bottom. If a transfer is interrupted, **Resume** continues it, picking up a download where it stopped. If the phone was unplugged or disconnected, reconnecting it continues the transfer by itself.
-5. Press **Stop sharing** on Android (in the app or the notification) when finished. Losing or changing Wi-Fi, or unplugging a USB tethering cable, also stops sharing. Restarting creates new credentials; pair again on the Mac.
+5. Press **Stop sharing** on Android (in the app or the notification) when finished. Losing or changing Wi-Fi, or unplugging a USB tethering cable, also stops sharing. Your computer stays paired: next time you tap the sun, it reconnects by itself. To stop a computer from reconnecting, tap **Trusted computers** on the phone and **Forget** it.
 
 Existing filenames are rejected on both sides, before any data is transferred. On Android, names are compared ignoring case (`Photo.JPG` collides with `photo.jpg`), and the characters `" * : < > ? |` are not allowed. Choose another name (rename the source before upload). Downloads use temporary sibling files; uploads use temporary SAF documents and publish only after the declared body is received. On a normal disconnection/cancellation, partial files are removed. After a process kill or power loss, remove any leftover `.openbridge-part-*` Android documents (hidden from the Mac's file list) or `.openbridge-*.part` Mac files manually. A cancellation exactly at upload completion can mean the phone committed the file before the Mac received its acknowledgement; refresh before retrying.
 

@@ -5,6 +5,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.toComposeImageBitmap
+import org.openbridge.ui.Release
+import org.openbridge.ui.Updates
 import java.awt.Toolkit
 import java.awt.datatransfer.DataFlavor
 import java.awt.datatransfer.StringSelection
@@ -13,6 +15,9 @@ import java.util.concurrent.Executors
 import javax.swing.SwingUtilities
 
 enum class SortKey { NAME, SIZE, KIND }
+
+/** What the folder shows: everything, or only photos and videos. */
+enum class Show { ALL, MEDIA }
 
 /** What a file is, from its name: decides its icon, sorting group and whether it has a preview. */
 enum class Kind { FOLDER, IMAGE, VIDEO, AUDIO, DOCUMENT, ARCHIVE, APP, OTHER;
@@ -62,6 +67,19 @@ class AppState {
     var thumbnails by mutableStateOf(emptyMap<String, ImageBitmap>()); private set
     var transfer by mutableStateOf<Transfer?>(null); private set
     var mirroring by mutableStateOf(false); private set
+    /** Phones paired before, which reconnect by themselves. */
+    var saved by mutableStateOf(Phones.load()); private set
+    /** The saved phone connected now, if the connection came from one. */
+    private var current: SavedPhone? = null
+    /** Off after Disconnect, so the phone doesn't reconnect straight away; on again with the next connection. */
+    @Volatile private var autoConnect = true
+    var query by mutableStateOf("")
+    var show by mutableStateOf(Show.ALL)
+    /** Folder sizes measured on the phone, by entry ID. */
+    var sizes by mutableStateOf(emptyMap<String, FolderSize>()); private set
+    private val pendingSizes = HashSet<String>()
+    /** A newer release, to offer. */
+    var update by mutableStateOf<Release?>(null); private set
 
     private val worker = Executors.newSingleThreadExecutor { Thread(it, "openbridge-work").apply { isDaemon = true } }
     // One preview at a time: the phone serves only a few connections at once, and browsing and transfers come first.
@@ -82,6 +100,16 @@ class AppState {
     fun start() {
         // Discovery runs for the whole session: the phone may stop and start sharing at any time.
         discovery.start()
+        // The installed app knows its version; a development run doesn't, and skips the check.
+        System.getProperty("jpackage.app-version")?.let { version ->
+            Thread { Updates.newerThan(version)?.let { found -> ui { update = found } } }.apply { isDaemon = true }.start()
+        }
+        Thread {
+            while (true) {
+                if (client == null && !busy && autoConnect) reconnectSaved()
+                Thread.sleep(4_000)
+            }
+        }.apply { isDaemon = true }.start()
         Thread {
             Thread.sleep(10_000)
             ui { searchedLong = true }
@@ -108,6 +136,7 @@ class AppState {
             catch (e: Exception) {
                 when {
                     cancelled && client == null -> ui { status = "" }   // pairing cancelled
+                    e is BridgeException && e.forgotten -> ui { current?.let(::forgetPhone); lose(S.forgotten) }
                     e is BridgeException && e.lost -> ui { lose(e.message ?: S.dropped) }
                     else -> ui { error = e.message ?: e.toString() }
                 }
@@ -122,37 +151,100 @@ class AppState {
         // Accept "192.168.1.23:41987" pasted into the address field.
         val typed = host.trim()
         if (typed.count { it == ':' } == 1 && port.isBlank()) { host = typed.substringBefore(':'); port = typed.substringAfter(':') }
-        connect(name)
+        pairNow(name)
     }
 
-    private fun connect(name: String?) = run {
+    private fun pairNow(name: String?) = run {
         ui { status = S.pairing }
         val paired = BridgeClient.pair(host.trim(), port.trim(), { pairing = it }) { code -> ui { pairingCode = code } }
         val top = paired.list()
+        val phone = SavedPhone(name ?: "${S.phone} ${paired.host}", paired.fingerprint, paired.host, paired.port, paired.secret)
+        ui { remember(phone) }
+        opened(paired, phone, top)
+    }
+
+    /** Shows a connected phone, and continues an interrupted transfer when it's the same phone as before. */
+    private fun opened(paired: BridgeClient, phone: SavedPhone, top: List<Entry>) {
         connection++
-        val samePhone = lastHost == paired.host
-        lastHost = paired.host
+        val samePhone = lastHost == phone.id
+        lastHost = phone.id
+        autoConnect = true
         ui {
-            client = paired; deviceName = name ?: "${S.phone} ${paired.host}"
-            path = listOf("" to S.phone); entries = top; selection = emptySet(); status = ""; thumbnails = emptyMap()
+            client = paired; current = phone; deviceName = phone.name
+            path = listOf("" to S.phone); entries = top; selection = emptySet(); status = ""; thumbnails = emptyMap(); sizes = emptyMap()
+            pendingSizes.clear(); query = ""
         }
         // An interrupted transfer continues by itself when the same phone pairs again.
-        val pending = transfer?.takeIf { samePhone && !it.done && it.remaining.isNotEmpty() } ?: return@run
+        val pending = transfer?.takeIf { samePhone && !it.done && it.remaining.isNotEmpty() } ?: return
         ui { show(S.continuing(pending.remaining.first().name)) }
         perform(pending.remaining, paired, pending.connection)
     }
 
-    fun pairWith(phone: NearbyPhone) { host = phone.host; port = phone.port; pair(phone.name) }
+    // Saved phones
+
+    private fun remember(phone: SavedPhone) {
+        saved = listOf(phone) + saved.filter { it != phone }
+        runCatching { Phones.save(saved) }
+    }
+
+    fun forgetPhone(phone: SavedPhone) {
+        saved = saved.filter { it != phone }
+        runCatching { Phones.save(saved) }
+    }
+
+    /** Where a saved phone is now: its announced address on this Wi‑Fi, or where it was last time. */
+    private fun located(phone: SavedPhone): SavedPhone {
+        val seen = nearby.firstOrNull { it.id == phone.id } ?: return phone
+        return phone.copy(host = seen.host, port = seen.port.toIntOrNull() ?: phone.port)
+    }
+
+    fun isNearby(phone: SavedPhone) = nearby.any { it.id == phone.id }
+
+    /** Tries each saved phone quietly; the first that answers opens. Runs on its own thread, not the worker. */
+    private fun reconnectSaved() {
+        for (phone in saved.map(::located)) {
+            if (!BridgeClient.reachable(phone.host, phone.port)) continue
+            val client = phone.client()
+            val top = try { client.list() } catch (e: BridgeException) {
+                if (e.forgotten) ui { forgetPhone(phone); error = "${phone.name}: ${S.forgotten}" }
+                continue
+            } catch (_: Exception) { continue }
+            ui {
+                if (this.client == null && !busy && autoConnect) {
+                    remember(phone)
+                    run { opened(client, phone, top) }
+                }
+            }
+            return
+        }
+    }
+
+    /** Opens a saved phone now (the user clicked it). */
+    fun connect(phone: SavedPhone) = run {
+        ui { status = S.pairing }
+        val target = located(phone)
+        val client = target.client()
+        val top = client.list()
+        ui { remember(target) }
+        opened(client, target, top)
+    }
+
+    fun pairWith(phone: NearbyPhone) {
+        val known = saved.firstOrNull { it.id == phone.id }
+        if (known != null) { connect(known); return }
+        host = phone.host; port = phone.port; pair(phone.name)
+    }
 
     fun disconnect() {
         if (busy) return
-        client = null; entries = emptyList(); path = listOf("" to S.phone); selection = emptySet(); thumbnails = emptyMap()
+        autoConnect = false
+        client = null; current = null; entries = emptyList(); path = listOf("" to S.phone); selection = emptySet(); thumbnails = emptyMap()
     }
 
     /** The phone is gone (stopped sharing, new identity, left the Wi‑Fi): back to pairing, keeping unfinished transfers. */
     private fun lose(message: String) {
         if (client == null) { error = message; return }
-        client = null; entries = emptyList(); path = listOf("" to S.phone); selection = emptySet(); thumbnails = emptyMap()
+        client = null; current = null; entries = emptyList(); path = listOf("" to S.phone); selection = emptySet(); thumbnails = emptyMap()
         pendingPreviews.clear()
         error = "$message ${S.lostHint}"
     }
@@ -171,15 +263,21 @@ class AppState {
 
     // Browsing
 
-    val sorted: List<Entry> get() = entries.sortedWith { a, b ->
+    val sorted: List<Entry> get() = entries.filter { entry ->
+        (query.isBlank() || entry.name.contains(query.trim(), ignoreCase = true)) &&
+            (show == Show.ALL || Kind.of(entry).previewable)
+    }.sortedWith { a, b ->
         if (a.directory != b.directory) return@sortedWith if (a.directory) -1 else 1
         val order = when (sortKey) {
             SortKey.NAME -> a.name.compareTo(b.name, ignoreCase = true)
-            SortKey.SIZE -> a.size.compareTo(b.size).takeIf { it != 0 } ?: a.name.compareTo(b.name, ignoreCase = true)
+            SortKey.SIZE -> sizeOf(a).compareTo(sizeOf(b)).takeIf { it != 0 } ?: a.name.compareTo(b.name, ignoreCase = true)
             SortKey.KIND -> Kind.of(a).compareTo(Kind.of(b)).takeIf { it != 0 } ?: a.name.compareTo(b.name, ignoreCase = true)
         }
         if (ascending) order else -order
     }
+
+    /** A file's size, or a folder's measured size (0 until measured). */
+    fun sizeOf(entry: Entry): Long = if (entry.directory) sizes[entry.id]?.bytes ?: 0 else entry.size
 
     private val trail get() = path.drop(1).map { it.second }
 
@@ -205,7 +303,7 @@ class AppState {
     }
 
     private fun display(listed: List<Entry>, at: List<Pair<String, String>>) {
-        entries = listed; path = at; selection = emptySet(); anchor = null
+        entries = listed; path = at; selection = emptySet(); anchor = null; query = ""
     }
 
     /** Click selects, Ctrl-click adds or removes, Shift-click selects a range, like File Explorer. */
@@ -232,6 +330,43 @@ class AppState {
                 else runCatching { org.jetbrains.skia.Image.makeFromEncoded(phone.thumbnail(entry)).toComposeImageBitmap() }.getOrNull()
             // Without a preview the row keeps its icon; it asks again the next time the folder opens.
             ui { pendingPreviews.remove(entry.id); if (image != null && client === phone) thumbnails = thumbnails + (entry.id to image) }
+        }
+    }
+
+    /** Measures a folder on the phone, one at a time behind previews; an old phone just shows no size. */
+    fun loadSize(entry: Entry) {
+        val phone = client ?: return
+        if (!entry.directory || entry.id in sizes || !pendingSizes.add(entry.id)) return
+        previews.execute {
+            val size = if (client !== phone) null else runCatching { phone.measure(entry) }.getOrNull()
+            ui { if (size != null && client === phone) sizes = sizes + (entry.id to size) }
+        }
+    }
+
+    // Editing
+
+    /** Deletes the selected items on the phone (the window asks first). */
+    fun deleteSelected() {
+        val phone = client ?: return
+        val doomed = selected
+        if (doomed.isEmpty()) return
+        val directory = path.last().first
+        run {
+            for (entry in doomed) phone.delete(entry)
+            val listed = phone.list(directory)
+            ui { entries = listed; selection = emptySet(); sizes = emptyMap(); pendingSizes.clear(); show(S.deleted(doomed.size)) }
+        }
+    }
+
+    fun rename(entry: Entry, name: String) {
+        val phone = client ?: return
+        val trimmed = name.trim()
+        if (trimmed.isEmpty() || trimmed == entry.name) return
+        val directory = path.last().first
+        run {
+            val renamed = phone.rename(entry, trimmed)
+            val listed = phone.list(directory)
+            ui { entries = listed; selection = setOf(renamed.id); anchor = renamed.id }
         }
     }
 

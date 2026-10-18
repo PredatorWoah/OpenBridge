@@ -129,6 +129,75 @@ public final class FileStore implements Store {
         return thumbnails.make(file.toFile(), size);
     }
 
+    @Override public synchronized void delete(String id) throws IOException {
+        Path target = resolve(id);
+        if (rootPaths.contains(target.toRealPath())) throw new IOException("The storage itself can't be deleted");
+        // Deletes links themselves and never follows them, so nothing outside the folder is touched.
+        Files.walkFileTree(target, new SimpleFileVisitor<Path>() {
+            @Override public FileVisitResult visitFile(Path file, java.nio.file.attribute.BasicFileAttributes attributes) throws IOException {
+                Files.delete(file); return FileVisitResult.CONTINUE;
+            }
+            @Override public FileVisitResult postVisitDirectory(Path directory, IOException error) throws IOException {
+                if (error != null) throw error;
+                Files.delete(directory); return FileVisitResult.CONTINUE;
+            }
+        });
+        forget(target);
+    }
+
+    @Override public synchronized String rename(String id, String name) throws IOException {
+        Names.requireStorable(name);
+        Path source = resolve(id);
+        if (rootPaths.contains(source.toRealPath())) throw new IOException("The storage itself can't be renamed");
+        String current = source.getFileName().toString();
+        if (current.equals(name)) return id;
+        Path directory = source.getParent();
+        Path target = directory.resolve(name);
+        boolean caseOnly = Names.collisionKey(current).equals(Names.collisionKey(name));
+        if (!caseOnly && (exists(directory, name) || reserved.contains(directory + "/" + Names.collisionKey(name))))
+            throw new IOException("A file or folder with that name already exists");
+        if (caseOnly) {
+            // Shared storage ignores case: go through a temporary name so "photo.JPG" can become "photo.jpg".
+            Path step = directory.resolve(Names.TEMPORARY_PREFIX + UUID.randomUUID());
+            Files.move(source, step);
+            Files.move(step, target);
+        } else {
+            try { Files.move(source, target); }   // without REPLACE_EXISTING: never overwrites
+            catch (FileAlreadyExistsException e) { throw new IOException("A file or folder with that name already exists"); }
+        }
+        forget(source);
+        return id(target);
+    }
+
+    @Override public Store.Size measure(String directoryId, long deadline) throws IOException {
+        Path directory;
+        synchronized (this) {
+            if (directoryId.isEmpty() && roots.size() > 1) return Store.super.measure(directoryId, deadline);
+            directory = directory(directoryId);
+        }
+        // Walks the filesystem directly (no IDs handed out), skipping links, like the listing does.
+        long[] totals = new long[3];
+        boolean[] complete = {true};
+        Files.walkFileTree(directory, new SimpleFileVisitor<Path>() {
+            @Override public FileVisitResult visitFile(Path file, java.nio.file.attribute.BasicFileAttributes attributes) {
+                if (++totals[2] > MEASURE_LIMIT || System.currentTimeMillis() > deadline) { complete[0] = false; return FileVisitResult.TERMINATE; }
+                if (attributes.isRegularFile() && !Names.isTemporary(file.getFileName().toString())) { totals[0] += attributes.size(); totals[1]++; }
+                return FileVisitResult.CONTINUE;
+            }
+            @Override public FileVisitResult visitFileFailed(Path file, IOException error) { return FileVisitResult.CONTINUE; }
+        });
+        return new Store.Size(totals[0], totals[1], complete[0]);
+    }
+
+    /** Drops IDs for a path and everything below it, after it was deleted or moved. */
+    private void forget(Path path) {
+        ids.keySet().removeIf(known -> {
+            boolean gone = known.startsWith(path);
+            if (gone) documents.values().remove(known);
+            return gone;
+        });
+    }
+
     private static boolean exists(Path directory, String name) throws IOException {
         // Shared storage ignores letter case, so compare names that way.
         String key = Names.collisionKey(name);

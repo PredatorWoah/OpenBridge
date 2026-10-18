@@ -63,6 +63,13 @@ public final class MTPSession {
         _ = try simple(MTPCode.deleteObject, [handle, 0])
     }
 
+    /// Renames an object in place (its file name property). The caller checks the name is free first.
+    public func rename(_ handle: UInt32, to name: String) throws {
+        var writer = MTPWriter()
+        try writer.string(name)
+        _ = try dataOut(MTPCode.setObjectPropValue, [handle, UInt32(MTPCode.objectFileNameProperty)], payload: writer.data)
+    }
+
     public func storages() throws -> [MTPStorage] {
         var reader = MTPReader(try dataIn(MTPCode.getStorageIDs))
         return try reader.u32Array().map { id in

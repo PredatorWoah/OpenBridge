@@ -102,6 +102,8 @@ public final class ProtocolTest {
         pairingTests(store);
         extensionTests();
         fileStoreTests();
+        trustTests();
+        editingTests();
         System.out.println("Protocol tests passed: " + checks + " assertions");
     }
 
@@ -231,6 +233,128 @@ public final class ProtocolTest {
         DataInputStream refused = serve(store, request.toByteArray());
         check(refused.readByte() == 1 && Wire.readString(refused, 512).contains("not available"), "Pairing unavailable");
         check(refused.available() == 0, "Nothing else sent");
+    }
+
+    /** Remembered pairing: OBP2 names the computer, each computer gets its own secret, and only those work. */
+    private static void trustTests() throws Exception {
+        byte[] fingerprint = new byte[32]; Arrays.fill(fingerprint, (byte) 7);
+        Map<String, byte[]> given = new LinkedHashMap<>();
+        Trust trust = new Trust() {
+            public String computer(byte[] secret) {
+                for (Map.Entry<String, byte[]> entry : given.entrySet())
+                    if (java.security.MessageDigest.isEqual(entry.getValue(), secret)) return entry.getKey();
+                return null;
+            }
+            public byte[] admit(String computer) {
+                byte[] secret = new byte[32]; new Random(computer.hashCode()).nextBytes(secret);
+                given.put(computer, secret);
+                return secret;
+            }
+        };
+        String[] asked = new String[1];
+        Pairing.Approver approver = new Pairing.Approver() {
+            public boolean approve(String code) { return false; }
+            @Override public boolean approve(String code, String computer) { asked[0] = computer; return true; }
+        };
+        Session session = new Session(new MemoryStore(), trust, fingerprint, approver, null);
+        byte[][] secrets = new byte[2][];
+        String[] names = {"Aditya\u2019s MacBook Air\n", "\u0007"};
+        for (int i = 0; i < 2; i++) {
+            ByteArrayOutputStream pairing = new ByteArrayOutputStream();
+            DataOutputStream out = new DataOutputStream(pairing);
+            out.write(Pairing.MAGIC2); out.write(Pairing.nameBlock(names[i])); out.write(new byte[32]);
+            DataInputStream reply = serve(session, pairing.toByteArray());
+            check(reply.readByte() == 0, "OBP2 pairing starts");
+            reply.readFully(new byte[64]);
+            check(reply.readByte() == 0, "OBP2 approved");
+            secrets[i] = new byte[32]; reply.readFully(secrets[i]);
+        }
+        check(given.containsKey("Aditya\u2019s MacBook Air") && given.containsKey("Computer"), "Names cleaned before showing: " + given.keySet());
+        check(asked[0].equals("Computer"), "The phone is asked with the computer's name");
+        check(!Arrays.equals(secrets[0], secrets[1]), "Each computer gets its own secret");
+        for (byte[] secret : secrets) {
+            ByteArrayOutputStream list = new ByteArrayOutputStream();
+            DataOutputStream out = new DataOutputStream(list);
+            out.write(Wire.MAGIC); out.write(secret); out.writeByte(1); Wire.writeString(out, "");
+            check(serve(session, list.toByteArray()).readByte() == 0, "A remembered computer is let in");
+        }
+        given.remove("Computer");   // forgotten on the phone
+        ByteArrayOutputStream forgotten = new ByteArrayOutputStream();
+        DataOutputStream out = new DataOutputStream(forgotten);
+        out.write(Wire.MAGIC); out.write(secrets[1]); out.writeByte(1); Wire.writeString(out, "");
+        DataInputStream refused = serve(session, forgotten.toByteArray());
+        check(refused.readByte() == 1 && Wire.readString(refused, 512).equals("Pairing rejected"), "A forgotten computer is refused");
+        byte[] broken = Pairing.nameBlock("ok"); broken[2] = (byte) 0xC3;   // a cut UTF-8 sequence
+        DataInputStream invalid = serve(session, concat(Pairing.MAGIC2, broken));
+        check(invalid.readByte() == 1, "Invalid computer name refused");
+        String long_ = "\u00e9".repeat(100);   // 200 bytes: cut at a character boundary
+        check(new String(Pairing.nameBlock(long_), StandardCharsets.UTF_8).replace("\u0000", "").equals("\u00e9".repeat(64)), "Long names cut cleanly");
+
+        // A phone that predates OBP2 reads the name block as a wrong secret and answers at once.
+        // (Before 0.11.0 the phone handled any magic but OBP1 with Wire.authenticate, which reads 32 bytes.)
+        try {
+            Wire.authenticate(new DataInputStream(new ByteArrayInputStream(Pairing.nameBlock("Mac"))), Pairing.MAGIC2, SECRET);
+            check(false, "OBP2 accepted by an old phone");
+        } catch (IOException expected) { check(expected.getMessage().equals("Pairing rejected"), "Old phones answer OBP2 straight away"); }
+    }
+
+    private static byte[] concat(byte[] a, byte[] b) { byte[] c = Arrays.copyOf(a, a.length + b.length); System.arraycopy(b, 0, c, a.length, b.length); return c; }
+
+    /** DELETE, RENAME and MEASURE, through the handler and on the filesystem store. */
+    private static void editingTests() throws Exception {
+        MemoryStore store = new MemoryStore();
+        store.files.put("old.txt", new byte[] {1, 2, 3});
+        DataInputStream renamed = serve(store, simple(10, "file:old.txt", out -> Wire.writeString(out, "new.txt")));
+        check(renamed.readByte() == 0 && Wire.readString(renamed, 128).equals("file:new.txt"), "Rename replies with the new ID");
+        check(store.files.containsKey("new.txt") && !store.files.containsKey("old.txt"), "Renamed");
+        check(serve(store, simple(10, "file:new.txt", out -> Wire.writeString(out, "hello.txt"))).readByte() == 1, "Rename never takes an existing name");
+        for (String bad : new String[] {"", "..", "a/b", "x".repeat(256)})
+            check(serve(store, simple(10, "file:new.txt", out -> Wire.writeString(out, bad))).readByte() == 1, "Rename rejects " + bad);
+        check(serve(store, simple(9, "file:new.txt", out -> {})).readByte() == 0 && !store.files.containsKey("new.txt"), "Delete");
+        check(serve(store, simple(9, "file:new.txt", out -> {})).readByte() == 1, "Deleting twice fails");
+        DataInputStream measured = serve(store, simple(11, "", out -> {}));
+        check(measured.readByte() == 0, "Measure");
+        long bytes = measured.readLong(), count = measured.readLong();
+        check(bytes == store.files.get("hello.txt").length && count == 1 && measured.readBoolean(), "Measure through the listing: " + bytes + "/" + count);
+
+        java.nio.file.Path base = java.nio.file.Files.createTempDirectory("openbridge-edit");
+        try {
+            java.nio.file.Path internal = java.nio.file.Files.createDirectories(base.resolve("internal"));
+            java.nio.file.Path camera = java.nio.file.Files.createDirectories(internal.resolve("DCIM/Camera"));
+            java.nio.file.Files.write(camera.resolve("a.jpg"), new byte[1000]);
+            java.nio.file.Files.write(camera.resolve("b.jpg"), new byte[2500]);
+            java.nio.file.Files.writeString(internal.resolve("Photo.JPG"), "x");
+            java.nio.file.Path outside = java.nio.file.Files.createDirectories(base.resolve("outside"));
+            java.nio.file.Files.writeString(outside.resolve("keep.txt"), "keep");
+            try { java.nio.file.Files.createSymbolicLink(camera.resolve("link"), outside); } catch (Exception ignored) {}
+            FileStore files = new FileStore(List.of(new FileStore.Root("Internal storage", internal.toFile())));
+            Map<String, Store.Entry> top = byName(files.list(""));
+            Store.Size size = files.measure(top.get("DCIM").id, System.currentTimeMillis() + 5_000);
+            check(size.bytes == 3500 && size.files == 2 && size.complete, "Folder size counts files below, not links: " + size.bytes);
+            check(!files.measure(top.get("DCIM").id, 0).complete, "Measuring stops at the deadline");
+
+            String renamedId = files.rename(top.get("Photo.JPG").id, "photo.jpg");
+            check(byName(files.list("")).containsKey("photo.jpg") && !byName(files.list("")).containsKey("Photo.JPG"), "Case-only rename");
+            try { files.rename(renamedId, "DCIM"); check(false, "Rename onto a folder"); } catch (IOException expected) { check(true, "Rename never replaces"); }
+            String trips = files.rename(top.get("DCIM").id, "Trips");
+            check(java.nio.file.Files.isDirectory(internal.resolve("Trips/Camera")), "Folder renamed with its contents");
+            try { files.list(top.get("DCIM").id); } catch (IOException stale) { check(true, "Old ID forgotten after a rename"); }
+            files.delete(trips);
+            check(!java.nio.file.Files.exists(internal.resolve("Trips")), "Folder deleted with its contents");
+            check(java.nio.file.Files.readString(outside.resolve("keep.txt")).equals("keep"), "Deleting never follows a link out of storage");
+            try { files.delete(""); check(false, "Deleted the storage"); } catch (IOException expected) { check(true, "Storage can't be deleted"); }
+        } finally {
+            try (var walk = java.nio.file.Files.walk(base)) { walk.sorted(Comparator.reverseOrder()).forEach(p -> p.toFile().delete()); }
+        }
+    }
+
+    interface Body { void write(DataOutputStream out) throws IOException; }
+    private static byte[] simple(int operation, String id, Body body) throws IOException {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        DataOutputStream out = new DataOutputStream(bytes);
+        out.write(Wire.MAGIC); out.write(SECRET); out.writeByte(operation); Wire.writeString(out, id);
+        body.write(out);
+        return bytes.toByteArray();
     }
 
     private static Map<String, Store.Entry> byName(List<Store.Entry> entries) {

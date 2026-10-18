@@ -2,9 +2,19 @@ import Foundation
 
 public enum BridgeError: LocalizedError {
     case message(String)
+    /// The phone no longer trusts this Mac (forgotten on the phone, or its app reinstalled): pair again.
+    case forgotten
     public var errorDescription: String? {
-        switch self { case .message(let message): return message }
+        switch self {
+        case .message(let message): return message
+        case .forgotten: return "This phone no longer trusts this Mac (it was forgotten on the phone, or OpenBridge was reinstalled there). Pair again."
+        }
     }
+}
+
+/// What MEASURE found in a folder. `complete` is false when the phone stopped counting early.
+public struct FolderSize: Equatable {
+    public let bytes: Int64, files: Int64, complete: Bool
 }
 
 public struct Entry: Identifiable, Equatable {

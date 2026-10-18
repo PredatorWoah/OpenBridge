@@ -8,7 +8,7 @@ import CryptoKit
 final class TLSChannel {
     private let connection: NWConnection
     private let queue = DispatchQueue(label: "org.openbridge.connection")
-    private final class Observed { var fingerprint: Data? }
+    private final class Observed { var fingerprint: Data?; var mismatch = false }
     private let observed: Observed
     /// SHA-256 of the server's leaf certificate, recorded during the handshake.
     var peerFingerprint: Data? { observed.fingerprint }
@@ -25,7 +25,9 @@ final class TLSChannel {
             }
             let seen = Data(SHA256.hash(data: SecCertificateCopyData(certificate) as Data))
             observed.fingerprint = seen
-            complete(fingerprint.map { $0 == seen } ?? true)
+            let accepted = fingerprint.map { $0 == seen } ?? true
+            observed.mismatch = !accepted
+            complete(accepted)
         }, queue)
         connection = NWConnection(host: NWEndpoint.Host(host), port: NWEndpoint.Port(rawValue: port)!,
             using: NWParameters(tls: tls, tcp: NWProtocolTCP.Options()))
@@ -60,13 +62,17 @@ final class TLSChannel {
         }, onCancel: { self.close() })
     }
 
-    func connect() async throws {
-        try await perform { (finish: @escaping (Result<Void, Error>) -> Void) in
+    func connect(timeout: TimeInterval = 30) async throws {
+        try await perform(timeout: timeout) { (finish: @escaping (Result<Void, Error>) -> Void) in
             self.connection.stateUpdateHandler = { state in
                 switch state {
                 case .ready:
                     self.connection.stateUpdateHandler = nil
                     finish(.success(()))
+                // A different certificate means the phone has a new identity: fail now instead of retrying.
+                case .waiting where self.observed.mismatch, .failed where self.observed.mismatch:
+                    self.connection.cancel()
+                    finish(.failure(BridgeError.forgotten))
                 case .failed(let error): finish(.failure(error))
                 case .cancelled: finish(.failure(CancellationError()))
                 default: break
@@ -113,7 +119,11 @@ final class TLSChannel {
     }
     func status(timeout: TimeInterval = 30) async throws {
         let code = try await number(1, timeout: timeout)
-        if code == 1 { throw BridgeError.message(try await string(limit: 512)) }
+        if code == 1 {
+            let message = try await string(limit: 512)
+            // Only the phone's authentication check says this: it doesn't know this Mac's secret any more.
+            throw message == "Pairing rejected" ? BridgeError.forgotten : BridgeError.message(message)
+        }
         guard code == 0 else { throw BridgeError.message("Invalid response status.") }
     }
 }

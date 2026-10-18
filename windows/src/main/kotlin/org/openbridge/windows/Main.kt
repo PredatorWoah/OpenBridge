@@ -64,7 +64,7 @@ fun main() {
     application {
         val window = rememberWindowState(size = DpSize(1060.dp, 700.dp))
         Window(onCloseRequest = ::exitApplication, title = "OpenBridge", state = window, icon = painterResource("icon.png"),
-            onPreviewKeyEvent = { shortcut(state, it) }) {
+            onKeyEvent = { shortcut(state, it) }) {   // after the focused field, so typing in search never triggers these
             var dropping by remember { mutableStateOf(false) }
             DisposableEffect(Unit) {
                 // Files dragged from File Explorer upload into the open phone folder.
@@ -94,9 +94,28 @@ private fun shortcut(state: AppState, event: KeyEvent): Boolean {
         event.key == Key.Enter -> { state.selected.firstOrNull()?.let(state::open); true }
         event.key == Key.Backspace || (event.isAltPressed && event.key == Key.DirectionUp) -> { state.up(); true }
         event.key == Key.F5 -> { state.refresh(); true }
+        event.key == Key.Delete && !state.busy -> { confirmDelete(state); true }
+        event.key == Key.F2 && !state.busy -> { promptRename(state); true }
         else -> false
     }
 }
+
+/** Asks before deleting anything on the phone: there's no recycle bin there. */
+private fun confirmDelete(state: AppState) {
+    val doomed = state.selected
+    if (doomed.isEmpty()) return
+    val answer = JOptionPane.showConfirmDialog(null, S.deleteConfirm(doomed.size, doomed.first().name), S.delete.trimEnd('…'),
+        JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE)
+    if (answer == JOptionPane.OK_OPTION) state.deleteSelected()
+}
+
+private fun promptRename(state: AppState) {
+    val entry = state.selected.singleOrNull() ?: return
+    val name = JOptionPane.showInputDialog(null, S.newName, entry.name) ?: return
+    state.rename(entry, name)
+}
+
+private fun openPage(url: String) { runCatching { java.awt.Desktop.getDesktop().browse(java.net.URI(url)) } }
 
 private val glassShape = RoundedCornerShape(18.dp)
 
@@ -107,6 +126,11 @@ private fun Modifier.glass(shape: Shape = glassShape, border: Color = Color.Whit
 private fun App(state: AppState, dropping: Boolean) {
     Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0f to Palette.plum, 0.45f to Palette.dusk, 1f to Palette.night))) {
         if (state.client == null) ConnectScreen(state) else BrowserScreen(state, dropping)
+        state.update?.let { release ->
+            Text(S.update(release.version), color = Palette.night, fontSize = 12.5.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.align(Alignment.TopEnd).padding(top = 12.dp, end = 16.dp).clip(CircleShape).background(Palette.amber)
+                    .clickable { openPage(release.page) }.padding(horizontal = 12.dp, vertical = 5.dp))
+        }
         state.toast?.let { message ->
             Text(message, color = Palette.fg, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 22.dp).glass(CircleShape).padding(horizontal = 18.dp, vertical = 10.dp))
@@ -148,10 +172,12 @@ private fun ConnectScreen(state: AppState) {
             Text(S.waitingHint, color = Palette.muted, fontSize = 13.5.sp)
         }
         Column(Modifier.width(420.dp).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            if (state.saved.isNotEmpty()) SavedPhones(state)
             Column(Modifier.fillMaxWidth().glass().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Label(S.nearby)
-                if (state.nearby.isEmpty()) Text(if (state.searchedLong) S.notFound else S.looking, color = Palette.muted, fontSize = 12.5.sp)
-                state.nearby.forEach { phone ->
+                val unsaved = state.nearby.filter { phone -> state.saved.none { it.id == phone.id } }
+                if (unsaved.isEmpty()) Text(if (state.searchedLong) S.notFound else S.looking, color = Palette.muted, fontSize = 12.5.sp)
+                unsaved.forEach { phone ->
                     Row(Modifier.fillMaxWidth().glass(RoundedCornerShape(12.dp)).clickable(enabled = !state.busy) { state.pairWith(phone) }.padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Filled.Smartphone, null, tint = Palette.fg)
@@ -189,6 +215,32 @@ private fun ConnectScreen(state: AppState) {
     }
 }
 
+/** Phones paired before: they reconnect by themselves, or with a click. */
+@Composable
+private fun SavedPhones(state: AppState) {
+    Column(Modifier.fillMaxWidth().glass().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Label(S.yourPhones)
+        state.saved.forEach { phone ->
+            val here = state.isNearby(phone)
+            Row(Modifier.fillMaxWidth().glass(RoundedCornerShape(12.dp), if (here) Palette.ok.copy(alpha = 0.45f) else Color.White.copy(alpha = 0.14f))
+                .padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Smartphone, null, tint = if (here) Palette.ok else Palette.fg)
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(phone.name, color = Palette.fg, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                    Text(if (here) S.nearbyNow else S.reconnects, color = Palette.muted, fontSize = 11.5.sp)
+                }
+                GhostButton(S.connect, enabled = !state.busy) { state.connect(phone) }
+                Spacer(Modifier.width(6.dp))
+                IconButton(Icons.Filled.Close, S.forget) {
+                    if (JOptionPane.showConfirmDialog(null, S.forgetConfirm(phone.name), S.forget, JOptionPane.OK_CANCEL_OPTION) == JOptionPane.OK_OPTION)
+                        state.forgetPhone(phone)
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun UsbCard(state: AppState) {
     val phone = state.usbPhones.firstOrNull()
@@ -218,11 +270,12 @@ private fun UsbCard(state: AppState) {
 private fun BrowserScreen(state: AppState, dropping: Boolean) {
     Column(Modifier.fillMaxSize()) {
         Toolbar(state)
+        FilterBar(state)
         Box(Modifier.weight(1f).fillMaxWidth()) {
             val entries = state.sorted
             LazyColumn(Modifier.fillMaxSize().padding(horizontal = 10.dp), contentPadding = PaddingValues(vertical = 8.dp)) {
                 items(entries, key = { it.id }) { entry ->
-                    LaunchedEffect(entry.id) { state.loadThumbnail(entry) }
+                    LaunchedEffect(entry.id) { if (entry.directory) state.loadSize(entry) else state.loadThumbnail(entry) }
                     Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
                         .background(if (entry.id in state.selection) Brush.horizontalGradient(listOf(Palette.violet.copy(alpha = 0.55f), Palette.pink.copy(alpha = 0.35f)))
                             else SolidColor(Color.Transparent))
@@ -239,11 +292,16 @@ private fun BrowserScreen(state: AppState, dropping: Boolean) {
                         }
                         Spacer(Modifier.width(12.dp))
                         Text(entry.name, color = Palette.fg, fontSize = 13.5.sp, maxLines = 1, overflow = TextOverflow.MiddleEllipsis, modifier = Modifier.weight(1f))
-                        Text(if (entry.directory) "—" else size(entry.size), color = Palette.muted, fontSize = 13.sp)
+                        val measured = state.sizes[entry.id]
+                        Text(when {
+                            !entry.directory -> size(entry.size)
+                            measured != null -> S.folderSize(size(measured.bytes), measured.files, measured.complete)
+                            else -> "—"
+                        }, color = Palette.muted, fontSize = 13.sp)
                     }
                 }
             }
-            if (entries.isEmpty() && !state.busy) Text(S.emptyFolder, color = Palette.muted, modifier = Modifier.align(Alignment.Center))
+            if (entries.isEmpty() && !state.busy && state.entries.isEmpty()) Text(S.emptyFolder, color = Palette.muted, modifier = Modifier.align(Alignment.Center))
             if (dropping) {
                 Box(Modifier.fillMaxSize().padding(10.dp).clip(RoundedCornerShape(16.dp)).background(Palette.violet.copy(alpha = 0.18f))
                     .border(2.dp, Palette.sunset, RoundedCornerShape(16.dp)), contentAlignment = Alignment.Center) {
@@ -287,6 +345,8 @@ private fun Toolbar(state: AppState) {
             DropdownMenu(moreMenu, { moreMenu = false }) {
                 DropdownMenuItem({ moreMenu = false; JOptionPane.showInputDialog(null, S.folderName, S.newFolder, JOptionPane.PLAIN_MESSAGE)?.takeIf { it.isNotBlank() }?.let(state::newFolder) }) { Text(S.newFolder) }
                 DropdownMenuItem({ moreMenu = false; state.upload(Dialogs.chooseUploads()) }) { Text(S.upload) }
+                DropdownMenuItem({ moreMenu = false; promptRename(state) }, enabled = state.selection.size == 1) { Text(S.rename) }
+                DropdownMenuItem({ moreMenu = false; confirmDelete(state) }, enabled = state.selection.isNotEmpty()) { Text(S.delete, color = if (state.selection.isNotEmpty()) Palette.pink else Palette.muted) }
                 DropdownMenuItem({ moreMenu = false; state.sendClipboard() }) { Text(S.sendClipboard) }
                 DropdownMenuItem({ moreMenu = false; state.fetchClipboard() }) { Text(S.getClipboard) }
                 DropdownMenuItem({ moreMenu = false; state.refresh() }) { Text(S.refresh) }
@@ -296,6 +356,21 @@ private fun Toolbar(state: AppState) {
         }
         SunsetButton(if (state.selection.size > 1) S.downloadCount(state.selection.size) else S.download,
             enabled = !state.busy && state.selection.isNotEmpty()) { state.download(state.selected) }
+    }
+}
+
+/** Search within the folder, and show only photos and videos. */
+@Composable
+private fun FilterBar(state: AppState) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Field(state.query, { state.query = it }, S.search, Modifier.weight(1f))
+        listOf(Show.ALL to S.showAll, Show.MEDIA to S.showMedia).forEach { (option, label) ->
+            val on = state.show == option
+            Text(label, color = if (on) Color.White else Palette.muted, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.clip(CircleShape).background(if (on) Palette.violet.copy(alpha = 0.6f) else Color.White.copy(alpha = 0.06f))
+                    .clickable { state.show = option }.padding(horizontal = 12.dp, vertical = 7.dp))
+        }
     }
 }
 

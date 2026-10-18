@@ -86,7 +86,16 @@ struct RootView: View {
         .animation(.spring(response: 0.55, dampingFraction: 0.82), value: browsing)
         .frame(minWidth: 780, minHeight: 580)
         .preferredColorScheme(.dark)
-        .sheet(isPresented: $wifi) { WiFiSheet(model: model, isPresented: $wifi) }
+        .sheet(isPresented: $wifi) { WiFiSheet(model: model, discovery: model.discovery, isPresented: $wifi) }
+        .overlay(alignment: .topTrailing) {
+            if let update = model.update {
+                Link("Update available: \(update.version)", destination: update.page)
+                    .font(.system(size: 12, weight: .bold)).foregroundStyle(Palette.background)
+                    .padding(.horizontal, 12).padding(.vertical, 5)
+                    .background(Palette.amber, in: Capsule())
+                    .padding(.top, 10).padding(.trailing, 14)
+            }
+        }
         .onAppear { model.startWatching() }
         .onChange(of: model.connected) { connected in
             guard connected else { return }
@@ -128,10 +137,15 @@ struct ConnectScreen: View {
                         DeviceCard(model: model, openAutomatically: $openAutomatically)
                             .padding(.top, 16)
                             .transition(.move(edge: .bottom).combined(with: .opacity))
-                    } else if let error = model.error {
-                        ErrorCard(message: error, busy: model.busy, retry: { if model.overUSB { model.retryUSB() } else { wifi = true } })
-                            .padding(.top, 16)
-                            .transition(.opacity)
+                    } else {
+                        if !model.saved.isEmpty {
+                            SavedPhonesCard(model: model, discovery: model.discovery).padding(.top, 16)
+                        }
+                        if let error = model.error {
+                            ErrorCard(message: error, busy: model.busy, retry: { if model.overUSB { model.retryUSB() } else { wifi = true } })
+                                .padding(.top, 12)
+                                .transition(.opacity)
+                        }
                     }
                     Spacer()
                     HStack(spacing: 6) {
@@ -199,6 +213,40 @@ struct DeviceCard: View {
     }
 }
 
+/// Phones paired before: they reconnect by themselves while sharing, or with a click.
+struct SavedPhonesCard: View {
+    @ObservedObject var model: BrowserModel
+    @ObservedObject var discovery: PhoneDiscovery
+    @State private var forgetting: SavedPhone?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("YOUR PHONES").font(.system(size: 11, weight: .semibold)).tracking(1.4).foregroundStyle(Palette.muted)
+            ForEach(model.saved) { phone in
+                let here = discovery.phones.contains { $0.phoneID == phone.id }
+                HStack(spacing: 10) {
+                    Image(systemName: "iphone").foregroundStyle(here ? Palette.ok : .white).frame(width: 22)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(phone.name).font(.system(size: 13.5, weight: .semibold)).lineLimit(1)
+                        Text(here ? "On this Wi‑Fi now" : "Reconnects by itself while the phone is sharing")
+                            .font(.system(size: 11.5)).foregroundStyle(Palette.muted)
+                    }
+                    Spacer()
+                    Button("Connect") { model.connect(phone) }.buttonStyle(GhostButton()).disabled(model.busy)
+                    Button { forgetting = phone } label: { Image(systemName: "xmark") }
+                        .buttonStyle(.plain).foregroundStyle(Palette.muted).help("Forget this phone")
+                }
+                .padding(10)
+                .glass(12, border: here ? Palette.ok.opacity(0.45) : .white.opacity(0.14))
+            }
+        }
+        .frame(width: 460)
+        .confirmationDialog("Forget \(forgetting?.name ?? "this phone")?", isPresented: Binding(get: { forgetting != nil }, set: { if !$0 { forgetting = nil } })) {
+            Button("Forget", role: .destructive) { if let forgetting { model.forget(forgetting) }; forgetting = nil }
+        } message: { Text("You'll need to pair with a code again.") }
+    }
+}
+
 struct ErrorCard: View {
     var message: String
     var busy = false
@@ -217,8 +265,8 @@ struct ErrorCard: View {
 
 struct WiFiSheet: View {
     @ObservedObject var model: BrowserModel
+    @ObservedObject var discovery: PhoneDiscovery
     @Binding var isPresented: Bool
-    @StateObject private var discovery = PhoneDiscovery()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -239,8 +287,8 @@ struct WiFiSheet: View {
                 }
                 ForEach(discovery.phones) { phone in
                     Button {
-                        model.host = phone.host; model.port = phone.port
-                        model.pair(name: phone.name)
+                        if let known = model.saved.first(where: { $0.id == phone.phoneID }) { model.connect(known) }
+                        else { model.host = phone.host; model.port = phone.port; model.pair(name: phone.name) }
                     } label: {
                         HStack(spacing: 10) {
                             Image(systemName: "iphone").frame(width: 22)
@@ -295,8 +343,6 @@ struct WiFiSheet: View {
         .frame(width: 440)
         .background(Palette.background)
         .preferredColorScheme(.dark)
-        .onAppear { discovery.start() }
-        .onDisappear { discovery.stop() }
     }
 }
 

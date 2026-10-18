@@ -155,6 +155,66 @@ class SafStore(private val resolver: ContentResolver, private val root: Document
         Thumbs.ofDocument(resolver, file.uri, file.name ?: "", size)
     }
 
+    @Synchronized
+    override fun delete(id: String) = storage {
+        if (id.isEmpty()) throw IOException("The shared folder itself can't be deleted")
+        val item = documents[id] ?: throw IOException("Unknown document; refresh the folder")
+        if (!item.exists()) throw IOException("Document is unavailable")
+        // The storage provider deletes a folder with everything in it.
+        if (!DocumentsContract.deleteDocument(resolver, item.uri)) throw IOException("Couldn't delete that")
+        forget(item.uri)
+    }
+
+    @Synchronized
+    override fun rename(id: String, name: String): String = storage {
+        Names.requireStorable(name)
+        if (id.isEmpty()) throw IOException("The shared folder itself can't be renamed")
+        val item = documents[id] ?: throw IOException("Unknown document; refresh the folder")
+        val current = item.name ?: throw IOException("Document is unavailable")
+        if (current == name) return@storage id
+        val parent = item.parentFile ?: throw IOException("Document is unavailable")
+        val caseOnly = Names.collisionKey(current) == Names.collisionKey(name)
+        if (!caseOnly && (reserved.any { it.first == parent.uri && it.second == Names.collisionKey(name) } || exists(parent, name)))
+            throw IOException("A file or folder with that name already exists")
+        val old = item.uri
+        if (!item.renameTo(name) || item.name != name) throw IOException("Couldn't rename that")
+        forget(old)
+        ids[item.uri] = id
+        documents[id] = item
+        id
+    }
+
+    /** Counts with direct provider queries by document ID, so walking a big folder hands out no IDs. */
+    override fun measure(directoryId: String, deadline: Long): Store.Size = storage {
+        val start = synchronized(this) { DocumentsContract.getDocumentId(document(directoryId, true).uri) }
+        val tree = root.uri
+        val pending = ArrayDeque<String>().apply { add(start) }
+        var bytes = 0L; var files = 0L; var seen = 0
+        val columns = arrayOf(Document.COLUMN_DOCUMENT_ID, Document.COLUMN_MIME_TYPE, Document.COLUMN_SIZE, Document.COLUMN_DISPLAY_NAME)
+        while (pending.isNotEmpty()) {
+            val query = DocumentsContract.buildChildDocumentsUriUsingTree(tree, pending.removeFirst())
+            resolver.query(query, columns, null, null, null)?.use { cursor ->
+                while (cursor.moveToNext()) {
+                    if (++seen > Store.MEASURE_LIMIT || System.currentTimeMillis() > deadline) return@storage Store.Size(bytes, files, false)
+                    val child = cursor.getString(0) ?: continue
+                    if (cursor.getString(1) == Document.MIME_TYPE_DIR) pending.add(child)
+                    else if (!Names.isTemporary(cursor.getString(3) ?: "")) { bytes += if (cursor.isNull(2)) 0 else cursor.getLong(2); files++ }
+                }
+            }
+        }
+        Store.Size(bytes, files, true)
+    }
+
+    /** Drops IDs for a document and everything below it, after it was deleted or renamed. */
+    private fun forget(uri: Uri) {
+        val gone = DocumentsContract.getDocumentId(uri)
+        val stale = ids.keys.filter { known ->
+            val document = runCatching { DocumentsContract.getDocumentId(known) }.getOrNull() ?: return@filter false
+            known != root.uri && (document == gone || document.startsWith("$gone/"))
+        }
+        for (known in stale) ids.remove(known)?.let { documents.remove(it) }
+    }
+
     private fun <T> storage(block: () -> T): T = try { block() }
     catch (e: SecurityException) { throw IOException("Storage permission denied; select the folder again") }
     catch (e: java.io.FileNotFoundException) { throw IOException("Document is unavailable") }

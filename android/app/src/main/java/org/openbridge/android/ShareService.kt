@@ -39,19 +39,19 @@ class ShareService : Service() {
             if (Sharing.server != null && Sharing.inBackground) notify(context, SHARING_ID, sharing(context))
         }
 
-        fun showPairing(context: Context, code: String) {
+        fun showPairing(context: Context, code: String, computer: String?) {
             channels(context)
-            val text = "Code ${code.chunked(3).joinToString(" ")}. Tap Pair only if your computer shows the same code."
+            val text = S.codeNotice(code)
             val notification = NotificationCompat.Builder(context, PAIRING_CHANNEL)
                 .setSmallIcon(R.drawable.ic_launcher_monochrome)
-                .setContentTitle("Pair with this computer?")
+                .setContentTitle(S.pairWith(computer))
                 .setContentText(text)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(text))
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setCategory(NotificationCompat.CATEGORY_CALL)
                 .setContentIntent(openApp(context))
-                .addAction(0, "Cancel", action(context, DECLINE))
-                .addAction(0, "Pair", action(context, PAIR))
+                .addAction(0, S.cancel, action(context, DECLINE))
+                .addAction(0, S.pair, action(context, PAIR))
                 .setTimeoutAfter(60_000)
                 .setAutoCancel(true)
                 .build()
@@ -67,8 +67,8 @@ class ShareService : Service() {
         private fun channels(context: Context) {
             if (Build.VERSION.SDK_INT < 26) return
             val manager = context.getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(NotificationChannel(SHARING_CHANNEL, "Sharing", NotificationManager.IMPORTANCE_LOW))
-            manager.createNotificationChannel(NotificationChannel(PAIRING_CHANNEL, "Pairing requests", NotificationManager.IMPORTANCE_HIGH))
+            manager.createNotificationChannel(NotificationChannel(SHARING_CHANNEL, S.channelSharing, NotificationManager.IMPORTANCE_LOW))
+            manager.createNotificationChannel(NotificationChannel(PAIRING_CHANNEL, S.channelPairing, NotificationManager.IMPORTANCE_HIGH))
         }
 
         private fun openApp(context: Context) = PendingIntent.getActivity(context, 0,
@@ -81,17 +81,17 @@ class ShareService : Service() {
             channels(context)
             val server = Sharing.server
             val text = when {
-                Sharing.paired -> "Your computer is connected"
-                server != null -> "On your computer: ${server.host} · port ${server.port}"
-                else -> "Starting…"
+                Sharing.paired -> S.connectedTo(Sharing.computer)
+                server != null -> S.onComputer(server.host, server.port)
+                else -> S.starting
             }
             return NotificationCompat.Builder(context, SHARING_CHANNEL)
                 .setSmallIcon(R.drawable.ic_launcher_monochrome)
-                .setContentTitle(if (Sharing.wholePhone) "Sharing your whole phone" else "Sharing one folder")
+                .setContentTitle(if (Sharing.wholePhone) S.sharingWholePhoneTitle else S.sharingOneFolderTitle)
                 .setContentText(text)
                 .setOngoing(true)
                 .setContentIntent(openApp(context))
-                .addAction(0, "Stop sharing", action(context, STOP))
+                .addAction(0, S.stopSharing, action(context, STOP))
                 .build()
         }
     }
@@ -122,7 +122,7 @@ class ShareService : Service() {
 
     /** Android 15 limits background data sync to about six hours a day. */
     override fun onTimeout(startId: Int, fgsType: Int) {
-        Sharing.stop("Android paused sharing in the background after a few hours. Tap the sun to share again.")
+        Sharing.stop(S.pausedInBackground)
     }
 
     override fun onDestroy() {

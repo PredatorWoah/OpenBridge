@@ -29,8 +29,10 @@ object Sharing {
     var folder by mutableStateOf<Uri?>(null); private set
     var server by mutableStateOf<SharingServer?>(null); private set
     var busy by mutableStateOf(false); private set
-    /** A Mac has paired since sharing started. */
+    /** A computer has paired or reconnected since sharing started. */
     var paired by mutableStateOf(false); private set
+    /** The name of the computer using the phone, once one has. */
+    var computer by mutableStateOf<String?>(null); private set
     /** The USB cable: unplugged, charging only, or in File transfer mode (the Mac can browse the phone). */
     var cable by mutableStateOf(Cable.NONE)
     /** A problem or hint to show under the status, or null. */
@@ -39,7 +41,7 @@ object Sharing {
     var inBackground by mutableStateOf(true); private set
     /** The OpenBridge screen is in front, so the clipboard can be read and pairing shown in the app. */
     @Volatile var onScreen = false
-        set(value) { field = value; if (value) ShareService.clearPairing(app) else pairingCode?.let { ShareService.showPairing(app, it) } }
+        set(value) { field = value; if (value) ShareService.clearPairing(app) else pairingCode?.let { ShareService.showPairing(app, it, pairingComputer) } }
 
     /** Sharing should start as soon as the needed permission or folder arrives. */
     private var startWhenReady = false
@@ -50,22 +52,32 @@ object Sharing {
 
     /** 6-digit code of a pairing request waiting for the user, shown in a sheet (or a notification). */
     var pairingCode by mutableStateOf<String?>(null); private set
+    /** The computer asking to pair, as it named itself. */
+    var pairingComputer by mutableStateOf<String?>(null); private set
     private var pairingDecision: CompletableFuture<Boolean>? = null
 
     fun attach(context: Context) {
         if (::app.isInitialized) return
         app = context.applicationContext as Application
         inBackground = app.getSharedPreferences("openbridge", Context.MODE_PRIVATE).getBoolean("inBackground", true)
+        Trusted.attach(app)
+        // A remembered computer reconnecting lights the sun like a fresh pairing does.
+        Trusted.onSeen = { name -> main.post { if (server != null && (!paired || computer != name)) { paired = true; computer = name; ShareService.refresh(app) } } }
     }
 
     /** Called on a server thread: shows the code and waits up to a minute for Pair or Cancel. */
-    private val approver = Pairing.Approver { code ->
+    private val approver = object : Pairing.Approver {
+        override fun approve(code: String) = approve(code, "Computer")
+        override fun approve(code: String, computer: String): Boolean = ask(code, computer)
+    }
+
+    private fun ask(code: String, asking: String): Boolean {
         val decision = CompletableFuture<Boolean>()
         synchronized(this) {
-            if (pairingDecision != null) return@Approver false   // one request at a time
+            if (pairingDecision != null) return false   // one request at a time
             pairingDecision = decision
         }
-        main.post { pairingCode = code; if (!onScreen) ShareService.showPairing(app, code) }
+        main.post { pairingCode = code; pairingComputer = asking; if (!onScreen) ShareService.showPairing(app, code, asking) }
         val approved = try {
             decision.get(60, TimeUnit.SECONDS)
         } catch (_: java.util.concurrent.TimeoutException) {
@@ -76,8 +88,8 @@ object Sharing {
             synchronized(this) { pairingDecision = null }
             main.post { if (pairingCode == code) pairingCode = null; ShareService.clearPairing(app) }
         }
-        if (approved) main.post { if (server != null) { paired = true; ShareService.refresh(app) } }
-        approved
+        if (approved) main.post { if (server != null) { paired = true; computer = asking; ShareService.refresh(app) } }
+        return approved
     }
 
     fun decidePairing(approve: Boolean) {
@@ -98,7 +110,7 @@ object Sharing {
         // Local external-storage documents only: no cloud providers or broad filesystem permissions.
         if (uri.authority != "com.android.externalstorage.documents") {
             startWhenReady = false
-            note = "Pick a folder on this phone's storage or SD card."
+            note = S.pickLocalFolder
             return
         }
         folder = uri; wholePhone = false; note = null
@@ -121,7 +133,7 @@ object Sharing {
             if (startWhenReady) { startWhenReady = false; start() }
         } else {
             startWhenReady = false
-            note = "OpenBridge needs All files access to share the whole phone. Or choose One folder."
+            note = S.needAllFiles
         }
     }
 
@@ -129,18 +141,18 @@ object Sharing {
         val selected = folder
         val shareAll = wholePhone
         if ((!shareAll && selected == null) || busy || server != null) return
-        busy = true; note = null; paired = false
+        busy = true; note = null; paired = false; computer = null
         val current = ++generation
         worker.execute {
             try {
                 val store = if (shareAll) {
-                    if (!AllFiles.granted(app)) error("All files access was turned off. Allow it again to share the whole phone.")
+                    if (!AllFiles.granted(app)) error(S.allFilesOff)
                     FileStore(AllFiles.roots(app)) { file, size -> Thumbs.ofFile(file, size) }
                 } else {
-                    val root = DocumentFile.fromTreeUri(app, selected!!) ?: error("Choose the folder again")
+                    val root = DocumentFile.fromTreeUri(app, selected!!) ?: error(S.chooseFolderAgain)
                     SafStore(app.contentResolver, root)
                 }
-                val created = SharingServer(app, store, approver, PhoneClipboard(app)) { reason ->
+                val created = SharingServer(app, store, Trusted, approver, PhoneClipboard(app)) { reason ->
                     main.post { if (generation == current) { stop(); note = reason } }
                 }
                 main.post {
@@ -155,9 +167,9 @@ object Sharing {
                     if (generation == current) {
                         busy = false
                         note = when (e) {
-                            is SecurityException -> "Android denied access to the folder. Choose it again."
-                            is IllegalStateException -> e.message ?: "Couldn't start sharing."
-                            else -> "Couldn't start sharing. Check that Wi‑Fi is on."
+                            is SecurityException -> S.folderDenied
+                            is IllegalStateException -> e.message ?: S.couldNotStart
+                            else -> S.checkWifi
                         }
                     }
                 }
@@ -168,7 +180,7 @@ object Sharing {
     fun stop(reason: String? = null) {
         generation++
         decidePairing(false)
-        server?.close(); server = null; busy = false; paired = false
+        server?.close(); server = null; busy = false; paired = false; computer = null
         if (reason != null) note = reason
         ShareService.stop(app)
     }

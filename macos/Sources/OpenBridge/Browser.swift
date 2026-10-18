@@ -8,14 +8,20 @@ struct BrowserScreen: View {
     @ObservedObject var model: BrowserModel
     var mirror: () -> Void
     @State private var dropping = false
+    @State private var newName = ""
+    /// While typing in search, keys like Space and Return go to the field, not to shortcuts.
+    @FocusState private var searching: Bool
 
     var body: some View {
         HStack(spacing: 0) {
             Sidebar(model: model, mirror: mirror)
             VStack(spacing: 0) {
-                Toolbar(model: model)
+                Toolbar(model: model, searching: $searching)
                 ZStack {
                     if model.grid { grid } else { list }
+                    if model.sorted.isEmpty && !model.entries.isEmpty {
+                        Text("Nothing here matches.").foregroundStyle(Palette.muted)
+                    }
                     if model.entries.isEmpty && !model.busy {
                         Text(model.path.count > 1 ? "This folder is empty. Drop files here to upload them." : "Nothing to show.")
                             .foregroundStyle(Palette.muted)
@@ -44,14 +50,27 @@ struct BrowserScreen: View {
         }
         .overlay(alignment: .bottom) { Toast(text: model.toast) }
         .quickLookPreview($model.previewURL)
-        .background { Shortcuts(model: model) }
+        .background { Shortcuts(model: model, searching: searching) }
+        .confirmationDialog(deleteTitle, isPresented: Binding(get: { !model.pendingDelete.isEmpty }, set: { if !$0 { model.pendingDelete = [] } })) {
+            Button("Delete", role: .destructive, action: model.deleteConfirmed)
+        } message: { Text("Folders are deleted with everything in them. The phone has no bin, so this can't be undone.") }
+        .alert("Rename", isPresented: Binding(get: { model.renaming != nil }, set: { if !$0 { model.renaming = nil } })) {
+            TextField("Name", text: $newName)
+            Button("Rename") { if let entry = model.renaming { model.rename(entry, to: newName) }; model.renaming = nil }
+            Button("Cancel", role: .cancel) { model.renaming = nil }
+        }
+        .onChange(of: model.renaming) { entry in if let entry { newName = entry.name } }
+    }
+
+    private var deleteTitle: String {
+        model.pendingDelete.count == 1 ? "Delete “\(model.pendingDelete[0].name)” from the phone?" : "Delete \(model.pendingDelete.count) items from the phone?"
     }
 
     private var list: some View {
         ScrollView {
             LazyVStack(spacing: 2) {
                 ForEach(model.sorted) { entry in
-                    FileRow(entry: entry, selected: model.selection.contains(entry.id), thumbnail: model.thumbnails[entry.id])
+                    FileRow(entry: entry, selected: model.selection.contains(entry.id), thumbnail: model.thumbnails[entry.id], folderSize: model.sizes[entry.id])
                         .modifier(Item(model: model, entry: entry))
                 }
             }
@@ -67,7 +86,7 @@ struct BrowserScreen: View {
         ScrollView {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 128), spacing: 10)], spacing: 10) {
                 ForEach(model.sorted) { entry in
-                    FileTile(entry: entry, selected: model.selection.contains(entry.id), thumbnail: model.thumbnails[entry.id])
+                    FileTile(entry: entry, selected: model.selection.contains(entry.id), thumbnail: model.thumbnails[entry.id], folderSize: model.sizes[entry.id])
                         .modifier(Item(model: model, entry: entry))
                 }
             }
@@ -103,7 +122,7 @@ private struct Item: ViewModifier {
         content
             .onTapGesture(count: 2) { model.open(entry) }
             .onTapGesture { model.click(entry) }
-            .onAppear { model.loadThumbnail(entry) }
+            .onAppear { if entry.directory { model.loadSize(entry) } else { model.loadThumbnail(entry) } }
             .onDrag { model.dragItem(entry) }
             .contextMenu {
                 Button(entry.directory ? "Open" : "Download…") { model.open(entry) }
@@ -112,6 +131,11 @@ private struct Item: ViewModifier {
                 }
                 if model.selection.count > 1 && model.selection.contains(entry.id) {
                     Button("Download \(model.selection.count) Items…") { model.download(model.selected) }
+                }
+                Divider()
+                Button("Rename…") { model.renaming = entry }
+                Button(model.selection.count > 1 && model.selection.contains(entry.id) ? "Delete \(model.selection.count) Items…" : "Delete…") {
+                    model.confirmDelete(model.selection.contains(entry.id) ? model.selected : [entry])
                 }
             }
     }
@@ -153,12 +177,24 @@ private struct Sidebar: View {
 
 private struct Toolbar: View {
     @ObservedObject var model: BrowserModel
+    var searching: FocusState<Bool>.Binding
     var body: some View {
         HStack(spacing: 8) {
             Button(action: model.up) { Image(systemName: "chevron.left") }
                 .buttonStyle(GhostButton()).disabled(model.path.count < 2 || model.busy).help("Up one folder")
             PathBar(model: model)
             Spacer(minLength: 8)
+            HStack(spacing: 5) {
+                Image(systemName: "magnifyingglass").foregroundStyle(Palette.muted)
+                TextField("Search", text: $model.query).textFieldStyle(.plain).focused(searching)
+                if !model.query.isEmpty {
+                    Button { model.query = "" } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain).foregroundStyle(Palette.muted)
+                }
+            }
+            .font(.system(size: 13)).padding(.horizontal, 9).padding(.vertical, 5).frame(width: 170).glass(8)
+            Button { model.mediaOnly.toggle() } label: { Image(systemName: model.mediaOnly ? "photo.fill.on.rectangle.fill" : "photo.on.rectangle") }
+                .buttonStyle(.plain).foregroundStyle(model.mediaOnly ? Palette.amber : .white).frame(width: 28)
+                .help(model.mediaOnly ? "Showing only photos and videos" : "Show only photos and videos")
             Picker("", selection: $model.grid) {
                 Image(systemName: "list.bullet").tag(false)
                 Image(systemName: "square.grid.2x2").tag(true)
@@ -178,6 +214,9 @@ private struct Toolbar: View {
             Menu {
                 Button("New Folder…", action: model.newFolder)
                 Button("Upload…", action: model.chooseUploads)
+                Divider()
+                Button("Rename…") { model.renaming = model.selected.first }.disabled(model.selection.count != 1)
+                Button("Delete…") { model.confirmDelete(model.selected) }.disabled(model.selection.isEmpty)
                 Divider()
                 Button("Send Mac clipboard to phone", action: model.sendClipboard).disabled(!model.clipboardAvailable)
                 Button("Copy phone clipboard to Mac", action: model.fetchClipboard).disabled(!model.clipboardAvailable)
@@ -214,15 +253,18 @@ private struct PathBar: View {
     }
 }
 
-/// Keyboard shortcuts: Space for Quick Look, ⌘A to select all, ⌘↓ or Return to open, ⌘⇧N for a new folder.
+/// Keyboard shortcuts: Space for Quick Look, ⌘A to select all, ⌘↓ or Return to open, ⌘⇧N for a new folder,
+/// ⌘⌫ to delete. While typing in search, Space, Return and ⌘A belong to the field.
 private struct Shortcuts: View {
     @ObservedObject var model: BrowserModel
+    var searching: Bool
     var body: some View {
         ZStack {
-            Button("") { model.preview() }.keyboardShortcut(.space, modifiers: [])
-            Button("") { model.selectAll() }.keyboardShortcut("a", modifiers: .command)
+            Button("") { model.preview() }.keyboardShortcut(.space, modifiers: []).disabled(searching)
+            Button("") { model.selectAll() }.keyboardShortcut("a", modifiers: .command).disabled(searching)
             Button("") { if let first = model.selected.first { model.open(first) } }.keyboardShortcut(.downArrow, modifiers: .command)
-            Button("") { if let first = model.selected.first { model.open(first) } }.keyboardShortcut(.return, modifiers: [])
+            Button("") { if let first = model.selected.first { model.open(first) } }.keyboardShortcut(.return, modifiers: []).disabled(searching)
+            Button("") { model.confirmDelete(model.selected) }.keyboardShortcut(.delete, modifiers: .command).disabled(searching)
             Button("") { model.up() }.keyboardShortcut(.upArrow, modifiers: .command)
             Button("") { model.newFolder() }.keyboardShortcut("n", modifiers: [.command, .shift])
         }
@@ -245,10 +287,17 @@ private func symbol(for kind: FileKind) -> (String, Color) {
 
 private let selectionFill = LinearGradient(colors: [Palette.violet.opacity(0.55), Palette.pink.opacity(0.35)], startPoint: .leading, endPoint: .trailing)
 
+/// "2.3 GB", "≥ 41 GB" when the phone stopped counting early, or "—" before it's measured.
+private func folderText(_ size: FolderSize?) -> String {
+    guard let size else { return "—" }
+    return (size.complete ? "" : "≥ ") + ByteCountFormatter.string(fromByteCount: size.bytes, countStyle: .file)
+}
+
 struct FileRow: View {
     var entry: Entry
     var selected: Bool
     var thumbnail: NSImage?
+    var folderSize: FolderSize? = nil
 
     var body: some View {
         let (name, color) = symbol(for: FileKind(entry))
@@ -264,8 +313,9 @@ struct FileRow: View {
             .frame(width: 26, height: 26)
             Text(entry.name).lineLimit(1).truncationMode(.middle)
             Spacer()
-            Text(entry.directory ? "—" : ByteCountFormatter.string(fromByteCount: entry.size, countStyle: .file))
+            Text(entry.directory ? folderText(folderSize) : ByteCountFormatter.string(fromByteCount: entry.size, countStyle: .file))
                 .foregroundStyle(Palette.muted).monospacedDigit()
+                .help(folderSize.map { "\($0.files) files" } ?? "")
         }
         .font(.system(size: 13.5))
         .padding(.horizontal, 12).padding(.vertical, 6)
@@ -278,6 +328,7 @@ struct FileTile: View {
     var entry: Entry
     var selected: Bool
     var thumbnail: NSImage?
+    var folderSize: FolderSize? = nil
 
     var body: some View {
         let (name, color) = symbol(for: FileKind(entry))
@@ -294,7 +345,7 @@ struct FileTile: View {
             .frame(width: 108, height: 96)
             .clipped()
             Text(entry.name).font(.system(size: 12)).lineLimit(2).multilineTextAlignment(.center).truncationMode(.middle)
-            Text(entry.directory ? " " : ByteCountFormatter.string(fromByteCount: entry.size, countStyle: .file))
+            Text(entry.directory ? (folderSize == nil ? " " : folderText(folderSize)) : ByteCountFormatter.string(fromByteCount: entry.size, countStyle: .file))
                 .font(.system(size: 10.5)).foregroundStyle(Palette.muted)
         }
         .padding(8)

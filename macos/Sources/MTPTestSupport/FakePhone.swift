@@ -135,6 +135,7 @@ public final class FakePhone: MTPTransport {
     }
 
     private var pendingInfo: (storage: UInt32, parent: UInt32, transaction: UInt32)?
+    private var pendingRename: (handle: UInt32, transaction: UInt32)?
 
     private func handle(_ header: ContainerHeader, _ body: Data) throws {
         var reader = MTPReader(body)
@@ -148,6 +149,11 @@ public final class FakePhone: MTPTransport {
                 objects[handle] = Object(storage: info.storage, parent: info.parent, name: parsed.filename, folder: folder, data: Data(), bigSize: nil)
                 pendingSend = folder ? nil : (handle, 0); pendingInfo = nil
                 respond(MTPCode.ok, info.transaction, [info.storage, info.parent == MTPSession.root ? 0 : info.parent, handle])
+            } else if header.code == MTPCode.setObjectPropValue, let target = pendingRename {
+                pendingRename = nil
+                var name = MTPReader(body)
+                objects[target.handle]?.name = try name.string()
+                respond(MTPCode.ok, target.transaction)
             } else if header.code == MTPCode.sendObject, let target = pendingSend {
                 objects[target.handle]?.data = body
                 pendingSend = nil
@@ -211,7 +217,18 @@ public final class FakePhone: MTPTransport {
             pendingInfo = (try reader.u32(), try reader.u32(), t)
         case MTPCode.deleteObject:
             let handle = try reader.u32()
-            if objects.removeValue(forKey: handle) == nil { respond(0x2009, t) } else { respond(MTPCode.ok, t) }
+            guard objects[handle] != nil else { respond(0x2009, t); return }
+            // Like Android, a folder goes with everything in it.
+            var doomed = [handle]
+            while let next = doomed.popLast() {
+                objects.removeValue(forKey: next)
+                doomed += objects.filter { $0.value.parent == next }.keys
+            }
+            respond(MTPCode.ok, t)
+        case MTPCode.setObjectPropValue:
+            let handle = try reader.u32(), property = try reader.u32()
+            guard objects[handle] != nil, property == UInt32(MTPCode.objectFileNameProperty) else { respond(0x2009, t); return }
+            pendingRename = (handle, t)
         case MTPCode.sendObject:
             if pendingSend == nil { respond(0x2014, t) }   // no valid object info
         default:

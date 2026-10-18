@@ -15,6 +15,7 @@ import org.openbridge.protocol.Clipboard
 import org.openbridge.protocol.Pairing
 import org.openbridge.protocol.Session
 import org.openbridge.protocol.Store
+import org.openbridge.protocol.Trust
 import org.openbridge.protocol.Wire
 import java.io.Closeable
 import java.net.Inet4Address
@@ -37,8 +38,14 @@ import javax.net.ssl.SSLServerSocket
 import javax.net.ssl.SSLSocket
 import javax.security.auth.x500.X500Principal
 
-class SharingServer(context: Context, private val store: Store, private val approver: Pairing.Approver,
+class SharingServer(context: Context, private val store: Store, private val trust: Trust, private val approver: Pairing.Approver,
                     private val clipboard: Clipboard?, private val stopped: (String) -> Unit) : Closeable {
+    companion object {
+        /** Tried first, so a computer that saved this phone finds it at the same address next time. */
+        const val PREFERRED_PORT = 41987
+        /** The phone's TLS identity: made once and kept, so paired computers recognize it later. */
+        private const val IDENTITY = "openbridge-identity"
+    }
     private val connectivity = context.getSystemService(ConnectivityManager::class.java)
     private val nsd = context.getSystemService(NsdManager::class.java)
     /** The name Macs see in their list of phones, like "vivo X300 Pro". */
@@ -50,23 +57,24 @@ class SharingServer(context: Context, private val store: Store, private val appr
     // Four requests at a time (a transfer, browsing and previews together), and a few more wait their turn instead of
     // being dropped. Anything beyond that is refused, so a misbehaving client can't pile up threads.
     private val workers = ThreadPoolExecutor(4, 4, 10, TimeUnit.SECONDS, ArrayBlockingQueue(8)).apply { allowCoreThreadTimeOut(true) }
-    private val secret = ByteArray(32).also { SecureRandom().nextBytes(it) }
-    /** Serves paired Macs, and pairs new ones by 6-digit comparison (see Pairing). */
+    /** Serves paired computers, and pairs new ones by 6-digit comparison (see Pairing). */
     private val session: Session
     private var callbackRegistered = false
     /** Wi-Fi network being served, or null when serving over a USB tethering cable. */
     private val network: Network?
     private val address: InetAddress
-    private val listener: SSLServerSocket
+    private var listener: SSLServerSocket
+    /** SHA-256 of this phone's certificate; computers pin it. */
+    private val fingerprint: ByteArray
     val usb: Boolean get() = network == null
     val host: String get() = address.hostAddress!!
     val port: Int get() = listener.localPort
 
     private val callback = object : ConnectivityManager.NetworkCallback() {
-        override fun onLost(lost: Network) { if (lost == network) stop("Wi-Fi disconnected") }
+        override fun onLost(lost: Network) { if (lost == network) stop(S.wifiDisconnected) }
         override fun onLinkPropertiesChanged(changed: Network, properties: LinkProperties) {
             if (changed == network && properties.linkAddresses.none { it.address == address })
-                stop("Wi-Fi address changed")
+                stop(S.wifiChanged)
         }
     }
 
@@ -80,36 +88,41 @@ class SharingServer(context: Context, private val store: Store, private val appr
                 connectivity.getLinkProperties(candidate)?.linkAddresses
                     ?.firstOrNull { Wire.isPrivateIPv4(it.address) }?.let { candidate to it.address }
             } else null
-        } ?: throw IllegalStateException("Connect to Wi-Fi or turn on USB tethering first")
+        } ?: throw IllegalStateException(S.needNetwork)
         network = candidate.first
         address = candidate.second
 
-        // New certificate and secret on every start; nothing is paired permanently.
+        // One identity for as long as the app is installed, so paired computers reconnect without a code. The private
+        // key never leaves the AndroidKeyStore. Earlier versions made a new one on every start; drop that one.
         val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        val alias = "openbridge-session"
-        if (keyStore.containsAlias(alias)) keyStore.deleteEntry(alias)
-        KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_RSA, "AndroidKeyStore").apply {
-            initialize(KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY)
+        if (keyStore.containsAlias("openbridge-session")) keyStore.deleteEntry("openbridge-session")
+        if (!keyStore.containsAlias(IDENTITY)) KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_RSA, "AndroidKeyStore").apply {
+            initialize(KeyGenParameterSpec.Builder(IDENTITY, KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY)
                 .setKeySize(2048)
                 .setDigests(KeyProperties.DIGEST_SHA256, KeyProperties.DIGEST_SHA384, KeyProperties.DIGEST_SHA512)
                 .setSignaturePaddings(KeyProperties.SIGNATURE_PADDING_RSA_PKCS1, KeyProperties.SIGNATURE_PADDING_RSA_PSS)
-                .setCertificateSubject(X500Principal("CN=OpenBridge session"))
-                .setCertificateNotBefore(Date(System.currentTimeMillis() - 60_000))
-                .setCertificateNotAfter(Date(System.currentTimeMillis() + 86_400_000))
+                .setCertificateSubject(X500Principal("CN=OpenBridge"))
+                .setCertificateNotBefore(Date(System.currentTimeMillis() - 86_400_000))
+                .setCertificateNotAfter(Date(System.currentTimeMillis() + 25L * 365 * 86_400_000))
                 .build())
             generateKeyPair()
         }
-        val fingerprint = MessageDigest.getInstance("SHA-256").digest(keyStore.getCertificate(alias).encoded)
-        session = Session(store, secret, fingerprint, approver, clipboard)
+        fingerprint = MessageDigest.getInstance("SHA-256").digest(keyStore.getCertificate(IDENTITY).encoded)
+        session = Session(store, trust, fingerprint, approver, clipboard)
         val managers = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm()).apply { init(keyStore, null) }
         val tls = SSLContext.getInstance("TLS").apply { init(managers.keyManagers, null, SecureRandom()) }
-        listener = (tls.serverSocketFactory.createServerSocket() as SSLServerSocket).apply {
+        fun socket() = (tls.serverSocketFactory.createServerSocket() as SSLServerSocket).apply {
             enabledProtocols = supportedProtocols.filter { it == "TLSv1.2" || it == "TLSv1.3" }.toTypedArray()
-            reuseAddress = false
+            // Lets sharing restart on the same port while the last session's closed connections linger (TIME_WAIT).
+            // It never lets a second listener take a port that's in use.
+            reuseAddress = true
         }
+        listener = socket()
         try {
-            // Never bind 0.0.0.0, cellular, or a public interface. No discovery or port mapping.
-            listener.bind(InetSocketAddress(address, 0), 8)
+            // Never bind 0.0.0.0, cellular, or a public interface. No port mapping. The same port each time when
+            // it's free, so saved computers find the phone even where discovery is blocked.
+            try { listener.bind(InetSocketAddress(address, PREFERRED_PORT), 8) }
+            catch (_: java.io.IOException) { listener.close(); listener = socket(); listener.bind(InetSocketAddress(address, 0), 8) }
             if (network != null) {
                 connectivity.registerNetworkCallback(NetworkRequest.Builder()
                     .addTransportType(NetworkCapabilities.TRANSPORT_WIFI).build(), callback)
@@ -144,14 +157,14 @@ class SharingServer(context: Context, private val store: Store, private val appr
                         sockets.remove(socket); socket.close()
                     }
                 }
-            } catch (_: Exception) { if (!closed.get()) stop("Sharing server stopped unexpectedly") }
+            } catch (_: Exception) { if (!closed.get()) stop(S.serverStopped) }
         }, "openbridge-listener").start()
         // Tethering interfaces are not exposed as ConnectivityManager networks, so poll for cable removal.
         if (usb) Thread({
             try {
                 while (!closed.get()) {
                     Thread.sleep(2_000)
-                    if (!closed.get() && usbTetherAddress() != address) stop("USB cable disconnected or tethering turned off")
+                    if (!closed.get() && usbTetherAddress() != address) stop(S.cableRemoved)
                 }
             } catch (_: InterruptedException) {}
         }, "openbridge-usb-watch").apply { isDaemon = true }.start()
@@ -160,8 +173,9 @@ class SharingServer(context: Context, private val store: Store, private val appr
     private fun stop(reason: String) { close(); stopped(reason) }
 
     /**
-     * Lets Macs on this Wi-Fi list the phone while sharing (DNS-SD `_openbridge._tcp`), so nobody types an
-     * address. It reveals only the phone's name, address and port; pairing still needs the 6-digit code.
+     * Lets computers on this Wi-Fi list the phone while sharing (DNS-SD `_openbridge._tcp`), so nobody types an
+     * address. It reveals only the phone's name, address, port and a short ID derived from its certificate (so a
+     * computer that saved the phone recognizes it at a new address); pairing still needs the 6-digit code.
      */
     private fun announce() {
         if (usb) return
@@ -172,6 +186,7 @@ class SharingServer(context: Context, private val store: Store, private val appr
             setAttribute("ip", this@SharingServer.host)
             setAttribute("port", this@SharingServer.port.toString())
             setAttribute("v", "1")
+            setAttribute("id", fingerprint.take(8).joinToString("") { "%02x".format(it) })
         }
         val listener = object : NsdManager.RegistrationListener {
             override fun onServiceRegistered(info: NsdServiceInfo) {}
@@ -190,7 +205,6 @@ class SharingServer(context: Context, private val store: Store, private val appr
         listener.close()
         sockets.forEach { runCatching { it.close() } }
         workers.shutdownNow()
-        secret.fill(0)
     }
 }
 

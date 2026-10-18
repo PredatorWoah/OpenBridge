@@ -10,6 +10,12 @@ public protocol FileSource {
     func makeFolder(named name: String, in directoryID: String) async throws -> Entry
     /// A small JPEG preview of a photo or video.
     func thumbnail(_ entry: Entry, size: Int) async throws -> Data
+    /// Deletes a file, or a folder with everything in it.
+    func delete(_ entry: Entry) async throws
+    /// Renames in place; returns the item afterwards.
+    func rename(_ entry: Entry, to name: String) async throws -> Entry
+    /// A folder's total size; sources that can't count cheaply throw.
+    func measure(_ folder: Entry) async throws -> FolderSize
     func disconnect() async
 }
 
@@ -164,6 +170,33 @@ public final class MTPClient: FileSource, @unchecked Sendable {
                 throw error
             }
         }
+    }
+
+    public func delete(_ entry: Entry) async throws {
+        let location = try Location(entry.id)
+        guard location.storage != nil, location.handle != MTPSession.root else { throw BridgeError.message("The storage itself can't be deleted.") }
+        // Android deletes a folder with everything in it.
+        _ = try await run { try $0.delete(location.handle) }
+    }
+
+    public func rename(_ entry: Entry, to name: String) async throws -> Entry {
+        try Wire.validateName(name)
+        guard name.utf16.count < 255 else { throw BridgeError.message("That name is too long for the phone.") }
+        let location = try Location(entry.id)
+        guard let storage = location.storage, location.handle != MTPSession.root else { throw BridgeError.message("The storage itself can't be renamed.") }
+        if name == entry.name { return entry }
+        let parent = try await run { try $0.info(location.handle).parent }
+        let folder = parent == 0 || parent == MTPSession.root ? "s:\(storage)" : "o:\(storage):\(parent)"
+        // Never take a name that exists; a change of letter case of its own name is fine.
+        let taken = Set(try await list(id: folder).filter { $0.id != entry.id }.map { $0.name.lowercased() })
+        guard !taken.contains(name.lowercased()) else { throw BridgeError.message("A file or folder named “\(name)” already exists on the phone.") }
+        try await run { try $0.rename(location.handle, to: name) }
+        return Entry(id: entry.id, name: name, directory: entry.directory, size: entry.size)
+    }
+
+    public func measure(_ folder: Entry) async throws -> FolderSize {
+        // MTP has no folder sizes, and walking a folder over the cable would hold up browsing.
+        throw BridgeError.message("Folder sizes aren't available over USB.")
     }
 
     public func upload(_ source: URL, directoryID: String, progress: @MainActor (Int64, Int64) -> Void) async throws {

@@ -1,6 +1,7 @@
 package org.openbridge.protocol;
 
 import java.io.*;
+import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.Arrays;
 import java.util.List;
@@ -8,28 +9,36 @@ import java.util.List;
 /** Blocking streaming handler, independent of Android and TLS implementation. */
 public final class Session {
     private final Store store;
-    private final byte[] secret;
+    private final Trust trust;
     private final byte[] fingerprint;
     private final Pairing.Approver approver;
     private final Clipboard clipboard;
     private final SecureRandom random = new SecureRandom();
 
     /** A session that only accepts clients that already hold the secret. */
-    public Session(Store store, byte[] secret) { this(store, secret, null, null); }
+    public Session(Store store, byte[] secret) { this(store, Trust.single(secret), null, null, null); }
 
     /**
      * A session that can also pair new clients (OBP1): `fingerprint` is the SHA-256 of this server's TLS
      * certificate, and `approver` shows the 6-digit code to the user.
      */
     public Session(Store store, byte[] secret, byte[] fingerprint, Pairing.Approver approver) {
-        this(store, secret, fingerprint, approver, null);
+        this(store, Trust.single(secret), fingerprint, approver, null);
     }
 
     /** Like the pairing constructor, and also shares `clipboard` (null: clipboard requests fail). */
     public Session(Store store, byte[] secret, byte[] fingerprint, Pairing.Approver approver, Clipboard clipboard) {
-        this.store = store; this.secret = secret.clone(); this.approver = approver; this.clipboard = clipboard;
+        this(store, Trust.single(secret), fingerprint, approver, clipboard);
+    }
+
+    /** Each paired computer has its own secret, kept by `trust`. */
+    public Session(Store store, Trust trust, byte[] fingerprint, Pairing.Approver approver, Clipboard clipboard) {
+        this.store = store; this.trust = trust; this.approver = approver; this.clipboard = clipboard;
         this.fingerprint = fingerprint == null ? null : fingerprint.clone();
     }
+
+    /** How long MEASURE may count before answering with what it has. */
+    static final long MEASURE_MILLIS = 5_000;
 
     public void serve(InputStream input, OutputStream output) throws IOException {
         DataInputStream in = new DataInputStream(new BufferedInputStream(input));
@@ -38,13 +47,17 @@ public final class Session {
         try {
             byte[] magic = new byte[4];
             in.readFully(magic);
-            if (Arrays.equals(magic, Pairing.MAGIC)) {
+            boolean named = Arrays.equals(magic, Pairing.MAGIC2);
+            if (named || Arrays.equals(magic, Pairing.MAGIC)) {
                 if (approver == null || fingerprint == null) throw new IOException("Pairing is not available");
+                String computer = named ? Pairing.readName(in) : "Computer";
                 responseStarted = true;   // pairing reports its own errors after the exchange begins
-                Pairing.serve(in, out, fingerprint, secret, approver, random);
+                Pairing.serve(in, out, fingerprint, trust, computer, approver, random);
                 return;
             }
-            Wire.authenticate(in, magic, secret);
+            byte[] supplied = new byte[32];
+            in.readFully(supplied);
+            if (!MessageDigest.isEqual(magic, Wire.MAGIC) || trust.computer(supplied) == null) throw new IOException("Pairing rejected");
             int operation = in.readUnsignedByte();
             String id = Wire.readString(in, 128);
             switch (operation) {
@@ -135,6 +148,27 @@ public final class Session {
                     String text = Wire.readString(in, Wire.MAX_CLIPBOARD);
                     clipboard.write(text);
                     out.writeByte(0);
+                    break;
+                }
+                case 9: {   // DELETE: a file, or a folder and everything in it
+                    store.delete(id);
+                    out.writeByte(0);
+                    break;
+                }
+                case 10: {   // RENAME: a new name; replies with the item's ID afterwards
+                    String name = Wire.readString(in, 255);
+                    Wire.validateName(name);
+                    String renamed = store.rename(id, name);
+                    out.writeByte(0); responseStarted = true;
+                    Wire.writeString(out, renamed);
+                    break;
+                }
+                case 11: {   // MEASURE: total size and file count of a folder, and whether counting finished
+                    Store.Size size = store.measure(id, System.currentTimeMillis() + MEASURE_MILLIS);
+                    out.writeByte(0); responseStarted = true;
+                    out.writeLong(size.bytes);
+                    out.writeLong(size.files);
+                    out.writeBoolean(size.complete);
                     break;
                 }
                 default: throw new IOException("Unsupported operation; update OpenBridge on the phone");
