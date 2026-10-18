@@ -4,6 +4,21 @@ All notable changes to OpenBridge are recorded here. Every release has an entry;
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-10-18
+
+Fixes from real-device testing of 0.12.0: search every folder, folder sizes over USB, and a toolbar that no longer squashes its text.
+
+### Added
+- **Search every folder.** Type in the search field and press Return (or click **Search all folders**) to find files and folders by name anywhere inside the open folder, like ".iso" from the top of the phone. Results show where each one is; double-click to open or download, or right-click › **Show in Folder**. Works over Wi‑Fi on the Mac and Windows, and over USB on the Mac.
+
+### Fixed
+- **Mac: folder sizes over USB.** Folders opened over the cable showed "—". They're now counted too, using Android's bulk folder queries so it takes a couple of requests per folder (phones without them are counted file by file, for up to 8 seconds). A storage area shows its used space.
+- **Mac: text broke when the window got narrower.** The toolbar squeezed the path to "…" and wrapped Download letter by letter. When space runs out the controls now move to a second row, deep paths keep the first and last folders with the rest behind "…", and buttons never wrap. The phone card's shortcuts wrap onto a second row instead of shortening to "Downl…".
+- Windows: buttons never wrap their labels.
+
+### Notes
+- Searching over Wi‑Fi needs the 0.12.1 phone app; update both.
+
 ## [0.12.0] - 2026-10-18
 
 Send from the phone: share photos and files to your computer from any app, import only the new photos, uploads that survive a dropped connection, and mirroring without the cable.

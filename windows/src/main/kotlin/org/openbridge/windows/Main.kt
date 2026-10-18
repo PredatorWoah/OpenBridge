@@ -272,6 +272,12 @@ private fun BrowserScreen(state: AppState, dropping: Boolean) {
     Column(Modifier.fillMaxSize()) {
         Toolbar(state)
         FilterBar(state)
+        state.results?.let { results ->
+            Box(Modifier.weight(1f).fillMaxWidth()) { ResultsList(state, results) }
+            state.error?.let { Text(it, color = Palette.amber, fontSize = 12.5.sp, modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp)) }
+            state.transfer?.let { TransferBar(state, it) }
+            return@Column
+        }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             val entries = state.sorted
             LazyColumn(Modifier.fillMaxSize().padding(horizontal = 10.dp), contentPadding = PaddingValues(vertical = 8.dp)) {
@@ -303,6 +309,12 @@ private fun BrowserScreen(state: AppState, dropping: Boolean) {
                 }
             }
             if (entries.isEmpty() && !state.busy && state.entries.isEmpty()) Text(S.emptyFolder, color = Palette.muted, modifier = Modifier.align(Alignment.Center))
+            if (entries.isEmpty() && state.entries.isNotEmpty()) {
+                Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(S.nothingMatches, color = Palette.muted)
+                    if (state.query.isNotBlank()) SunsetButton(S.searchAll(state.query.trim()), enabled = !state.busy) { state.searchEverywhere() }
+                }
+            }
             if (dropping) {
                 Box(Modifier.fillMaxSize().padding(10.dp).clip(RoundedCornerShape(16.dp)).background(Palette.violet.copy(alpha = 0.18f))
                     .border(2.dp, Palette.sunset, RoundedCornerShape(16.dp)), contentAlignment = Alignment.Center) {
@@ -366,12 +378,58 @@ private fun Toolbar(state: AppState) {
     }
 }
 
+/** Hits from every folder below the open one, with where each one is. */
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+private fun ResultsList(state: AppState, results: SearchResult) {
+    var menuFor by remember { mutableStateOf<Found?>(null) }
+    Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(S.foundCount(results.found.size, !results.complete, state.resultsFor), color = Palette.fg, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+                if (!results.complete) Text(S.searchStopped, color = Palette.muted, fontSize = 12.sp)
+            }
+            GhostButton(S.done) { state.changeQuery("") }
+        }
+        LazyColumn(Modifier.fillMaxSize().padding(horizontal = 10.dp)) {
+            items(results.found, key = { it.entry.id }) { hit ->
+                Box {
+                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                        .onPointerEvent(PointerEventType.Press) { event ->
+                            val awt = event.nativeEvent as? java.awt.event.MouseEvent
+                            when {
+                                awt?.button == java.awt.event.MouseEvent.BUTTON3 -> menuFor = hit
+                                (awt?.clickCount ?: 1) >= 2 -> state.openFound(hit)
+                            }
+                        }
+                        .padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        val (icon, tint) = kindIcon(Kind.of(hit.entry))
+                        Icon(icon, null, tint = tint, modifier = Modifier.size(22.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(hit.entry.name, color = Palette.fg, fontSize = 13.5.sp, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
+                            Text(hit.location.ifEmpty { state.path.last().second }.replace("/", " › "), color = Palette.muted, fontSize = 11.5.sp,
+                                maxLines = 1, overflow = TextOverflow.StartEllipsis)
+                        }
+                        if (!hit.entry.directory) Text(size(hit.entry.size), color = Palette.muted, fontSize = 13.sp)
+                    }
+                    DropdownMenu(menuFor == hit, { menuFor = null }) {
+                        DropdownMenuItem({ menuFor = null; state.openFound(hit) }) { Text(if (hit.entry.directory) S.open else S.download) }
+                        DropdownMenuItem({ menuFor = null; state.reveal(hit) }) { Text(S.showInFolder2) }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /** Search within the folder, and show only photos and videos. */
 @Composable
 private fun FilterBar(state: AppState) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Field(state.query, { state.query = it }, S.search, Modifier.weight(1f))
+        Field(state.query, state::changeQuery, S.search, Modifier.weight(1f), onEnter = state::searchEverywhere)
+        if (state.query.isNotBlank() && state.results == null) GhostButton(S.searchAll(state.query.trim()), enabled = !state.busy) { state.searchEverywhere() }
         listOf(Show.ALL to S.showAll, Show.MEDIA to S.showMedia).forEach { (option, label) ->
             val on = state.show == option
             Text(label, color = if (on) Color.White else Palette.muted, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold,
@@ -444,8 +502,12 @@ private fun size(bytes: Long): String {
 private fun Label(text: String) = Text(text, color = Palette.muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.4.sp)
 
 @Composable
-private fun Field(value: String, change: (String) -> Unit, placeholder: String, modifier: Modifier) {
-    Box(modifier.glass(RoundedCornerShape(10.dp)).padding(horizontal = 12.dp, vertical = 10.dp)) {
+private fun Field(value: String, change: (String) -> Unit, placeholder: String, modifier: Modifier, onEnter: (() -> Unit)? = null) {
+    Box(modifier.glass(RoundedCornerShape(10.dp))
+        .onPreviewKeyEvent { event ->
+            if (onEnter != null && event.type == KeyEventType.KeyDown && event.key == Key.Enter) { onEnter(); true } else false
+        }
+        .padding(horizontal = 12.dp, vertical = 10.dp)) {
         if (value.isEmpty()) Text(placeholder, color = Palette.muted.copy(alpha = 0.7f), fontSize = 13.5.sp)
         BasicTextField(value, change, singleLine = true, cursorBrush = SolidColor(Palette.sun),
             textStyle = TextStyle(color = Palette.fg, fontSize = 13.5.sp, fontFamily = FontFamily.Monospace), modifier = Modifier.fillMaxWidth())
@@ -456,7 +518,7 @@ private fun Field(value: String, change: (String) -> Unit, placeholder: String, 
 private fun SunsetButton(text: String, enabled: Boolean = true, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Box(modifier.clip(CircleShape).background(Palette.sunset, alpha = if (enabled) 1f else 0.4f).clickable(enabled = enabled, onClick = onClick)
         .padding(horizontal = 18.dp, vertical = 9.dp), contentAlignment = Alignment.Center) {
-        Text(text, color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+        Text(text, color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
     }
 }
 
@@ -464,7 +526,7 @@ private fun SunsetButton(text: String, enabled: Boolean = true, modifier: Modifi
 private fun GhostButton(text: String, enabled: Boolean = true, onClick: () -> Unit) {
     Box(Modifier.clip(CircleShape).background(Color.White.copy(alpha = 0.08f)).border(1.dp, Color.White.copy(alpha = 0.14f), CircleShape)
         .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 14.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
-        Text(text, color = if (enabled) Palette.fg else Palette.muted, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        Text(text, color = if (enabled) Palette.fg else Palette.muted, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
     }
 }
 

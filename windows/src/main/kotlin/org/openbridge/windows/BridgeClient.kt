@@ -27,6 +27,12 @@ data class Entry(val id: String, val name: String, val directory: Boolean, val s
  */
 class BridgeException(message: String, val lost: Boolean = false, val forgotten: Boolean = false) : IOException(message)
 
+/** A search hit, and the folder it's in by name relative to where the search started ("DCIM/Camera"). */
+data class Found(val entry: Entry, val location: String)
+
+/** What a search found; `complete` is false when the phone stopped early (time or result limit). */
+data class SearchResult(val found: List<Found>, val complete: Boolean)
+
 /** What MEASURE found in a folder; `complete` is false when the phone stopped counting early. */
 data class FolderSize(val bytes: Long, val files: Long, val complete: Boolean)
 
@@ -346,6 +352,28 @@ class BridgeClient internal constructor(
         val complete = when (input.readUnsignedByte()) { 0 -> false; 1 -> true; else -> throw BridgeException("The phone sent an invalid reply.") }
         if (bytes < 0 || files < 0) throw BridgeException("The phone sent an invalid reply.")
         FolderSize(bytes, files, complete)
+    }
+
+    /** Files and folders whose names contain `query`, anywhere below `folderId`, searched on the phone. */
+    fun search(folderId: String, query: String): SearchResult {
+        val text = query.trim()
+        if (text.isEmpty() || text.toByteArray().size > 255) throw BridgeException(S.typeToSearch)
+        return request(16, folderId, { Wire.writeString(it, text) }) { input, _ ->
+            status(input)
+            val count = input.readInt()
+            if (count !in 0..1_000) throw BridgeException("The phone sent an invalid reply.")
+            val found = List(count) {
+                val id = Wire.readString(input, 128)
+                val name = Wire.readString(input, 255)
+                Wire.validateName(name)
+                val directory = when (input.readUnsignedByte()) { 0 -> false; 1 -> true; else -> throw BridgeException("The phone sent an invalid reply.") }
+                val size = input.readLong()
+                val location = Wire.readString(input, 1024)
+                if (id.isEmpty() || size < 0) throw BridgeException("The phone sent an invalid reply.")
+                Found(Entry(id, name, directory, size), location)
+            }
+            SearchResult(found, input.readUnsignedByte() == 1)
+        }
     }
 
     fun clipboard(): String = request(7, "") { input, _ -> status(input); Wire.readString(input, Wire.MAX_CLIPBOARD) }

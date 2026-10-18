@@ -202,6 +202,29 @@ public struct BridgeClient {
         return FolderSize(bytes: Int64(bytes), files: Int64(files), complete: complete == 1)
     }
 
+    /// Files and folders whose names contain `query`, anywhere below `folderID`, searched on the phone.
+    public func search(in folderID: String, for query: String) async throws -> SearchResult {
+        let text = query.trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty, text.utf8.count <= 255 else { throw BridgeError.message("Type something to search for.") }
+        let channel = try await open(operation: 16, id: folderID, extra: Wire.string(text))
+        defer { channel.close() }
+        try await channel.status(timeout: 30)
+        let count = try await channel.number(4)
+        guard count <= 1_000 else { throw BridgeError.message("Invalid search reply.") }
+        var found: [Found] = []
+        for _ in 0..<Int(count) {
+            let id = try await channel.string(limit: 128)
+            let name = try await channel.string(limit: 255)
+            try Wire.validateName(name)
+            let directory = try await channel.number(1)
+            let size = try await channel.number(8)
+            let location = try await channel.string(limit: 1024)
+            guard !id.isEmpty, directory <= 1, size <= UInt64(Int64.max) else { throw BridgeError.message("Invalid search reply.") }
+            found.append(Found(entry: Entry(id: id, name: name, directory: directory == 1, size: Int64(size)), location: location))
+        }
+        return SearchResult(found: found, complete: try await channel.number(1) == 1)
+    }
+
     /// The phone's clipboard text.
     public func clipboard() async throws -> String {
         let channel = try await open(operation: 7, id: "")

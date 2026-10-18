@@ -84,6 +84,66 @@ public final class MTPSession {
         }
     }
 
+    /// One item in a folder, as needed for sizes and search.
+    public struct Child: Equatable {
+        public let handle: UInt32
+        public let folder: Bool
+        public let size: UInt64
+        public let name: String
+    }
+
+    /// Everything directly inside `parent`. Uses Android's GetObjectPropList, which answers for a whole folder in one
+    /// request per property; phones without it (and storage tops, which it can't tell apart) are asked per object.
+    public func contents(storage: UInt32, parent: UInt32, names: Bool) throws -> [Child] {
+        if parent != MTPSession.root {
+            do {
+                let formats = try propertyList(parent, MTPCode.objectFormatProperty)
+                let sizes = try propertyList(parent, MTPCode.objectSizeProperty)
+                let named = names ? try propertyList(parent, MTPCode.objectFileNameProperty) : [:]
+                return formats.keys.sorted().map { handle in
+                    let size: UInt64
+                    if case .number(let value)? = sizes[handle] { size = value } else { size = 0 }
+                    var name = ""
+                    if case .text(let value)? = named[handle] { name = value }
+                    var folder = false
+                    if case .number(let value)? = formats[handle] { folder = value == UInt64(MTPCode.associationFormat) }
+                    return Child(handle: handle, folder: folder, size: size, name: name)
+                }
+            } catch MTPError.response {
+                // Not supported here: ask object by object below.
+            }
+        }
+        return try children(storage: storage, parent: parent).map { item in
+            Child(handle: item.handle, folder: item.info.isFolder,
+                  size: item.info.isFolder ? 0 : try size(of: item.handle, info: item.info), name: item.info.filename)
+        }
+    }
+
+    public enum PropertyValue: Equatable { case number(UInt64), text(String) }
+
+    /// One property of every object directly inside `parent` (GetObjectPropList, depth 1).
+    func propertyList(_ parent: UInt32, _ property: UInt16) throws -> [UInt32: PropertyValue] {
+        var reader = MTPReader(try dataIn(MTPCode.getObjectPropList, [parent, 0, UInt32(property), 0, 1]))
+        let count = try reader.u32()
+        guard count <= 1_000_000 else { throw MTPError.protocolViolation("property list too long") }
+        var values: [UInt32: PropertyValue] = [:]
+        for _ in 0..<count {
+            let handle = try reader.u32()
+            _ = try reader.u16()          // property code
+            let type = try reader.u16()
+            switch type {
+            case 0x0001, 0x0002: values[handle] = .number(UInt64(try reader.u8()))
+            case 0x0003, 0x0004: values[handle] = .number(UInt64(try reader.u16()))
+            case 0x0005, 0x0006: values[handle] = .number(UInt64(try reader.u32()))
+            case 0x0007, 0x0008: values[handle] = .number(try reader.u64())
+            case 0x0009, 0x000A: _ = try reader.u64(); values[handle] = .number(try reader.u64())   // 128-bit: low half
+            case 0xFFFF: values[handle] = .text(try reader.string())
+            default: throw MTPError.protocolViolation("property type \(type)")
+            }
+        }
+        return values
+    }
+
     public func info(_ handle: UInt32) throws -> MTPObjectInfo {
         try MTPObjectInfo(parsing: try dataIn(MTPCode.getObjectInfo, [handle]))
     }

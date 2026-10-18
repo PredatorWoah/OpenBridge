@@ -317,6 +317,12 @@ public final class ProtocolTest {
         check(measured.readByte() == 0, "Measure");
         long bytes = measured.readLong(), count = measured.readLong();
         check(bytes == store.files.get("hello.txt").length && count == 1 && measured.readBoolean(), "Measure through the listing: " + bytes + "/" + count);
+        DataInputStream searched = serve(store, simple(16, "", out -> Wire.writeString(out, "HELLO")));
+        check(searched.readByte() == 0 && searched.readInt() == 1, "Search through the listing");
+        check(Wire.readString(searched, 128).equals("file:hello.txt") && Wire.readString(searched, 255).equals("hello.txt") && !searched.readBoolean(), "Search hit");
+        searched.readLong();
+        check(Wire.readString(searched, 1024).equals("") && searched.readBoolean(), "Hit at the top, search complete");
+        check(serve(store, simple(16, "", out -> Wire.writeString(out, "  "))).readByte() == 1, "An empty search is refused");
 
         java.nio.file.Path base = java.nio.file.Files.createTempDirectory("openbridge-edit");
         try {
@@ -333,6 +339,18 @@ public final class ProtocolTest {
             Store.Size size = files.measure(top.get("DCIM").id, System.currentTimeMillis() + 5_000);
             check(size.bytes == 3500 && size.files == 2 && size.complete, "Folder size counts files below, not links: " + size.bytes);
             check(!files.measure(top.get("DCIM").id, 0).complete, "Measuring stops at the deadline");
+
+            // Deep search, from the top: names containing the query anywhere below, with where they are.
+            java.nio.file.Files.write(camera.resolve("ubuntu.ISO"), new byte[7]);
+            boolean[] complete = {false};
+            List<Store.Found> hits = files.search("", ".iso", System.currentTimeMillis() + 5_000, complete);
+            check(complete[0] && hits.size() == 1 && hits.get(0).entry.name.equals("ubuntu.ISO") && hits.get(0).location.equals("DCIM/Camera")
+                && hits.get(0).entry.size == 7, "Deep search finds a file in a subfolder, ignoring case");
+            check(files.search("", "camera", System.currentTimeMillis() + 5_000, complete).get(0).entry.directory, "Search finds folders too");
+            check(files.search("", "link", System.currentTimeMillis() + 5_000, complete).isEmpty(), "Search never follows links");
+            DataInputStream download = serve(new Session(files, SECRET), simple(2, hits.get(0).entry.id, out -> {}));
+            check(download.readByte() == 0 && download.readLong() == 7, "A search hit can be downloaded");
+            java.nio.file.Files.delete(camera.resolve("ubuntu.ISO"));
 
             String renamedId = files.rename(top.get("Photo.JPG").id, "photo.jpg");
             check(byName(files.list("")).containsKey("photo.jpg") && !byName(files.list("")).containsKey("Photo.JPG"), "Case-only rename");

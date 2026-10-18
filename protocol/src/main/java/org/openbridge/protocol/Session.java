@@ -48,6 +48,8 @@ public final class Session {
     /** The longest OUTBOX wait, safely under the 30-second socket timeouts on both sides. */
     static final int MAX_WAIT_MILLIS = 25_000;
     static final int MAX_OUTBOX = 1_000;
+    /** How long SEARCH may look before answering with what it found. */
+    static final long SEARCH_MILLIS = 8_000;
 
     public void serve(InputStream input, OutputStream output) throws IOException {
         DataInputStream in = new DataInputStream(new BufferedInputStream(input));
@@ -237,6 +239,23 @@ public final class Session {
                     if (outbox == null) throw new IOException("Sending from the phone is not available");
                     outbox.done(id);
                     out.writeByte(0);
+                    break;
+                }
+                case 16: {   // SEARCH: names containing a query, anywhere below a folder
+                    String query = Wire.readString(in, 255).trim();
+                    if (query.isEmpty()) throw new IOException("Type something to search for");
+                    boolean[] complete = {true};
+                    List<Store.Found> found = store.search(id, query, System.currentTimeMillis() + SEARCH_MILLIS, complete);
+                    out.writeByte(0); responseStarted = true;
+                    out.writeInt(found.size());
+                    for (Store.Found hit : found) {
+                        Wire.writeString(out, hit.entry.id);
+                        Wire.writeString(out, hit.entry.name);
+                        out.writeBoolean(hit.entry.directory);
+                        out.writeLong(hit.entry.size);
+                        Wire.writeString(out, hit.location.length() > 1024 ? hit.location.substring(0, 1024) : hit.location);
+                    }
+                    out.writeBoolean(complete[0]);
                     break;
                 }
                 default: throw new IOException("Unsupported operation; update OpenBridge on the phone");

@@ -63,8 +63,11 @@ final class BrowserModel: ObservableObject {
     @Published private(set) var saved: [SavedPhone] = SavedPhones.load()
     /// Phones sharing on this Wi‑Fi; runs for the whole session.
     let discovery = PhoneDiscovery()
-    /// Filters for the open folder.
-    @Published var query = ""
+    /// Filters for the open folder; clearing it closes search results.
+    @Published var query = "" { didSet { if query.isEmpty { results = nil } } }
+    /// Results of searching every folder below the open one.
+    @Published private(set) var results: SearchResult?
+    @Published private(set) var resultsFor = ""
     @Published var mediaOnly = false
     /// Folder sizes counted on the phone (Wi‑Fi only).
     @Published private(set) var sizes: [Entry.ID: FolderSize] = [:]
@@ -433,7 +436,7 @@ final class BrowserModel: ObservableObject {
     func sizeOf(_ entry: Entry) -> Int64 { entry.directory ? sizes[entry.id]?.bytes ?? 0 : entry.size }
 
     private func display(_ entries: [Entry], at path: [(id: String, name: String)]) {
-        self.path = path; self.entries = entries; selection = []; anchor = nil; query = ""
+        self.path = path; self.entries = entries; selection = []; anchor = nil; query = ""; results = nil
         for entry in sizeQueue { sizesPending.remove(entry.id) }
         sizeQueue = []
         // Previews still waiting belong to the folder just left.
@@ -520,9 +523,9 @@ final class BrowserModel: ObservableObject {
 
     // MARK: Previews
 
-    /// Counts a folder's size on the phone, one at a time, when nothing else is running. Wi‑Fi only: MTP can't.
+    /// Counts a folder's size on the phone, one at a time, when nothing else is running.
     func loadSize(_ entry: Entry) {
-        guard entry.directory, !overUSB, client != nil, sizes[entry.id] == nil, !sizesPending.contains(entry.id) else { return }
+        guard entry.directory, client != nil, sizes[entry.id] == nil, !sizesPending.contains(entry.id) else { return }
         sizesPending.insert(entry.id)
         sizeQueue.append(entry)
         pumpSizes()
@@ -538,6 +541,37 @@ final class BrowserModel: ObservableObject {
             sizing = false
             if let size { sizes[entry.id] = size }
             pumpSizes()
+        }
+    }
+
+    // MARK: Searching everywhere
+
+    /// Searches every folder below the open one for names containing the query.
+    func searchEverywhere() {
+        let text = query.trimmingCharacters(in: .whitespaces)
+        guard let client, !text.isEmpty, let folder = path.last?.id else { return }
+        run {
+            self.status = "Searching…"
+            let found = try await client.search(in: folder, for: text)
+            self.status = ""
+            self.results = found; self.resultsFor = text
+        }
+    }
+
+    /// Opens a search hit: a folder opens, a file downloads.
+    func openFound(_ hit: Found) {
+        if hit.entry.directory { reveal(hit, inside: true) } else { download([hit.entry]) }
+    }
+
+    /// Goes to the folder holding a hit (or into it) and selects it.
+    func reveal(_ hit: Found, inside: Bool = false) {
+        guard let client else { return }
+        let names = trail + hit.location.split(separator: "/").map(String.init) + (inside ? [hit.entry.name] : [])
+        run {
+            guard let (trail, entries) = try await self.resolve(names, client) else { self.show("That folder is no longer on the phone."); return }
+            self.query = ""
+            self.display(entries, at: trail)
+            if !inside, let match = entries.first(where: { $0.name == hit.entry.name }) { self.selection = [match.id]; self.anchor = match.id }
         }
     }
 

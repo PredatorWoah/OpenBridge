@@ -148,6 +148,10 @@ class BridgeClientTest {
         File(phone, "DCIM/b.jpg").writeBytes(ByteArray(500))
         val dcim = client.list().first { it.name == "DCIM" }
         assertEquals(FolderSize(2000, 2, true), client.measure(dcim))
+        val hits = client.search("", "A.JPG")
+        assertEquals(listOf("a.jpg"), hits.found.map { it.entry.name })
+        assertEquals("DCIM/Camera", hits.found[0].location)
+        assertTrue(hits.complete)
 
         val notes = client.list().first { it.name == "notes.txt" }
         val renamed = client.rename(notes, "renamed.txt")

@@ -23,6 +23,8 @@ public final class FakePhone: MTPTransport {
     public var serialNumber = "SERIAL"
     /// Whether the phone implements Android's GetPartialObject64 (for resuming downloads).
     public var supportsPartialObject = true
+    /// Android answers GetObjectPropList for a folder's children; some phones don't.
+    public var supportsPropertyLists = true
     /// Simulates a USB error when the host sends this command.
     public var failWritingCommand: UInt16?
     /// Simulates a USB error after this many more successful writes.
@@ -225,6 +227,20 @@ public final class FakePhone: MTPTransport {
                 doomed += objects.filter { $0.value.parent == next }.keys
             }
             respond(MTPCode.ok, t)
+        case MTPCode.getObjectPropList:
+            guard supportsPropertyLists else { respond(0x2005, t); return }
+            let parent = try reader.u32(); _ = try reader.u32(); let property = try reader.u32()
+            let children = objects.filter { $0.value.parent == parent }.sorted { $0.key < $1.key }
+            var w = MTPWriter(); w.u32(UInt32(children.count))
+            for (handle, object) in children {
+                w.u32(handle); w.u16(UInt16(property))
+                switch UInt16(property) {
+                case MTPCode.objectFormatProperty: w.u16(0x0004); w.u16(object.folder ? MTPCode.associationFormat : MTPCode.undefinedFormat)
+                case MTPCode.objectSizeProperty: w.u16(0x0008); w.u64(object.bigSize ?? UInt64(object.data.count))
+                default: w.u16(0xFFFF); try w.string(object.name)
+                }
+            }
+            dataThenOK(header.code, t, w.data)
         case MTPCode.setObjectPropValue:
             let handle = try reader.u32(), property = try reader.u32()
             guard objects[handle] != nil, property == UInt32(MTPCode.objectFileNameProperty) else { respond(0x2009, t); return }

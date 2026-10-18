@@ -12,6 +12,19 @@ public enum BridgeError: LocalizedError {
     }
 }
 
+/// A search hit, and the folder it's in by name, relative to where the search started ("DCIM/Camera").
+public struct Found: Identifiable, Equatable {
+    public let entry: Entry
+    public let location: String
+    public var id: String { entry.id }
+}
+
+/// What a search found; `complete` is false when it stopped early (time or result limit).
+public struct SearchResult: Equatable {
+    public let found: [Found]
+    public let complete: Bool
+}
+
 /// What MEASURE found in a folder. `complete` is false when the phone stopped counting early.
 public struct FolderSize: Equatable {
     public let bytes: Int64, files: Int64, complete: Bool
