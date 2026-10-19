@@ -683,6 +683,22 @@ public final class ProtocolTest {
             String notesId = single.list("").stream().filter(e -> e.name.equals("notes.txt")).findFirst().get().id;
             check(new String(single.thumbnail(notesId, 200), StandardCharsets.UTF_8).equals("thumb:notes.txt:200"), "Thumbnail from the platform");
             try { single.thumbnail(made, 200); check(false, "Folder thumbnail"); } catch (IOException expected) { check(true, "No folder thumbnail"); }
+            // A slow preview doesn't hold up listings meanwhile.
+            java.util.concurrent.CountDownLatch decoding = new java.util.concurrent.CountDownLatch(1), listed = new java.util.concurrent.CountDownLatch(1);
+            boolean[] overlapped = {false};
+            FileStore slow = new FileStore(List.of(new FileStore.Root("Internal storage", internal.toFile())), (file, size) -> {
+                decoding.countDown();
+                try { overlapped[0] = listed.await(5, java.util.concurrent.TimeUnit.SECONDS); } catch (InterruptedException e) { throw new IOException(e); }
+                return new byte[] {1};
+            });
+            String slowNotes = slow.list("").stream().filter(e -> e.name.equals("notes.txt")).findFirst().get().id;
+            Thread preview = new Thread(() -> { try { slow.thumbnail(slowNotes, 200); } catch (IOException ignored) {} });
+            preview.start();
+            check(decoding.await(5, java.util.concurrent.TimeUnit.SECONDS), "Preview started");
+            slow.list("");
+            listed.countDown();
+            preview.join();
+            check(overlapped[0], "Listing while a preview is made");
             java.nio.file.Files.delete(internal.resolve("Trips"));
 
             FileStore two = new FileStore(List.of(new FileStore.Root("Internal storage", internal.toFile()), new FileStore.Root("SD card", sd.toFile())));

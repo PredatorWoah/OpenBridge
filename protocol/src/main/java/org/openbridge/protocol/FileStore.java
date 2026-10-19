@@ -173,8 +173,10 @@ public final class FileStore implements Store {
         catch (FileAlreadyExistsException e) { throw new IOException("A file or folder with that name already exists"); }
     }
 
-    @Override public synchronized byte[] thumbnail(String fileId, int size) throws IOException {
-        Path file = resolve(fileId);
+    // Not synchronized while decoding: a video's preview can take a second and must not hold up listings and transfers.
+    @Override public byte[] thumbnail(String fileId, int size) throws IOException {
+        Path file;
+        synchronized (this) { file = resolve(fileId); }
         if (thumbnails == null || !Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) throw new IOException("No preview");
         return thumbnails.make(file.toFile(), size);
     }
