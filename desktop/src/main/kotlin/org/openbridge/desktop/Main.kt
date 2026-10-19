@@ -1,4 +1,4 @@
-package org.openbridge.windows
+package org.openbridge.desktop
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image

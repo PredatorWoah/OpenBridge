@@ -1,4 +1,4 @@
-package org.openbridge.windows
+package org.openbridge.desktop
 
 import java.io.File
 import java.util.concurrent.TimeUnit

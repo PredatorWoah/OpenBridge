@@ -1,4 +1,4 @@
-package org.openbridge.windows
+package org.openbridge.desktop
 
 import org.openbridge.protocol.Clipboard
 import org.openbridge.protocol.FileStore
@@ -38,7 +38,7 @@ class BridgeClientTest {
 
     @BeforeTest
     fun start() {
-        base = Files.createTempDirectory("openbridge-windows").toFile()
+        base = Files.createTempDirectory("openbridge-desktop").toFile()
         phone = File(base, "phone").apply { mkdirs() }
         File(phone, "DCIM").mkdirs()
         File(phone, "notes.txt").writeText("hello from the phone")
@@ -58,7 +58,7 @@ class BridgeClientTest {
             override fun write(text: String) { clip = text }
         }
         val outbox = object : Outbox {
-            override fun waitFor(millis: Long) = sent.map { (id, data) -> Store.Entry(id, "IMG_$id.jpg", false, data.size.toLong()) }
+            override fun waitFor(millis: Long, texts: Boolean) = sent.map { (id, data) -> Outbox.Item(id, "IMG_$id.jpg", data.size.toLong(), Outbox.FILE) }
             override fun open(id: String): Store.Read {
                 val data = sent[id] ?: throw java.io.IOException("Already collected")
                 val stream = data.inputStream()

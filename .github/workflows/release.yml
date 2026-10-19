@@ -31,7 +31,7 @@ jobs:
           echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "::error::Version must look like 1.2.3"; exit 1; }
           grep -q "versionName = \"$version\"" android/app/build.gradle.kts || { echo "::error::android versionName is not $version"; exit 1; }
           grep -q "<key>CFBundleShortVersionString</key><string>$version</string>" macos/Info.plist || { echo "::error::macOS version is not $version"; exit 1; }
-          grep -q "orElse(\"$version\")" windows/build.gradle.kts || { echo "::error::Windows version is not $version"; exit 1; }
+          grep -q "orElse(\"$version\")" desktop/build.gradle.kts || { echo "::error::Windows version is not $version"; exit 1; }
           python3 scripts/release-notes.py "$version" > /dev/null
           echo "version=$version" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-java@v4
@@ -134,18 +134,18 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
-      - run: bash scripts/fetch-scrcpy-windows.sh windows/build/app-resources
-      - run: gradle -PdesktopOnly -PappVersion=${{ needs.verify.outputs.version }} :windows:test :windows:createDistributable :windows:packageExe --stacktrace
+      - run: bash scripts/fetch-scrcpy-windows.sh desktop/build/app-resources
+      - run: gradle -PdesktopOnly -PappVersion=${{ needs.verify.outputs.version }} :desktop:test :desktop:createDistributable :desktop:packageExe --stacktrace
       - name: Check the app carries screen mirroring
         run: |
-          app=windows/build/compose/binaries/main/app/OpenBridge
+          app=desktop/build/compose/binaries/main/app/OpenBridge
           test -f "$app/OpenBridge.exe"
           test -f "$app/app/resources/scrcpy/scrcpy.exe" && test -f "$app/app/resources/scrcpy/adb.exe"
       - name: Zip the app (unzip anywhere and run OpenBridge.exe)
         shell: pwsh
-        run: Compress-Archive -Path windows/build/compose/binaries/main/app/OpenBridge -DestinationPath "OpenBridge-${{ needs.verify.outputs.version }}-Windows.zip"
+        run: Compress-Archive -Path desktop/build/compose/binaries/main/app/OpenBridge -DestinationPath "OpenBridge-${{ needs.verify.outputs.version }}-Windows.zip"
       - name: Name the installer
-        run: cp windows/build/compose/binaries/main/exe/OpenBridge-*.exe "OpenBridge-${{ needs.verify.outputs.version }}-Windows-Setup.exe"
+        run: cp desktop/build/compose/binaries/main/exe/OpenBridge-*.exe "OpenBridge-${{ needs.verify.outputs.version }}-Windows-Setup.exe"
       - uses: actions/upload-artifact@v4
         with:
           name: windows

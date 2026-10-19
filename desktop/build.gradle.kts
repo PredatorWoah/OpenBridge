@@ -32,7 +32,7 @@ val appVersion = providers.gradleProperty("appVersion").orElse("0.12.2")
 
 compose.desktop {
     application {
-        mainClass = "org.openbridge.windows.MainKt"
+        mainClass = "org.openbridge.desktop.MainKt"
         nativeDistributions {
             // A setup .exe that installs for the current user only: no administrator prompt.
             targetFormats(TargetFormat.Exe)

@@ -17,11 +17,11 @@ import java.util.UUID
 import kotlin.concurrent.withLock
 
 /**
- * Files sent from the phone with Share › OpenBridge, copied into app-private storage until a paired computer
+ * Files and texts sent from the phone with Share › OpenBridge, copied into app-private storage until a paired computer
  * collects them. The copies are deleted once the computer has them, or when the user clears the list.
  */
 object PhoneOutbox : Outbox {
-    data class Item(val id: String, val name: String, val size: Long)
+    data class Item(val id: String, val name: String, val size: Long, val kind: Int = Outbox.FILE)
 
     private lateinit var folder: File
     private val items = mutableListOf<Item>()
@@ -40,7 +40,7 @@ object PhoneOutbox : Outbox {
         lock.withLock {
             for (i in 0 until saved.length()) {
                 val item = saved.getJSONObject(i)
-                val entry = Item(item.getString("id"), item.getString("name"), item.getLong("size"))
+                val entry = Item(item.getString("id"), item.getString("name"), item.getLong("size"), item.optInt("kind", Outbox.FILE))
                 if (File(folder, entry.id).length() == entry.size) items += entry
             }
             // Copies the index doesn't list (an interrupted share) go.
@@ -73,6 +73,21 @@ object PhoneOutbox : Outbox {
         return added
     }
 
+    /** Queues a text for the computer's clipboard. Returns false when it's empty or too long. */
+    fun addText(text: String): Boolean {
+        val bytes = text.toByteArray(Charsets.UTF_8)
+        if (text.isBlank() || bytes.size > Wire.MAX_CLIPBOARD) return false
+        val id = UUID.randomUUID().toString()
+        File(folder, id).writeBytes(bytes)
+        lock.withLock {
+            items += Item(id, "Text", bytes.size.toLong(), Outbox.TEXT)
+            save()
+            arrived.signalAll()
+        }
+        publish()
+        return true
+    }
+
     fun clear() {
         lock.withLock {
             items.forEach { File(folder, it.id).delete() }
@@ -82,15 +97,16 @@ object PhoneOutbox : Outbox {
         publish()
     }
 
-    override fun waitFor(millis: Long): List<Store.Entry> {
+    override fun waitFor(millis: Long, texts: Boolean): List<Outbox.Item> {
         val deadline = System.currentTimeMillis() + millis
+        fun matching() = items.filter { texts || it.kind == Outbox.FILE }
         lock.withLock {
-            while (items.isEmpty()) {
+            while (matching().isEmpty()) {
                 val left = deadline - System.currentTimeMillis()
                 if (left <= 0) break
                 arrived.await(left, java.util.concurrent.TimeUnit.MILLISECONDS)
             }
-            return items.map { Store.Entry(it.id, it.name, false, it.size) }
+            return matching().map { Outbox.Item(it.id, it.name, it.size, it.kind) }
         }
     }
 
@@ -136,7 +152,7 @@ object PhoneOutbox : Outbox {
 
     private fun save() {
         val array = JSONArray()
-        items.forEach { array.put(JSONObject().put("id", it.id).put("name", it.name).put("size", it.size)) }
+        items.forEach { array.put(JSONObject().put("id", it.id).put("name", it.name).put("size", it.size).put("kind", it.kind)) }
         File(folder, "index.json").writeText(array.toString())
     }
 

@@ -1,4 +1,4 @@
-package org.openbridge.windows
+package org.openbridge.desktop
 
 import org.openbridge.protocol.Pairing
 import org.openbridge.protocol.Wire

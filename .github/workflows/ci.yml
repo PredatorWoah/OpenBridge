@@ -44,7 +44,7 @@ jobs:
           gradle-version: '8.13'
       - run: bash scripts/test-protocol.sh
       - run: python3 scripts/test-tls.py
-      - run: gradle :protocol:check :android:app:assembleDebug :android:app:lintDebug :windows:test --stacktrace
+      - run: gradle :protocol:check :android:app:assembleDebug :android:app:lintDebug :desktop:test --stacktrace
       - name: Check release signing with a throwaway key
         run: |
           keytool -genkeypair -alias ci -keyalg RSA -keysize 2048 -storetype PKCS12 -keystore "$RUNNER_TEMP/ci.p12" \
@@ -97,31 +97,31 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
-      - run: bash scripts/fetch-scrcpy-windows.sh windows/build/app-resources
-      - run: gradle -PdesktopOnly :windows:test :windows:createDistributable :windows:packageExe --stacktrace
+      - run: bash scripts/fetch-scrcpy-windows.sh desktop/build/app-resources
+      - run: gradle -PdesktopOnly :desktop:test :desktop:createDistributable :desktop:packageExe --stacktrace
       - name: Check the app carries screen mirroring
         run: |
-          app=windows/build/compose/binaries/main/app/OpenBridge
+          app=desktop/build/compose/binaries/main/app/OpenBridge
           test -f "$app/OpenBridge.exe"
           test -f "$app/app/resources/scrcpy/scrcpy.exe" && test -f "$app/app/resources/scrcpy/adb.exe"
       - name: Launch the packaged app and check it keeps running
         shell: pwsh
         run: |
-          $app = Start-Process -FilePath windows/build/compose/binaries/main/app/OpenBridge/OpenBridge.exe -PassThru
+          $app = Start-Process -FilePath desktop/build/compose/binaries/main/app/OpenBridge/OpenBridge.exe -PassThru
           Start-Sleep -Seconds 25
           if ($app.HasExited) { Write-Error "OpenBridge.exe exited at startup with code $($app.ExitCode)"; exit 1 }
           Stop-Process -Id $app.Id -Force
       - name: Zip the app
         shell: pwsh
-        run: Compress-Archive -Path windows/build/compose/binaries/main/app/OpenBridge -DestinationPath windows/build/OpenBridge-Windows.zip
+        run: Compress-Archive -Path desktop/build/compose/binaries/main/app/OpenBridge -DestinationPath desktop/build/OpenBridge-Windows.zip
       - name: Check the installer was built
-        run: ls -l windows/build/compose/binaries/main/exe/OpenBridge-*.exe
+        run: ls -l desktop/build/compose/binaries/main/exe/OpenBridge-*.exe
       - uses: actions/upload-artifact@v4
         with:
           name: OpenBridge-Windows
           path: |
-            windows/build/OpenBridge-Windows.zip
-            windows/build/compose/binaries/main/exe/OpenBridge-*.exe
+            desktop/build/OpenBridge-Windows.zip
+            desktop/build/compose/binaries/main/exe/OpenBridge-*.exe
   repository:
     runs-on: ubuntu-latest
     steps:

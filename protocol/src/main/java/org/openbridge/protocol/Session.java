@@ -15,6 +15,10 @@ public final class Session {
     private final Clipboard clipboard;
     private final Outbox outbox;
     private final SecureRandom random = new SecureRandom();
+    private String version = "unknown", device = "Phone";
+
+    /** The highest operation number this phone answers, reported by INFO. */
+    public static final int REVISION = 18;
 
     /** A session that only accepts clients that already hold the secret. */
     public Session(Store store, byte[] secret) { this(store, Trust.single(secret), null, null, null); }
@@ -41,6 +45,13 @@ public final class Session {
     public Session(Store store, Trust trust, byte[] fingerprint, Pairing.Approver approver, Clipboard clipboard, Outbox outbox) {
         this.store = store; this.trust = trust; this.approver = approver; this.clipboard = clipboard; this.outbox = outbox;
         this.fingerprint = fingerprint == null ? null : fingerprint.clone();
+    }
+
+    /** What INFO reports: the phone app's version (like "1.0.0") and the phone's name. Returns this session. */
+    public Session describe(String appVersion, String deviceName) {
+        this.version = appVersion.length() > 64 ? appVersion.substring(0, 64) : appVersion;
+        this.device = deviceName.length() > 128 ? deviceName.substring(0, 128) : deviceName;
+        return this;
     }
 
     /** How long MEASURE may count before answering with what it has. */
@@ -203,20 +214,25 @@ public final class Session {
                     }
                     break;
                 }
-                case 13: {   // OUTBOX: files sent from the phone, waiting up to the given time for one
+                case 13:     // OUTBOX: files sent from the phone, waiting up to the given time for one
+                case 17: {   // OUTBOX ALL: the same with texts, each item with its kind
                     if (outbox == null) throw new IOException("Sending from the phone is not available");
+                    boolean texts = operation == 17;
                     int wait = in.readInt();
                     if (wait < 0 || wait > MAX_WAIT_MILLIS) throw new IOException("Invalid wait");
-                    List<Store.Entry> waiting;
-                    try { waiting = outbox.waitFor(wait); }
+                    List<Outbox.Item> waiting;
+                    try { waiting = outbox.waitFor(wait, texts); }
                     catch (InterruptedException e) { Thread.currentThread().interrupt(); throw new IOException("Sharing stopped", e); }
-                    int count = Math.min(waiting.size(), MAX_OUTBOX);
+                    List<Outbox.Item> items = new java.util.ArrayList<>();
+                    for (Outbox.Item item : waiting)
+                        if (items.size() < MAX_OUTBOX && (item.kind == Outbox.FILE || (texts && item.kind == Outbox.TEXT))) items.add(item);
                     out.writeByte(0); responseStarted = true;
-                    out.writeInt(count);
-                    for (Store.Entry entry : waiting.subList(0, count)) {
-                        Wire.writeString(out, entry.id);
-                        Wire.writeString(out, entry.name);
-                        out.writeLong(entry.size);
+                    out.writeInt(items.size());
+                    for (Outbox.Item item : items) {
+                        Wire.writeString(out, item.id);
+                        Wire.writeString(out, item.name);
+                        if (texts) out.writeByte(item.kind);
+                        out.writeLong(item.size);
                     }
                     break;
                 }
@@ -256,6 +272,13 @@ public final class Session {
                         Wire.writeString(out, hit.location.length() > 1024 ? hit.location.substring(0, 1024) : hit.location);
                     }
                     out.writeBoolean(complete[0]);
+                    break;
+                }
+                case 18: {   // INFO: the phone app's version, the highest operation it answers, and the phone's name
+                    out.writeByte(0); responseStarted = true;
+                    Wire.writeString(out, version);
+                    out.writeInt(REVISION);
+                    Wire.writeString(out, device);
                     break;
                 }
                 default: throw new IOException("Unsupported operation; update OpenBridge on the phone");

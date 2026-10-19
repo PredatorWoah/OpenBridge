@@ -105,6 +105,7 @@ public final class ProtocolTest {
         trustTests();
         editingTests();
         resumeAndOutboxTests();
+        fuzzTests();
         System.out.println("Protocol tests passed: " + checks + " assertions");
     }
 
@@ -408,12 +409,16 @@ public final class ProtocolTest {
 
         // OUTBOX
         Map<String, byte[]> sent = new LinkedHashMap<>();
-        sent.put("out-1", "photo bytes".getBytes(StandardCharsets.UTF_8));
+        Map<String, Integer> kinds = new HashMap<>();
+        sent.put("out-1", "photo bytes".getBytes(StandardCharsets.UTF_8)); kinds.put("out-1", Outbox.FILE);
+        sent.put("text-1", "Hej från telefonen ✓".getBytes(StandardCharsets.UTF_8)); kinds.put("text-1", Outbox.TEXT);
+        boolean[] askedForTexts = {false};
         Outbox outbox = new Outbox() {
-            public List<Store.Entry> waitFor(long millis) {
-                List<Store.Entry> entries = new ArrayList<>();
-                sent.forEach((id, data) -> entries.add(new Store.Entry(id, "IMG_" + id + ".jpg", false, data.length)));
-                return entries;
+            public List<Outbox.Item> waitFor(long millis, boolean texts) {
+                askedForTexts[0] = texts;
+                List<Outbox.Item> items = new ArrayList<>();
+                sent.forEach((id, data) -> items.add(new Outbox.Item(id, kinds.get(id) == TEXT ? "Text" : "IMG_" + id + ".jpg", data.length, kinds.get(id))));
+                return items;
             }
             public Store.Read open(String id) throws IOException {
                 byte[] data = sent.get(id);
@@ -425,14 +430,131 @@ public final class ProtocolTest {
         };
         Session phone = new Session(new MemoryStore(), Trust.single(SECRET), null, null, null, outbox);
         DataInputStream waiting = serve(phone, simple(13, "", out -> out.writeInt(1000)));
-        check(waiting.readByte() == 0 && waiting.readInt() == 1, "One file waiting");
+        check(waiting.readByte() == 0 && waiting.readInt() == 1 && !askedForTexts[0], "Older computers see only the waiting file");
         check(Wire.readString(waiting, 128).equals("out-1") && Wire.readString(waiting, 255).equals("IMG_out-1.jpg") && waiting.readLong() == 11, "Outbox entry");
+        DataInputStream all = serve(phone, simple(17, "", out -> out.writeInt(1000)));
+        check(all.readByte() == 0 && all.readInt() == 2 && askedForTexts[0], "OUTBOX ALL lists files and texts");
+        check(Wire.readString(all, 128).equals("out-1") && Wire.readString(all, 255).equals("IMG_out-1.jpg") && all.readByte() == Outbox.FILE && all.readLong() == 11, "File item with its kind");
+        int textSize = sent.get("text-1").length;
+        check(Wire.readString(all, 128).equals("text-1") && Wire.readString(all, 255).equals("Text") && all.readByte() == Outbox.TEXT && all.readLong() == textSize, "Text item with its kind");
+        DataInputStream text = serve(phone, simple(14, "text-1", out -> out.writeLong(0)));
+        check(text.readByte() == 0 && text.readLong() == textSize && new String(text.readAllBytes(), StandardCharsets.UTF_8).equals("Hej från telefonen ✓"), "A text is read like a file");
+        check(serve(phone, simple(15, "text-1", out -> {})).readByte() == 0 && !sent.containsKey("text-1"), "A collected text is dropped");
         DataInputStream got = serve(phone, simple(14, "out-1", out -> out.writeLong(6)));
         check(got.readByte() == 0 && got.readLong() == 11 && new String(got.readAllBytes(), StandardCharsets.UTF_8).equals("bytes"), "Outbox file from an offset");
         check(serve(phone, simple(15, "out-1", out -> {})).readByte() == 0 && sent.isEmpty(), "Collected files are dropped");
         check(serve(phone, simple(14, "out-1", out -> out.writeLong(0))).readByte() == 1, "A collected file is gone");
         check(serve(phone, simple(13, "", out -> out.writeInt(60_000))).readByte() == 1, "Waits are capped");
+        check(serve(phone, simple(17, "", out -> out.writeInt(-1))).readByte() == 1, "Negative waits refused");
         check(serve(memory, simple(13, "", out -> out.writeInt(0))).readByte() == 1, "No outbox unless shared");
+        check(serve(memory, simple(17, "", out -> out.writeInt(0))).readByte() == 1, "No OUTBOX ALL unless shared");
+
+        // INFO
+        DataInputStream info = serve(new Session(memory, SECRET).describe("1.0.0", "vivo X300 Pro"), simple(18, "", out -> {}));
+        check(info.readByte() == 0 && Wire.readString(info, 64).equals("1.0.0") && info.readInt() == Session.REVISION
+            && Wire.readString(info, 128).equals("vivo X300 Pro") && info.available() == 0, "INFO reports version, revision and name");
+        DataInputStream unnamed = serve(new Session(memory, SECRET).describe("x".repeat(100), "y".repeat(300)), simple(18, "", out -> {}));
+        check(unnamed.readByte() == 0 && Wire.readString(unnamed, 64).length() == 64 && unnamed.readInt() == 18 && Wire.readString(unnamed, 128).length() == 128, "INFO strings are bounded");
+    }
+
+    /**
+     * Random and half-valid requests: the phone must answer each with a status or close the connection (IOException),
+     * never crash with another exception, and never wait. OB01 is frozen from 1.0, so this guards every operation.
+     */
+    private static void fuzzTests() throws Exception {
+        Random random = new Random(20261019);
+        Outbox outbox = new Outbox() {
+            public List<Outbox.Item> waitFor(long millis, boolean texts) { return List.of(new Outbox.Item("t", "Text", 2, TEXT)); }
+            public Store.Read open(String id) throws IOException {
+                if (!id.equals("t")) throw new IOException("Already collected");
+                InputStream stream = new ByteArrayInputStream(new byte[] {'h', 'i'});
+                return new Store.Read() { public long size() { return 2; } public InputStream stream() { return stream; } public void close() {} };
+            }
+            public void done(String id) throws IOException { if (!id.equals("t")) throw new IOException("Already collected"); }
+        };
+        Clipboard clipboard = new Clipboard() { public String read() { return "clip"; } public void write(String text) {} };
+        byte[] fingerprint = new byte[32];
+        Session memory = new Session(new MemoryStore(), Trust.single(SECRET), fingerprint, code -> false, clipboard, outbox).describe("1.0.0", "Fuzz");
+        int requests = fuzz(memory, random, List.of("", "folder-id", "file:hello.txt", "t"), 25_000);
+
+        java.nio.file.Path base = java.nio.file.Files.createTempDirectory("openbridge-fuzz");
+        try {
+            java.nio.file.Path internal = java.nio.file.Files.createDirectories(base.resolve("internal"));
+            java.nio.file.Files.createDirectories(internal.resolve("DCIM/Camera"));
+            java.nio.file.Files.write(internal.resolve("DCIM/Camera/a.jpg"), new byte[300]);
+            java.nio.file.Files.writeString(internal.resolve("notes.txt"), "hello");
+            FileStore files = new FileStore(List.of(new FileStore.Root("Internal storage", internal.toFile())));
+            List<String> ids = new ArrayList<>(List.of(""));
+            for (Store.Entry entry : files.list("")) { ids.add(entry.id); if (entry.directory) files.list(entry.id).forEach(e -> ids.add(e.id)); }
+            Session session = new Session(files, Trust.single(SECRET), fingerprint, code -> false, clipboard, outbox);
+            requests += fuzz(session, random, ids, 10_000);
+            // Whatever the requests did, nothing escaped the shared folder.
+            try (var outside = java.nio.file.Files.list(base)) { check(outside.count() == 1, "Fuzzing stayed inside the shared folder"); }
+        } finally {
+            try (var walk = java.nio.file.Files.walk(base)) { walk.sorted(Comparator.reverseOrder()).forEach(p -> p.toFile().delete()); }
+        }
+        check(requests == 35_000, "Fuzzed every request");
+    }
+
+    private static int fuzz(Session session, Random random, List<String> ids, int count) {
+        for (int i = 0; i < count; i++) {
+            byte[] request;
+            try { request = fuzzRequest(random, ids); } catch (IOException e) { throw new AssertionError(e); }
+            long started = System.nanoTime();
+            try {
+                ByteArrayOutputStream reply = new ByteArrayOutputStream();
+                session.serve(new ByteArrayInputStream(request), reply);
+                byte[] answer = reply.toByteArray();
+                if (answer.length > 0 && answer[0] != 0 && answer[0] != 1)
+                    throw new AssertionError("Request " + HexFormat.of().formatHex(request) + " got a reply without a status");
+            } catch (IOException expected) {
+                // A dropped connection is a valid answer.
+            } catch (RuntimeException | Error e) {
+                throw new AssertionError("Request " + HexFormat.of().formatHex(request) + " crashed the phone: " + e, e);
+            }
+            if (System.nanoTime() - started > 2_000_000_000L)
+                throw new AssertionError("Request " + HexFormat.of().formatHex(request) + " took over 2 seconds");
+        }
+        return count;
+    }
+
+    private static byte[] fuzzRequest(Random random, List<String> ids) throws IOException {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        DataOutputStream out = new DataOutputStream(bytes);
+        int mode = random.nextInt(10);
+        if (mode == 0) { byte[] noise = new byte[random.nextInt(80)]; random.nextBytes(noise); return noise; }
+        if (mode == 1) {   // pairing, old and named
+            out.write(random.nextBoolean() ? Pairing.MAGIC : Pairing.MAGIC2);
+            byte[] noise = new byte[random.nextInt(200)]; random.nextBytes(noise); out.write(noise);
+            return bytes.toByteArray();
+        }
+        out.write(Wire.MAGIC);
+        out.write(mode == 2 ? new byte[32] : SECRET);
+        out.writeByte(random.nextInt(5) == 0 ? random.nextInt(256) : 1 + random.nextInt(Session.REVISION));
+        fuzzString(out, random, ids);
+        int fields = random.nextInt(6);
+        for (int f = 0; f < fields; f++) {
+            switch (random.nextInt(6)) {
+                case 0: out.writeInt(random.nextInt(4) == 0 ? random.nextInt() : random.nextInt(2_000)); break;
+                case 1: out.writeLong(random.nextInt(4) == 0 ? random.nextLong() : random.nextInt(400)); break;
+                case 2: fuzzString(out, random, ids); break;
+                case 3: out.writeByte(random.nextInt(256)); break;
+                default: { byte[] noise = new byte[random.nextInt(64)]; random.nextBytes(noise); out.write(noise); }
+            }
+        }
+        byte[] request = bytes.toByteArray();
+        // Sometimes the connection drops partway.
+        return random.nextInt(4) == 0 ? Arrays.copyOf(request, random.nextInt(request.length + 1)) : request;
+    }
+
+    private static void fuzzString(DataOutputStream out, Random random, List<String> ids) throws IOException {
+        switch (random.nextInt(6)) {
+            case 0: Wire.writeString(out, ids.get(random.nextInt(ids.size()))); break;
+            case 1: Wire.writeString(out, new String[] {"..", ".", "a/b", "名前.txt", "x".repeat(300), "\u0000", " "}[random.nextInt(7)]); break;
+            case 2: out.writeInt(random.nextInt()); break;   // any length, even negative or huge
+            case 3: { byte[] invalid = new byte[random.nextInt(20)]; random.nextBytes(invalid); out.writeInt(invalid.length); out.write(invalid); break; }
+            default: Wire.writeString(out, "f" + random.nextInt(50) + (random.nextBoolean() ? ".jpg" : ""));
+        }
     }
 
     interface Body { void write(DataOutputStream out) throws IOException; }

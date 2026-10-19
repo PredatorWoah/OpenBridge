@@ -41,7 +41,7 @@ for required in ["LICENSE", "SECURITY.md", "README.md", "docs/protocol.md", "doc
                  "macos/AppIcon.icns", "assets/icon/icon.svg",
                  "android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml",
                  "third_party/scrcpy/LICENSE", "third_party/scrcpy/README.md", "README.zh-CN.md",
-                 "windows/build.gradle.kts", "windows/src/main/resources/OpenBridge.ico",
+                 "desktop/build.gradle.kts", "desktop/src/main/resources/OpenBridge.ico",
                  "shared/compose/org/openbridge/ui/Sun.kt"]:
     assert (root / required).is_file(), required
 # The bundled scrcpy server is pinned, and its notice names the same file and version as the Swift client.
@@ -58,7 +58,7 @@ for script in (root / "scripts").glob("*.sh"):
 # Every app version must have a changelog entry before it can be released.
 android_version = re.search(r'versionName = "([^"]+)"', (root / "android/app/build.gradle.kts").read_text()).group(1)
 assert android_version == info["CFBundleShortVersionString"], "Android and macOS versions differ"
-windows_version = re.search(r'orElse\("([^"]+)"\)', (root / "windows/build.gradle.kts").read_text()).group(1)
+windows_version = re.search(r'orElse\("([^"]+)"\)', (root / "desktop/build.gradle.kts").read_text()).group(1)
 assert windows_version == android_version, "Android and Windows versions differ"
 subprocess.run([sys.executable, str(root / "scripts/release-notes.py"), android_version], check=True, stdout=subprocess.DEVNULL)
 subprocess.run(["git", "diff", "--check"], cwd=root, check=True)
