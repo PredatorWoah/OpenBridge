@@ -9,7 +9,27 @@ import java.util.concurrent.TimeUnit
  */
 object Tools {
     private val exe = if (Platform.windows) ".exe" else ""
-    private val bundled: File? = System.getProperty("compose.application.resources.dir")?.let { File(it, "scrcpy") }
+    private val bundled: File? by lazy { System.getProperty("compose.application.resources.dir")?.let { File(it, "scrcpy") }?.let(::runnable) }
+
+    /**
+     * The .deb's packaging drops the execute bits of bundled files, and /opt is read-only for the user: then the
+     * tools run from a copy in ~/.cache/OpenBridge/scrcpy, made once per version.
+     */
+    private fun runnable(folder: File): File {
+        val program = File(folder, "scrcpy$exe")
+        if (Platform.windows || !program.isFile || program.canExecute()) return folder
+        val cache = File(System.getenv("XDG_CACHE_HOME")?.takeIf { it.startsWith("/") } ?: "${System.getProperty("user.home")}/.cache", "OpenBridge/scrcpy")
+        return runCatching {
+            val stamp = File(cache, ".version")
+            if (stamp.takeIf { it.isFile }?.readText() != AppVersion.current) {
+                cache.deleteRecursively()
+                folder.copyRecursively(cache, overwrite = true)
+                listOf("scrcpy", "adb").forEach { File(cache, it).setExecutable(true, true) }
+                stamp.writeText(AppVersion.current)
+            }
+            cache
+        }.getOrDefault(folder)
+    }
 
     val scrcpy: File? get() = bundled?.resolve("scrcpy$exe")?.takeIf { it.isFile } ?: onPath("scrcpy$exe")
     val adb: File? get() = bundled?.resolve("adb$exe")?.takeIf { it.isFile } ?: onPath("adb$exe")

@@ -19,5 +19,13 @@ checks it before it is packaged next to the app:
 - Contents keep their own licenses and notices, shipped unmodified in the app's `scrcpy` folder (scrcpy and its
   libraries under Apache-2.0, LGPL and others; adb under Apache-2.0 from the Android SDK platform tools).
 
-OpenBridge does not modify the server or the Windows build. The Mac app's own client for its protocol (in
+The Linux app (the .deb and the portable tar.gz, x86_64) bundles the official **scrcpy for Linux** build the same
+way, with the server, the scrcpy client and adb. `scripts/fetch-scrcpy-linux.sh` downloads it from the same release
+and checks it before it is packaged next to the app (a copy without it uses `scrcpy` and `adb` on PATH):
+
+- File: `scrcpy-linux-x86_64-v5.0.1.tar.gz`
+- SHA-256: `9f969d30cc574816077edecda65719c1c70b0aee1df1ba5fa00779ac07b8fd6e` (as published in scrcpy's `doc/linux.md`)
+- Contents keep their own licenses and notices, shipped unmodified in the app's `scrcpy` folder.
+
+OpenBridge does not modify the server or the Windows and Linux builds. The Mac app's own client for its protocol (in
 `macos/Sources/BridgeCore/Scrcpy.swift`) was written for OpenBridge.

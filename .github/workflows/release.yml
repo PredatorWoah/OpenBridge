@@ -31,7 +31,7 @@ jobs:
           echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "::error::Version must look like 1.2.3"; exit 1; }
           grep -q "versionName = \"$version\"" android/app/build.gradle.kts || { echo "::error::android versionName is not $version"; exit 1; }
           grep -q "<key>CFBundleShortVersionString</key><string>$version</string>" macos/Info.plist || { echo "::error::macOS version is not $version"; exit 1; }
-          grep -q "orElse(\"$version\")" desktop/build.gradle.kts || { echo "::error::Windows version is not $version"; exit 1; }
+          grep -q "orElse(\"$version\")" desktop/build.gradle.kts || { echo "::error::Desktop (Windows and Linux) version is not $version"; exit 1; }
           python3 scripts/release-notes.py "$version" > /dev/null
           echo "version=$version" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-java@v4
@@ -153,8 +153,41 @@ jobs:
             OpenBridge-*-Windows.zip
             OpenBridge-*-Windows-Setup.exe
           if-no-files-found: error
+  linux:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+      - name: Tools for the .deb
+        run: sudo apt-get update && sudo apt-get install -y fakeroot
+      - run: bash scripts/fetch-scrcpy-linux.sh desktop/build/app-resources
+      - run: gradle -PdesktopOnly -PappVersion=${{ needs.verify.outputs.version }} :desktop:test :desktop:createDistributable :desktop:packageDeb --stacktrace
+      - name: Check the app carries screen mirroring
+        run: |
+          app=desktop/build/compose/binaries/main/app/OpenBridge
+          test -x "$app/bin/OpenBridge"
+          test -x "$app/lib/app/resources/scrcpy/scrcpy" && test -x "$app/lib/app/resources/scrcpy/adb"
+      - name: Pack the portable app (unpack anywhere and run OpenBridge/bin/OpenBridge)
+        run: tar -C desktop/build/compose/binaries/main/app -czf "OpenBridge-${{ needs.verify.outputs.version }}-Linux-x86_64.tar.gz" OpenBridge
+      - name: Name the package
+        run: cp desktop/build/compose/binaries/main/deb/openbridge_*.deb "OpenBridge-${{ needs.verify.outputs.version }}-Linux-amd64.deb"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: |
+            OpenBridge-*-Linux-x86_64.tar.gz
+            OpenBridge-*-Linux-amd64.deb
+          if-no-files-found: error
   publish:
-    needs: [verify, android, macos, windows]
+    needs: [verify, android, macos, windows, linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
