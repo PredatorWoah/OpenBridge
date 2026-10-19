@@ -85,11 +85,23 @@ object Platform {
         if (!process.waitFor(seconds, TimeUnit.SECONDS)) { process.destroyForcibly(); null } else process.exitValue()
     }.getOrNull()
 
-    /** A short command's output, or null. */
+    /**
+     * A short command's output, or null. The output is read on its own thread: reading it first would wait for as
+     * long as the command hangs (adb with a stuck phone), and the time limit would never apply.
+     */
     fun output(command: List<String>, seconds: Long = 5): String? = runCatching {
         val process = ProcessBuilder(command).redirectErrorStream(true).start()
-        val text = process.inputStream.bufferedReader().readText()
-        if (!process.waitFor(seconds, TimeUnit.SECONDS)) { process.destroyForcibly(); null } else text
+        val text = StringBuffer()
+        val reader = Thread {
+            runCatching {
+                process.inputStream.bufferedReader().use { input ->
+                    val buffer = CharArray(4096)
+                    while (true) { val read = input.read(buffer); if (read < 0) break; text.append(buffer, 0, read) }
+                }
+            }
+        }.apply { isDaemon = true; start() }
+        if (!process.waitFor(seconds, TimeUnit.SECONDS)) { process.destroyForcibly(); null }
+        else { reader.join(1_000); text.toString() }
     }.getOrNull()
 
     /** This computer's name, shown on the phone when pairing and in its list of trusted computers. */
