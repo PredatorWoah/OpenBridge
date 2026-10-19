@@ -19,34 +19,6 @@ import kotlin.math.pow
 import kotlin.math.sin
 import kotlin.math.sqrt
 
-object Palette {
-    val night = Color(0xFF0D0B26)
-    val dusk = Color(0xFF1D1546)
-    val plum = Color(0xFF3A2470)
-    val violet = Color(0xFF6D5DFC)
-    val pink = Color(0xFFFF5C8A)
-    val amber = Color(0xFFFFB347)
-    val sun = Color(0xFFFFD166)
-    val cream = Color(0xFFFFF6E0)
-    val ok = Color(0xFF3DDC97)
-    val muted = Color(0xFFB4ABD6)
-    val fg = Color(0xFFF4F0FF)
-    val sunset = Brush.horizontalGradient(0f to violet, 0.55f to pink, 1f to amber)
-
-    class SunColors(val core: Color, val middle: Color, val edge: Color, val glow: Color)
-
-    /** Grey glass when nothing is connected, gold when connected. */
-    fun sunColors(k: Float): SunColors {
-        fun mix(a: Int, b: Int) = Color(
-            red = ((a shr 16 and 255) + ((b shr 16 and 255) - (a shr 16 and 255)) * k) / 255f,
-            green = ((a shr 8 and 255) + ((b shr 8 and 255) - (a shr 8 and 255)) * k) / 255f,
-            blue = ((a and 255) + ((b and 255) - (a and 255)) * k) / 255f)
-        // Grey is moonlight: bright silver-lavender glass with a soft white glow, never a dark rim.
-        return SunColors(mix(0xFFFFFF, 0xFFFDF0), mix(0xE6E3F2, 0xFFE08A), mix(0xB4B0CC, 0xFFB347),
-            mix(0xF0EEFF, 0xFFC85A).copy(alpha = 0.3f + 0.65f * k))
-    }
-}
-
 /**
  * The sun's motion around the arch. The sun chases a moving target on a spring, so the lag, overshoot
  * and wobble come from the physics. The Mac app's sun uses the same values.
@@ -59,6 +31,8 @@ class SunEngine {
     var state = State.IDLE; private set
     var angle = 0.0; private set          // degrees, 0 = top, clockwise
     var velocity = 0.0; private set       // degrees per second
+    /** Seconds since the engine started, for looks that keep moving. */
+    val time: Double get() = clock
     var jelly = 0.0; private set
     var warmth = 0.0; private set         // 0 grey, 1 gold
     val trail = ArrayDeque<Double>()
@@ -153,7 +127,7 @@ class SunEngine {
     }
 }
 
-private fun ease(t: Double) = if (t < 0.5) 4 * t * t * t else 1 - (-2 * t + 2).pow(3) / 2
+internal fun ease(t: Double) = if (t < 0.5) 4 * t * t * t else 1 - (-2 * t + 2).pow(3) / 2
 
 /** Draws the arch around [c]: a glass ring of radius [r], the horizon bar and the moving sun. */
 fun DrawScope.drawSunArch(e: SunEngine, f: SunEngine.Frame, c: Offset, r: Float, rippleReach: Float) {

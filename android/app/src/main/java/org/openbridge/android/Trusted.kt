@@ -27,8 +27,6 @@ object Trusted : Trust {
     private val random = SecureRandom()
     /** For the screen: the trusted computers, most recently used first. */
     var computers by mutableStateOf(emptyList<Computer>()); private set
-    /** Told the name of a trusted computer each time it makes a request (on a server thread). */
-    @Volatile var onSeen: (String) -> Unit = {}
 
     fun attach(app: Context) {
         if (::context.isInitialized) return
@@ -63,7 +61,6 @@ object Trusted : Trust {
             }
             publish()
         }
-        onSeen(match.computer.name)
         return match.computer.name
     }
 

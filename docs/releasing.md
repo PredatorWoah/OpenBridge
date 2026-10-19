@@ -1,9 +1,10 @@
 # Releasing
 
-1. Add a section for the new version to `CHANGELOG.md` and set the same version in `android/app/build.gradle.kts` (`versionName`, and increase `versionCode`) and `macos/Info.plist` (`CFBundleShortVersionString`, and increase `CFBundleVersion`).
-2. Merge to `main`, then run **Actions → Release → Run workflow** with the version (for example `1.0.0`).
+1. Add a section for the new version to `CHANGELOG.md` and set the same version in `android/app/build.gradle.kts` (`versionName`, and increase `versionCode`), `macos/Info.plist` (`CFBundleShortVersionString`, and increase `CFBundleVersion`) and `desktop/build.gradle.kts` (the `appVersion` default).
+2. Run the native builds on the release commit (**Actions → Build and protocol checks → Run workflow**) and the phone checklist in [verification.md](verification.md#before-a-release).
+3. Merge to `main`, then run **Actions → Release → Run workflow** with the version (for example `1.0.0`).
 
-The workflow checks the versions and changelog, runs the tests, builds both apps and publishes them with checksums. From 1.0.0 it refuses to publish without the Android release key below; 0.x previews fall back to a debug-signed APK with a warning.
+The workflow checks the versions and changelog, runs the tests, builds the Android, Mac, Windows and Linux apps and publishes them with `SHA256SUMS.txt`, which the apps' **Update** button checks every download against. From 1.0.0 it refuses to publish without the Android release key below; 0.x previews fall back to a debug-signed APK with a warning.
 
 ## Android release key (one-time setup)
 

@@ -1,6 +1,8 @@
 # OB01 file-transfer protocol
 
-Transport: one request per **TLS** TCP connection, TLS 1.2 minimum. Pin the SHA-256 digest of the server's complete leaf certificate DER, learned by pairing (below). A self-signed certificate is expected. Never send the secret before successful pin verification. The server is reachable only through its selected private IPv4 address (Wi-Fi, or a USB tethering interface) and port: 41987 when it is free, otherwise an ephemeral one.
+Transport: one request per **TLS** TCP connection, TLS 1.2 minimum. Pin the SHA-256 digest of the server's complete leaf certificate DER, learned by pairing (below). A self-signed certificate is expected. Never send the secret before successful pin verification. The server is reachable only through private IPv4 addresses (Wi-Fi, a USB tethering interface, or the phone's own hotspot) and port: 41987 when it is free, otherwise an ephemeral one.
+
+**Fast USB.** While sharing, the phone also listens on its loopback address `127.0.0.1`, on the first free port of 41987 to 41990. Nothing on the network reaches it; a computer reaches it through USB debugging, by opening the ADB service `tcp:<port>` (what `adb forward` does). The connection is the same TLS with the same pin and secret, so a computer tries the four ports in order and keeps the one whose certificate is the phone's. When nothing answers, the computer may start sharing by launching the app over ADB with `am start -n org.openbridge.android/.MainActivity -a org.openbridge.android.SHARE_USB`; the phone then shares over the cable only (loopback), until the user stops it or the cable comes out. It does so only while a cable with USB debugging is plugged in and storage access is already granted; otherwise the app just opens with a note, and the user starts sharing there.
 
 All integers are big endian. A string is a signed 32-bit nonnegative UTF-8 byte length followed by exactly that many bytes, strictly decoded. Strings are not Java modified UTF-8. Each connection starts with:
 
@@ -8,7 +10,7 @@ All integers are big endian. A string is a signed 32-bit nonnegative UTF-8 byte 
 | --- | --- |
 | Version | four ASCII bytes `OB01` |
 | Pairing secret | 32 raw bytes, received during pairing (each computer has its own) |
-| Operation | one byte: `1` LIST, `2` GET, `3` PUT, `4` MKDIR, `5` THUMB, `6` RESUME, `7` CLIPBOARD GET, `8` CLIPBOARD SET, `9` DELETE, `10` RENAME, `11` MEASURE, `12` PUT RESUMABLE, `13` OUTBOX, `14` OUTBOX GET, `15` OUTBOX DONE, `16` SEARCH |
+| Operation | one byte: `1` LIST, `2` GET, `3` PUT, `4` MKDIR, `5` THUMB, `6` RESUME, `7` CLIPBOARD GET, `8` CLIPBOARD SET, `9` DELETE, `10` RENAME, `11` MEASURE, `12` PUT RESUMABLE, `13` OUTBOX, `14` OUTBOX GET, `15` OUTBOX DONE, `16` SEARCH, `17` OUTBOX ALL, `18` INFO |
 | Document ID | string, maximum 128 bytes; empty for root |
 
 Authentication is checked before the operation reaches storage. There is no unauthenticated metadata endpoint. A status is one byte: `0` success, or `1` followed by an error string (client limit 512 bytes). Any unexpected status, length, EOF, TLS failure, or timeout means failure. Close the connection; do not parse additional commands.
@@ -95,12 +97,24 @@ Files the user sent from the phone (Share › OpenBridge), waiting for a compute
 
 ## SEARCH (16)
 
-ID names a previously listed folder, or the empty root. After the common header, send the text to find (a string of 1 to 255 bytes; surrounding spaces are ignored). The phone looks through every folder below for files and folders whose names contain the text, ignoring case, for up to 8 seconds, 50,000 items or 500 hits. Reply: status; on success, a 32-bit count, then for each hit its ID, name, directory byte and size (as in LIST) and its folder as a string of at most 1,024 bytes: folder names joined by `/`, relative to the searched folder (empty for a hit directly inside it); then a byte, `1` when the search finished or `0` when it stopped early. Hit IDs work like listed ones.
+ID names a previously listed folder, or the empty root. After the common header, send the text to find (a string of 1 to 255 bytes; surrounding spaces are ignored). The phone looks through every folder below for files and folders whose names contain the text, ignoring case, for up to 8 seconds, 50,000 items or 500 hits. Reply: status; on success, a 32-bit count, then for each hit its ID, name, directory byte and size (as in LIST) and its folder as a string of at most 1,024 bytes: folder names joined by `/`, relative to the searched folder (empty for a hit directly inside it); then a byte, `1` when the search finished or `0` when it stopped early. Hit IDs work like listed ones. When sharing the whole phone, the phone first asks Android's media index, so most hits come first and at once, then walks the folders for files the index doesn't know; a hit is never listed twice.
 
 ## Discovery
 
-While sharing over Wi-Fi, the phone announces itself with DNS-SD as `_openbridge._tcp` under its device name, with TXT keys `ip`, `port`, `v=1` and, from 0.11.0, `id`: the first 8 bytes of `F` in lowercase hex, so a computer recognizes a phone it saved even when its address changed. The Mac lists these so nobody types an address. The announcement reveals only the name, address and port that the phone would otherwise show on screen; pairing still needs the 6-digit code. It stops when sharing stops.
+While sharing over Wi-Fi (or, when there is no Wi-Fi, over its own hotspot), the phone announces itself with DNS-SD as `_openbridge._tcp` under its device name, with TXT keys `ip`, `port`, `v=1` and, from 0.11.0, `id`: the first 8 bytes of `F` in lowercase hex, so a computer recognizes a phone it saved even when its address changed. The Mac lists these so nobody types an address. The announcement reveals only the name, address and port that the phone would otherwise show on screen; pairing still needs the 6-digit code. It stops when sharing stops.
+
+## OUTBOX ALL (17)
+
+Like OUTBOX, for computers that also take texts (from 0.13.0). Same request. Reply: status; on success, a 32-bit count (0 to 1,000) and that many items of ID, name, a kind byte (`0` file, `1` text) and signed 64-bit size. A text's name is a label such as `Text`; its content, read with OUTBOX GET, is UTF-8 of at most 262,144 bytes, meant for the computer's clipboard. OUTBOX DONE drops texts like files. OUTBOX (13) never lists texts, and waits only for files, so computers from before 0.13.0 keep working.
+
+## INFO (18)
+
+The document ID is empty. Reply: status; on success, the phone app's version (string, at most 64 bytes, like `1.0.0`), a signed 32-bit revision (the highest operation number the phone answers: 18 from 0.13.0) and the phone's name (string, at most 128 bytes). A computer can check the revision before offering an operation, instead of waiting for the "update OpenBridge on the phone" error.
+
+## Stability
+
+OB01 is frozen from 1.0.0: operations 1 to 18, their requests, replies and limits never change. A 1.x computer works with any 1.x phone. New features get new operation numbers, listed here, and a computer checks INFO's revision (or handles the "Unsupported operation; update OpenBridge on the phone" error) before using one. Anything that can't fit that rule needs a new version magic instead of `OB01`. The Java server is fuzzed with random and half-valid requests on every build (`ProtocolTest`), so a malformed request is answered with an error or a closed connection, never a crash.
 
 ## Evolution
 
-Unknown operation/version fails closed; servers older than 0.9.6 answer operations 4–8 with an error, and those older than 0.11.0 operations 9–11 and OBP2, and those older than 0.12.0 operations 12–15 (clients then upload with PUT and don't collect files), and those older than 0.12.1 operation 16, and the computer asks to update the phone app. Future companion features should use a new version/capability negotiation, with explicit permissions, rather than adding implicit access to this file capability. OB01 has no arbitrary path access, background synchronization, public hosting, or command execution. (Screen mirroring is separate: it uses USB debugging over the cable, not this protocol; see SECURITY.md.)
+Unknown operation/version fails closed; servers older than 0.9.6 answer operations 4–8 with an error, and those older than 0.11.0 operations 9–11 and OBP2, and those older than 0.12.0 operations 12–15 (clients then upload with PUT and don't collect files), and those older than 0.12.1 operation 16, and those older than 0.13.0 operations 17 and 18 (clients then collect only files with OUTBOX), and the computer asks to update the phone app. Future companion features should use a new version/capability negotiation, with explicit permissions, rather than adding implicit access to this file capability. OB01 has no arbitrary path access, background synchronization, public hosting, or command execution. (Screen mirroring is separate: it uses USB debugging over the cable, not this protocol; see SECURITY.md.)

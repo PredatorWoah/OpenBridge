@@ -102,10 +102,96 @@ public final class ProtocolTest {
         pairingTests(store);
         extensionTests();
         fileStoreTests();
+        indexTests();
         trustTests();
         editingTests();
         resumeAndOutboxTests();
+        fuzzTests();
         System.out.println("Protocol tests passed: " + checks + " assertions");
+    }
+
+    /** Whole-phone search starts with the platform's file index (MediaStore), then walks for what it doesn't know. */
+    private static void indexTests() throws Exception {
+        java.nio.file.Path base = java.nio.file.Files.createTempDirectory("openbridge-index");
+        try {
+            java.nio.file.Path internal = java.nio.file.Files.createDirectories(base.resolve("internal"));
+            java.nio.file.Path camera = java.nio.file.Files.createDirectories(internal.resolve("DCIM/Camera"));
+            java.nio.file.Path music = java.nio.file.Files.createDirectories(internal.resolve("Music"));
+            java.nio.file.Path docs = java.nio.file.Files.createDirectories(internal.resolve("Docs"));
+            java.nio.file.Path outside = java.nio.file.Files.createDirectories(base.resolve("outside"));
+            java.nio.file.Files.write(camera.resolve("Sunset.jpg"), new byte[321]);
+            java.nio.file.Files.write(music.resolve("sunrise.mp3"), new byte[12]);
+            java.nio.file.Files.write(docs.resolve("notes-sun.txt"), new byte[5]);   // not in the index
+            java.nio.file.Files.write(camera.resolve("other.jpg"), new byte[1]);
+            java.nio.file.Files.write(internal.resolve(Names.TEMPORARY_PREFIX + "sun"), new byte[1]);
+            java.nio.file.Files.write(outside.resolve("sunny.txt"), new byte[1]);
+            boolean linked = true;
+            try { java.nio.file.Files.createSymbolicLink(internal.resolve("link-sun.txt"), outside.resolve("sunny.txt")); } catch (Exception e) { linked = false; }
+            // An index that is out of date and ignores the folder it was asked about, so the store must check every hit.
+            List<File> indexed = new ArrayList<>(List.of(camera.resolve("Sunset.jpg").toFile(), music.resolve("sunrise.mp3").toFile(),
+                outside.resolve("sunny.txt").toFile(), internal.resolve("link-sun.txt").toFile(), internal.resolve(Names.TEMPORARY_PREFIX + "sun").toFile(),
+                internal.resolve("old-sun.jpg").toFile(), camera.resolve("other.jpg").toFile(), internal.resolve("DCIM/Camera/../Camera/Sunset.jpg").toFile()));
+            List<File> asked = new ArrayList<>();
+            FileStore.Index index = (query, folder, limit) -> { asked.add(folder); return indexed; };
+            FileStore files = new FileStore(List.of(new FileStore.Root("Internal storage", internal.toFile())), null, index);
+
+            // idOf hands out the same ID as the listing, and nothing outside, hidden or linked.
+            String cameraId = byName(files.list(byName(files.list("")).get("DCIM").id)).get("Camera").id;
+            String sunsetId = byName(files.list(cameraId)).get("Sunset.jpg").id;
+            check(sunsetId.equals(files.idOf(camera.resolve("Sunset.jpg").toFile())), "idOf matches the listing's ID");
+            check(sunsetId.equals(files.idOf(internal.resolve("DCIM/../DCIM/Camera/Sunset.jpg").toFile())), "idOf normalizes the path");
+            check(cameraId.equals(files.idOf(camera.toFile())), "idOf of a folder");
+            check(files.idOf(outside.resolve("sunny.txt").toFile()) == null, "Nothing outside the storage");
+            check(!linked || files.idOf(internal.resolve("link-sun.txt").toFile()) == null, "No symbolic links");
+            check(files.idOf(internal.resolve(Names.TEMPORARY_PREFIX + "sun").toFile()) == null, "No uploads in progress");
+            check(files.idOf(internal.resolve("old-sun.jpg").toFile()) == null, "No missing files");
+            check(files.idOf(internal.toFile()) == null, "Not the storage itself");
+
+            boolean[] complete = {false};
+            List<Store.Found> hits = files.search("", "SUN", System.currentTimeMillis() + 5_000, complete);
+            Map<String, Store.Found> named = new LinkedHashMap<>();
+            for (Store.Found hit : hits) check(named.put(hit.entry.name, hit) == null, "No hit twice: " + hit.entry.name);
+            check(complete[0] && named.keySet().equals(new LinkedHashSet<>(List.of("Sunset.jpg", "sunrise.mp3", "notes-sun.txt"))),
+                "Index hits first, then the walk finds the rest: " + named.keySet());
+            check(named.get("Sunset.jpg").location.equals("DCIM/Camera") && named.get("Sunset.jpg").entry.id.equals(sunsetId)
+                && named.get("Sunset.jpg").entry.size == 321, "An index hit has its folder, ID and size");
+            check(named.get("sunrise.mp3").location.equals("Music") && named.get("notes-sun.txt").location.equals("Docs"), "Locations relative to the top");
+            check(asked.get(asked.size() - 1).toPath().toRealPath().equals(internal.toRealPath()), "The index is asked about the searched folder");
+
+            String dcimId = byName(files.list("")).get("DCIM").id;
+            List<Store.Found> inDcim = files.search(dcimId, "sun", System.currentTimeMillis() + 5_000, complete);
+            check(inDcim.size() == 1 && inDcim.get(0).entry.name.equals("Sunset.jpg") && inDcim.get(0).location.equals("Camera"),
+                "Index hits outside the searched folder are dropped");
+            check(files.search("", "sun", 0, complete).isEmpty() && !complete[0], "Nothing after the deadline");
+
+            // A failing index changes nothing: the walk finds everything.
+            FileStore broken = new FileStore(List.of(new FileStore.Root("Internal storage", internal.toFile())), null,
+                (query, folder, limit) -> { throw new IOException("MediaStore is unavailable"); });
+            check(broken.search("", "sun", System.currentTimeMillis() + 5_000, complete).size() == 3 && complete[0], "Search without the index");
+
+            // Never more than SEARCH_LIMIT hits, even when the index knows more.
+            java.nio.file.Path many = java.nio.file.Files.createDirectories(internal.resolve("Many"));
+            List<File> crowd = new ArrayList<>();
+            for (int i = 0; i < Store.SEARCH_LIMIT + 40; i++) {
+                java.nio.file.Path file = many.resolve("crowd-" + i + ".txt");
+                java.nio.file.Files.write(file, new byte[0]);
+                crowd.add(file.toFile());
+            }
+            FileStore busy = new FileStore(List.of(new FileStore.Root("Internal storage", internal.toFile())), null, (query, folder, limit) -> crowd);
+            check(busy.search("", "crowd", System.currentTimeMillis() + 5_000, complete).size() == Store.SEARCH_LIMIT && !complete[0], "Hits are limited");
+
+            // Several storage areas: index hits are placed under the area's name.
+            java.nio.file.Path sd = java.nio.file.Files.createDirectories(base.resolve("sd"));
+            java.nio.file.Files.write(sd.resolve("sunflower.png"), new byte[3]);
+            FileStore two = new FileStore(List.of(new FileStore.Root("Internal storage", internal.toFile()), new FileStore.Root("SD card", sd.toFile())), null,
+                (query, folder, limit) -> List.of(camera.resolve("Sunset.jpg").toFile(), sd.resolve("sunflower.png").toFile()));
+            Map<String, Store.Found> everywhere = new LinkedHashMap<>();
+            for (Store.Found hit : two.search("", "sun", System.currentTimeMillis() + 5_000, complete)) check(everywhere.put(hit.entry.name, hit) == null, "Once each");
+            check(everywhere.get("Sunset.jpg").location.equals("Internal storage/DCIM/Camera") && everywhere.get("sunflower.png").location.equals("SD card")
+                && everywhere.containsKey("notes-sun.txt") && everywhere.containsKey("sunrise.mp3"), "Hits across storage areas: " + everywhere.keySet());
+        } finally {
+            try (var walk = java.nio.file.Files.walk(base)) { walk.sorted(Comparator.reverseOrder()).forEach(p -> p.toFile().delete()); }
+        }
     }
 
     private static DataOutputStream header(ByteArrayOutputStream bytes, int operation, String id) throws IOException {
@@ -408,12 +494,16 @@ public final class ProtocolTest {
 
         // OUTBOX
         Map<String, byte[]> sent = new LinkedHashMap<>();
-        sent.put("out-1", "photo bytes".getBytes(StandardCharsets.UTF_8));
+        Map<String, Integer> kinds = new HashMap<>();
+        sent.put("out-1", "photo bytes".getBytes(StandardCharsets.UTF_8)); kinds.put("out-1", Outbox.FILE);
+        sent.put("text-1", "Hej från telefonen ✓".getBytes(StandardCharsets.UTF_8)); kinds.put("text-1", Outbox.TEXT);
+        boolean[] askedForTexts = {false};
         Outbox outbox = new Outbox() {
-            public List<Store.Entry> waitFor(long millis) {
-                List<Store.Entry> entries = new ArrayList<>();
-                sent.forEach((id, data) -> entries.add(new Store.Entry(id, "IMG_" + id + ".jpg", false, data.length)));
-                return entries;
+            public List<Outbox.Item> waitFor(long millis, boolean texts) {
+                askedForTexts[0] = texts;
+                List<Outbox.Item> items = new ArrayList<>();
+                sent.forEach((id, data) -> items.add(new Outbox.Item(id, kinds.get(id) == TEXT ? "Text" : "IMG_" + id + ".jpg", data.length, kinds.get(id))));
+                return items;
             }
             public Store.Read open(String id) throws IOException {
                 byte[] data = sent.get(id);
@@ -425,14 +515,131 @@ public final class ProtocolTest {
         };
         Session phone = new Session(new MemoryStore(), Trust.single(SECRET), null, null, null, outbox);
         DataInputStream waiting = serve(phone, simple(13, "", out -> out.writeInt(1000)));
-        check(waiting.readByte() == 0 && waiting.readInt() == 1, "One file waiting");
+        check(waiting.readByte() == 0 && waiting.readInt() == 1 && !askedForTexts[0], "Older computers see only the waiting file");
         check(Wire.readString(waiting, 128).equals("out-1") && Wire.readString(waiting, 255).equals("IMG_out-1.jpg") && waiting.readLong() == 11, "Outbox entry");
+        DataInputStream all = serve(phone, simple(17, "", out -> out.writeInt(1000)));
+        check(all.readByte() == 0 && all.readInt() == 2 && askedForTexts[0], "OUTBOX ALL lists files and texts");
+        check(Wire.readString(all, 128).equals("out-1") && Wire.readString(all, 255).equals("IMG_out-1.jpg") && all.readByte() == Outbox.FILE && all.readLong() == 11, "File item with its kind");
+        int textSize = sent.get("text-1").length;
+        check(Wire.readString(all, 128).equals("text-1") && Wire.readString(all, 255).equals("Text") && all.readByte() == Outbox.TEXT && all.readLong() == textSize, "Text item with its kind");
+        DataInputStream text = serve(phone, simple(14, "text-1", out -> out.writeLong(0)));
+        check(text.readByte() == 0 && text.readLong() == textSize && new String(text.readAllBytes(), StandardCharsets.UTF_8).equals("Hej från telefonen ✓"), "A text is read like a file");
+        check(serve(phone, simple(15, "text-1", out -> {})).readByte() == 0 && !sent.containsKey("text-1"), "A collected text is dropped");
         DataInputStream got = serve(phone, simple(14, "out-1", out -> out.writeLong(6)));
         check(got.readByte() == 0 && got.readLong() == 11 && new String(got.readAllBytes(), StandardCharsets.UTF_8).equals("bytes"), "Outbox file from an offset");
         check(serve(phone, simple(15, "out-1", out -> {})).readByte() == 0 && sent.isEmpty(), "Collected files are dropped");
         check(serve(phone, simple(14, "out-1", out -> out.writeLong(0))).readByte() == 1, "A collected file is gone");
         check(serve(phone, simple(13, "", out -> out.writeInt(60_000))).readByte() == 1, "Waits are capped");
+        check(serve(phone, simple(17, "", out -> out.writeInt(-1))).readByte() == 1, "Negative waits refused");
         check(serve(memory, simple(13, "", out -> out.writeInt(0))).readByte() == 1, "No outbox unless shared");
+        check(serve(memory, simple(17, "", out -> out.writeInt(0))).readByte() == 1, "No OUTBOX ALL unless shared");
+
+        // INFO
+        DataInputStream info = serve(new Session(memory, SECRET).describe("1.0.0", "vivo X300 Pro"), simple(18, "", out -> {}));
+        check(info.readByte() == 0 && Wire.readString(info, 64).equals("1.0.0") && info.readInt() == Session.REVISION
+            && Wire.readString(info, 128).equals("vivo X300 Pro") && info.available() == 0, "INFO reports version, revision and name");
+        DataInputStream unnamed = serve(new Session(memory, SECRET).describe("x".repeat(100), "y".repeat(300)), simple(18, "", out -> {}));
+        check(unnamed.readByte() == 0 && Wire.readString(unnamed, 64).length() == 64 && unnamed.readInt() == 18 && Wire.readString(unnamed, 128).length() == 128, "INFO strings are bounded");
+    }
+
+    /**
+     * Random and half-valid requests: the phone must answer each with a status or close the connection (IOException),
+     * never crash with another exception, and never wait. OB01 is frozen from 1.0, so this guards every operation.
+     */
+    private static void fuzzTests() throws Exception {
+        Random random = new Random(20261019);
+        Outbox outbox = new Outbox() {
+            public List<Outbox.Item> waitFor(long millis, boolean texts) { return List.of(new Outbox.Item("t", "Text", 2, TEXT)); }
+            public Store.Read open(String id) throws IOException {
+                if (!id.equals("t")) throw new IOException("Already collected");
+                InputStream stream = new ByteArrayInputStream(new byte[] {'h', 'i'});
+                return new Store.Read() { public long size() { return 2; } public InputStream stream() { return stream; } public void close() {} };
+            }
+            public void done(String id) throws IOException { if (!id.equals("t")) throw new IOException("Already collected"); }
+        };
+        Clipboard clipboard = new Clipboard() { public String read() { return "clip"; } public void write(String text) {} };
+        byte[] fingerprint = new byte[32];
+        Session memory = new Session(new MemoryStore(), Trust.single(SECRET), fingerprint, code -> false, clipboard, outbox).describe("1.0.0", "Fuzz");
+        int requests = fuzz(memory, random, List.of("", "folder-id", "file:hello.txt", "t"), 25_000);
+
+        java.nio.file.Path base = java.nio.file.Files.createTempDirectory("openbridge-fuzz");
+        try {
+            java.nio.file.Path internal = java.nio.file.Files.createDirectories(base.resolve("internal"));
+            java.nio.file.Files.createDirectories(internal.resolve("DCIM/Camera"));
+            java.nio.file.Files.write(internal.resolve("DCIM/Camera/a.jpg"), new byte[300]);
+            java.nio.file.Files.writeString(internal.resolve("notes.txt"), "hello");
+            FileStore files = new FileStore(List.of(new FileStore.Root("Internal storage", internal.toFile())));
+            List<String> ids = new ArrayList<>(List.of(""));
+            for (Store.Entry entry : files.list("")) { ids.add(entry.id); if (entry.directory) files.list(entry.id).forEach(e -> ids.add(e.id)); }
+            Session session = new Session(files, Trust.single(SECRET), fingerprint, code -> false, clipboard, outbox);
+            requests += fuzz(session, random, ids, 10_000);
+            // Whatever the requests did, nothing escaped the shared folder.
+            try (var outside = java.nio.file.Files.list(base)) { check(outside.count() == 1, "Fuzzing stayed inside the shared folder"); }
+        } finally {
+            try (var walk = java.nio.file.Files.walk(base)) { walk.sorted(Comparator.reverseOrder()).forEach(p -> p.toFile().delete()); }
+        }
+        check(requests == 35_000, "Fuzzed every request");
+    }
+
+    private static int fuzz(Session session, Random random, List<String> ids, int count) {
+        for (int i = 0; i < count; i++) {
+            byte[] request;
+            try { request = fuzzRequest(random, ids); } catch (IOException e) { throw new AssertionError(e); }
+            long started = System.nanoTime();
+            try {
+                ByteArrayOutputStream reply = new ByteArrayOutputStream();
+                session.serve(new ByteArrayInputStream(request), reply);
+                byte[] answer = reply.toByteArray();
+                if (answer.length > 0 && answer[0] != 0 && answer[0] != 1)
+                    throw new AssertionError("Request " + HexFormat.of().formatHex(request) + " got a reply without a status");
+            } catch (IOException expected) {
+                // A dropped connection is a valid answer.
+            } catch (RuntimeException | Error e) {
+                throw new AssertionError("Request " + HexFormat.of().formatHex(request) + " crashed the phone: " + e, e);
+            }
+            if (System.nanoTime() - started > 2_000_000_000L)
+                throw new AssertionError("Request " + HexFormat.of().formatHex(request) + " took over 2 seconds");
+        }
+        return count;
+    }
+
+    private static byte[] fuzzRequest(Random random, List<String> ids) throws IOException {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        DataOutputStream out = new DataOutputStream(bytes);
+        int mode = random.nextInt(10);
+        if (mode == 0) { byte[] noise = new byte[random.nextInt(80)]; random.nextBytes(noise); return noise; }
+        if (mode == 1) {   // pairing, old and named
+            out.write(random.nextBoolean() ? Pairing.MAGIC : Pairing.MAGIC2);
+            byte[] noise = new byte[random.nextInt(200)]; random.nextBytes(noise); out.write(noise);
+            return bytes.toByteArray();
+        }
+        out.write(Wire.MAGIC);
+        out.write(mode == 2 ? new byte[32] : SECRET);
+        out.writeByte(random.nextInt(5) == 0 ? random.nextInt(256) : 1 + random.nextInt(Session.REVISION));
+        fuzzString(out, random, ids);
+        int fields = random.nextInt(6);
+        for (int f = 0; f < fields; f++) {
+            switch (random.nextInt(6)) {
+                case 0: out.writeInt(random.nextInt(4) == 0 ? random.nextInt() : random.nextInt(2_000)); break;
+                case 1: out.writeLong(random.nextInt(4) == 0 ? random.nextLong() : random.nextInt(400)); break;
+                case 2: fuzzString(out, random, ids); break;
+                case 3: out.writeByte(random.nextInt(256)); break;
+                default: { byte[] noise = new byte[random.nextInt(64)]; random.nextBytes(noise); out.write(noise); }
+            }
+        }
+        byte[] request = bytes.toByteArray();
+        // Sometimes the connection drops partway.
+        return random.nextInt(4) == 0 ? Arrays.copyOf(request, random.nextInt(request.length + 1)) : request;
+    }
+
+    private static void fuzzString(DataOutputStream out, Random random, List<String> ids) throws IOException {
+        switch (random.nextInt(6)) {
+            case 0: Wire.writeString(out, ids.get(random.nextInt(ids.size()))); break;
+            case 1: Wire.writeString(out, new String[] {"..", ".", "a/b", "名前.txt", "x".repeat(300), "\u0000", " "}[random.nextInt(7)]); break;
+            case 2: out.writeInt(random.nextInt()); break;   // any length, even negative or huge
+            case 3: { byte[] invalid = new byte[random.nextInt(20)]; random.nextBytes(invalid); out.writeInt(invalid.length); out.write(invalid); break; }
+            default: Wire.writeString(out, "f" + random.nextInt(50) + (random.nextBoolean() ? ".jpg" : ""));
+        }
     }
 
     interface Body { void write(DataOutputStream out) throws IOException; }

@@ -73,7 +73,7 @@ enum Imports {
 
     /// Already copied there, with the same size.
     static func present(_ entry: Entry, in folder: URL) -> Bool {
-        let path = folder.appendingPathComponent(entry.name).path
+        let path = folder.appendingPathComponent(Wire.fitted(entry.name, limit: 220)).path   // as imported (BrowserModel.macName)
         return ((try? FileManager.default.attributesOfItem(atPath: path)[.size]) as? NSNumber)?.int64Value == entry.size
     }
 

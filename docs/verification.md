@@ -1,54 +1,74 @@
-# Verification status and manual acceptance
+# Testing and verification
+
+OpenBridge is tested three ways: automated tests on every change, native builds of every app in CI, and real phones.
+Real phones matter most, because every Android brand bends USB File transfer (MTP) a little differently. If you
+test on your phone, the [checklist below](#test-it-on-your-phone) takes about 20 minutes, and a
+[device report](https://github.com/PredatorWoah/OpenBridge/issues/new?template=device-report.yml) helps everyone
+with the same phone.
 
 ## Real-device results
 
 | Date | Devices | Result |
 | --- | --- | --- |
-| 2026-10-17 | vivo X300 Pro (V2514, Android) + MacBook Air M1 | USB File transfer: phone detected automatically, folders browsed, a 7.83 GB file downloaded successfully (covers the path for files of 4 GiB and more). Found and fixed: a crash on connect (0.9.3), a disappearing Mac window and blank folder lists (0.9.5). |
-| 2026-10-17 | vivo X300 Pro | The phone's USB tethering uses RNDIS, which macOS does not support; the Mac app explains this and points to File transfer. |
+| 2026-10-17 | vivo X300 Pro (V2514) + MacBook Air M1 | USB File transfer: phone found by itself, folders browsed, a 7.83 GB file downloaded. Found and fixed: a crash on connect (0.9.3), a disappearing window and blank folder lists (0.9.5). |
+| 2026-10-17 | vivo X300 Pro | The phone's USB tethering uses RNDIS, which macOS doesn't support; the Mac app explains this and points to File transfer. |
+| 2026-10-18 | vivo X300 Pro + MacBook Air M1 | Folders over USB needed several refreshes (fixed in 0.9.10); toolbar text squashed when narrow, no folder sizes or deep search over USB (fixed in 0.12.1); folders counted inside themselves over USB, giving huge sizes and duplicate search results (fixed in 0.12.2). |
+
+Add yours with a [device report](https://github.com/PredatorWoah/OpenBridge/issues/new?template=device-report.yml).
 
 ## Automated checks
 
-The checks below run in CI on every change. The real-device results above are the only physical-device testing so far.
-
-## Continuous integration
-
-| Trigger | Jobs | What runs |
+| When | Jobs | What runs |
 | --- | --- | --- |
-| Every push and pull request | `protocol`, `mtp`, `repository` | Java protocol tests, the real Java TLS server against a Python client, the MTP protocol tests (Swift on Linux), and repository checks. |
-| Manual (Actions → *Build and protocol checks* → Run workflow) | adds `android`, `macos` | Android build and lint; macOS build, all Swift tests (including the Java/Swift TLS interoperability test and the MTP client tests) and the app bundle. |
-| Release (Actions → *Release*, or a `v*` tag) | `verify`, `android`, `macos`, `publish` | Checks the version matches both apps and has a changelog entry, reruns the tests, builds both apps and publishes them with checksums. |
+| Every push and pull request | `protocol`, `mtp`, `repository` | The Java protocol tests (including fuzzing every operation with 35,000 random and half-valid requests), a real Java TLS server against a Python client, the MTP tests (Swift on Linux) against a simulated phone with real Android quirks, and repository checks. |
+| Manually (Actions › *Build and protocol checks* › Run workflow) | adds `android`, `macos`, `windows`, `linux` | Android build and lint with a release-signing check; macOS build, every Swift test (with the Java/Swift TLS interoperability test) and the app bundle; the Windows and Linux apps built, tested, packaged and launched for 25 seconds to prove they start. |
+| Release (Actions › *Release*) | `verify`, the four builds, `publish` | Checks the version in every app and the changelog, reruns the tests, builds everything and publishes it with `SHA256SUMS.txt`. |
 
-Native builds stay manual to save CI minutes. Run them before merging anything that touches `android/` or `macos/`.
+What the tests cover:
 
-## Automated coverage
+- **The Wi‑Fi protocol (OB01):** authentication, pairing vectors and declines, every operation's success and failure paths, strict UTF-8 and bounds, opaque IDs that can't escape the shared storage, collisions that keep the original, cleanup after interrupted uploads, resumable uploads that never mix old and new bytes, texts and files in the outbox, and the frozen operation set. A fuzzer sends random and half-valid requests to a phone with memory storage and to one with a real folder: every request must get an error or a closed connection, never a crash or a hang, and nothing may change outside the shared folder.
+- **TLS:** a real Java TLS server against the Python client and the Mac's Swift client, with pinned certificates, transfers both ways, wrong pins and wrong secrets.
+- **USB File transfer (MTP):** a simulated phone that enforces USB bulk rules and behaves like real Android phones: folders that list themselves, items listed twice, missing dates and file names in property lists, 0-byte files, Chinese and emoji names, odd storage sizes. It covers sessions, listings, downloads and uploads across packet boundaries, files of 4 GiB and more, free-space checks, collisions, errors, recovery after a USB failure, sizes and search.
+- **Desktop app:** the client against the real Java server: pairing, browsing, transfers, resuming, the outbox and texts, search, Fast USB matching.
 
-- **Wi-Fi protocol (OB01):** authentication, malformed headers, strict UTF-8 and bounds, opaque-ID traversal rejection, listings, binary multi-chunk, Unicode and empty transfers, collisions that preserve the original, interrupted-upload cleanup, commit failures, and Android filename rules (storage-provider characters, case-insensitive collisions, reserved temporary names).
-- **TLS:** a real Java TLS server exercised by a Python client and by the production Swift client, with a pinned certificate, both transfer directions, progress, collisions, temporary-file cleanup, and wrong-pin and wrong-secret rejection. The fixture is test-only and never shipped.
-- **USB File transfer (MTP):** a simulated phone that enforces USB bulk rules (short packets end a data phase, exact multiples need a zero-length packet, unknown-length data phases) covers sessions, storages, listings, downloads and uploads across packet boundaries, files of 4 GiB or more, free-space checks, case-insensitive collisions, error responses, recovery after a USB failure, device identity on reconnect, and cleanup of failed uploads.
-- **Builds:** Android lint, the macOS release bundle, and checks that both apps reference the app icon.
+## Test it on your phone
 
-## Physical Android + Mac acceptance (not yet performed)
+You need: the phone app and one computer app from the [latest release](https://github.com/PredatorWoah/OpenBridge/releases/latest).
+Tick what works and note anything odd. **Settings › Copy diagnostics** (on the phone and the computer) copies a short
+report without any secrets to paste into your device report.
 
-Start with one Pixel and one Samsung. USB File transfer stays labelled beta until these pass.
+**Wi‑Fi**
+- [ ] Tap the button on the phone. The computer lists the phone under *Phones nearby*; pair by comparing the 6 digits.
+- [ ] Browse a few folders, open a photo, switch to grid view. Folder sizes appear after a moment.
+- [ ] Download a big video (1 GB or more) and upload a folder of photos. Turn Wi‑Fi off on the phone halfway through a download, turn it back on, and press **Resume**.
+- [ ] Search the whole phone for a file you know (try part of its name, like `.pdf`). Photos and videos should show up instantly.
+- [ ] Rename a file and delete a test file from the computer.
+- [ ] Quit both apps, then start sharing again: the computer reconnects by itself, without a code.
 
-Record device model, Android/API version, storage/provider, macOS version, network type, commit SHA, result, and any logs without secrets. All items remain unverified until performed:
+**USB cable**
+- [ ] Plug in, unlock the phone and choose **File transfer**. The computer finds it by itself (Mac and Windows: in OpenBridge's own window).
+- [ ] Browse, download and upload over the cable. Check folder sizes and search.
+- [ ] Turn on USB debugging (Settings › About phone › tap Build number 7 times › Developer options). The computer switches to **Fast USB**; allow USB debugging on the phone if asked. Search and sizes should now be instant.
+- [ ] **Mirror screen**, then **Go wireless** / **Mirror over Wi‑Fi** and unplug.
 
-- [ ] Build/install the APK and Mac bundle; confirm local-network prompt/allow behavior on supported macOS versions.
-- [ ] Choose an internal-storage subfolder and an SD-card subfolder; reject cloud providers and unsupported roots. Confirm access outside the chosen tree is impossible. Confirm revoked grants produce a clear error.
-- [ ] Verify AndroidKeyStore certificate generation and TLS handshakes on Android 8/API 26 and current Android, including TLS 1.2/1.3 compatibility and screen rotation.
-- [ ] Pair by entering the IP and port and comparing the 6-digit codes. Cancel on the phone must fail the pairing; letting it time out must fail; a second Mac pairing at the same time must be refused; old credentials after restarting sharing and a public endpoint must fail without file access. A plaintext client must not obtain metadata.
-- [ ] Browse empty, nested, Unicode and large folders. Deleted/stale IDs should fail safely; refresh should recover.
-- [ ] Transfer empty files, Unicode filenames, random binary files, files larger than 64 KiB, and a multi-gigabyte file both ways. Compare SHA-256 locally on both devices. Confirm progress, bounded memory, and useful errors.
-- [ ] Upload/download a duplicate name and simultaneous same-name uploads. Verify original bytes remain intact. Test built-in SAF provider rename behavior and a competing external writer. Stop release if exclusive collision behavior is not reliable under the supported usage model.
-- [ ] Switch off Wi-Fi, change Wi-Fi addresses, enable guest-network isolation, cancel, stop sharing, lock the phone, switch apps and rotate the device during transfers. The server should close on background/network change, partial transfers should fail, normal partials should be removed, and restart should require new credentials.
-- [ ] Fill Android storage and Mac destination storage, revoke folder access, remove the SD card, select read-only storage, and edit the source while transferring. Verify errors and cleanup without damaging existing files.
-- [ ] Force-kill both apps mid-transfer; identify/remove documented temporary files and confirm no incomplete upload is presented as success. Refresh after a lost final acknowledgement.
-- [ ] USB tethering: on an NCM phone (e.g. Pixel, Android 11+), enable tethering, tap the sun, and transfer both ways with Wi-Fi off on both devices. Unplug mid-transfer and turn tethering off: sharing must stop. Record whether an RNDIS phone shows no Mac interface. Check the Mac does not unexpectedly route internet over the phone.
-- [ ] USB File transfer (MTP), Mac app only: on several phones (Pixel, Samsung, one older Android), choose File transfer and confirm the Mac app finds the phone by itself (also after unplugging and replugging, and after Disconnect, which must not reconnect until replugged). Browse internal storage and an SD card; download and upload small, multi-megabyte and multi-gigabyte files, including files above 4 GiB in both directions; compare SHA-256. Try an upload larger than the phone's free space. Cancel mid-transfer and unplug mid-transfer, then reconnect: no partial upload may remain on the phone. Repeat with Photos or Image Capture open. Record any phone that is not found.
-- [ ] Screen mirroring (0.9.6): with USB debugging on, open Mirror screen; tap Allow once with "Always allow" and confirm later sessions don't ask. Check video, rotation, taps, drags, scrolling, typing (including non-ASCII), right click as Back, the button bar, ⌘V paste, and clipboard sync both ways. Try with USB debugging off, with adb or Android Studio running, and with a protected (DRM) app on screen: each must show a clear message. Unplug while mirroring.
-- [ ] Background sharing (0.9.6): tap the sun, leave the app, lock the phone and transfer large files; pair a new Mac from the notification; Stop from the notification; turn the switch off and confirm leaving the app stops sharing. On Android 13+, deny notifications and confirm sharing still works.
-- [ ] Discovery, clipboard and browser (0.9.6): the phone appears under Phones nearby only while sharing on Wi‑Fi. Clipboard both ways, including reading while OpenBridge is in the background on the phone (must explain). Thumbnails and grid for photos and videos over USB and Wi‑Fi, Quick Look, sorting, ⌘/⇧ selection, multi-file and folder downloads and uploads with name clashes, drag and drop both ways, new folders, and Resume after unplugging mid-download over USB and stopping Wi‑Fi mid-download (compare SHA-256).
-- [ ] Check that the listening socket is bound only to the selected private Wi-Fi IPv4 address and accepts no public/cellular/VPN interface. Confirm no router port mapping is requested. This cannot prevent deliberate external forwarding by a network administrator.
+**From the phone**
+- [ ] In the gallery, select two photos and tap **Share › OpenBridge**. They land in *Downloads/OpenBridge* on the computer.
+- [ ] Share a 2 GB or larger video the same way and check the phone's free space doesn't drop by that much.
+- [ ] Copy some text on the phone and use the **Send clipboard** tile or button. It's on the computer's clipboard a second later.
+- [ ] On the computer, open **Texts**, type something and **Send**. It's on the phone's clipboard.
+- [ ] **Import new photos** twice: the second time only new photos come over.
 
-The MVP intentionally stops when Android leaves the foreground. A foreground service, wake lock, persistent pairing and transfer resume require a later explicit design and permission review; they are not hidden prerequisites for Phase 1.
+**Networks that get in the way**
+- [ ] On a guest, hotel or campus Wi‑Fi, the computer explains that the network keeps devices apart. Turn on **Settings › Phone hotspot** on the phone (Android 13+), join it from the computer, and connect.
+
+**Looks and comfort**
+- [ ] Try each look (Dusk, Aurora, Tide) on the phone and the computer.
+- [ ] Turn on your system's reduce-motion setting: backgrounds stop moving.
+- [ ] Use the computer browser with only the keyboard: arrows, Enter, Backspace, Delete, F2.
+- [ ] **Update** from the update pill when a new version comes out.
+
+## Before a release
+
+The maintainer runs the native builds (Actions › *Build and protocol checks*) on the release commit and repeats the
+Wi‑Fi, USB and *From the phone* parts above on at least one phone and one computer. Any check that fails blocks the
+release, and every fix found on real hardware is recorded in the table above.

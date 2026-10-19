@@ -46,6 +46,10 @@ final class BrowserModel: ObservableObject {
     /// Whether the file browser is showing (instead of the connect screen).
     @Published var showBrowser = false
     @Published var selection: Set<Entry.ID> = []
+    /// The item the keyboard is on (arrow keys move it); it shows a ring and stays scrolled into view.
+    @Published var cursor: Entry.ID?
+    /// Items per row in the grid, so ↑ and ↓ move by a row.
+    @Published var gridColumns = 1
     @Published var transfer: Transfer?
     @Published var thumbnails: [Entry.ID: NSImage] = [:]
     /// A downloaded copy shown with Quick Look.
@@ -75,6 +79,40 @@ final class BrowserModel: ObservableObject {
     @Published var pendingDelete: [Entry] = []
     @Published var renaming: Entry?
     @Published private(set) var update: AvailableUpdate?
+    let updater = Updater()
+    let texts = TextHistory()
+    /// Fast USB: the phone's own sharing reached through USB debugging. (`overUSB` means File transfer, MTP.)
+    @Published private(set) var fastUSB = false
+    /// A phone with USB debugging on is plugged in.
+    @Published private(set) var usbDebugging = false
+    /// USB debugging is on, but the phone hasn't allowed this Mac yet: offer to ask it.
+    @Published private(set) var usbNeedsAllow = false
+    /// OpenBridge answers over the cable, but this Mac hasn't paired with that phone: offer "Pair over USB".
+    @Published private(set) var usbPairable: String?
+    private var usbCandidate: FastUSB.Found?
+    private var tunnel: ADBTunnel?
+    /// A phone with USB debugging that Fast USB already tried, or that was disconnected: not tried again until replugged.
+    private var fastSkipped: String?
+    /// What INFO said about the connected phone (from 0.13.0).
+    @Published private(set) var phoneInfo: PhoneInfo?
+    /// The connected phone's app is from before 0.13.0: it sends no texts and has no Fast USB.
+    @Published private(set) var phoneOutdated = false
+    /// The Wi‑Fi seems to keep devices apart: a phone it announces can't be reached.
+    @Published private(set) var wifiIsolated = false
+    private var unreachable: [String: Int] = [:]
+    private var gatewayChecked: (address: String?, at: Date)?
+    @Published var showTexts = false
+    @Published private(set) var textProblem: String?
+    /// Off by default: what's copied on this Mac goes to the phone's clipboard while connected.
+    @Published var autoSendTexts = UserDefaults.standard.bool(forKey: "autoSendTexts") {
+        didSet { UserDefaults.standard.set(autoSendTexts, forKey: "autoSendTexts"); watchClipboard() }
+    }
+    private var clipboardTimer: Timer?
+    private var pasteboardSeen = 0
+    /// The clipboard's change count right after OpenBridge put the phone's text there, and the last text that went
+    /// either way, so automatic sending never echoes the phone's own text back (mirroring syncs the clipboard too).
+    private var fromPhone = -1
+    private var lastShared: String?
     /// The saved phone connected now, when the connection came from one.
     private var current: SavedPhone?
     /// Off after Disconnect, so a saved phone doesn't reconnect straight away.
@@ -158,11 +196,24 @@ final class BrowserModel: ObservableObject {
             }
             catch {
                 self.error = error.localizedDescription
+                Diagnostics.log("Failed (\(transportName)): \(BrowserModel.redacted(error.localizedDescription))")
                 status = overUSB
                     ? "Couldn't reach the phone over USB. Keep it unlocked, plugged in and in File transfer mode."
+                    : fastUSB ? "Couldn't reach the phone over the cable. Keep it plugged in, with OpenBridge sharing."
                     : "Couldn't reach the phone. Check Wi‑Fi and that sharing is still on, or pair again."
             }
         }
+    }
+
+    /// An error message for the diagnostics log: names in quotes (files, folders) left out.
+    static func redacted(_ message: String) -> String {
+        if message.contains("already exists") { return "a file or folder with that name already exists" }
+        return message.replacingOccurrences(of: "“[^”]*”", with: "“…”", options: .regularExpression)
+    }
+
+    var transportName: String {
+        guard connected else { return "not connected" }
+        return fastUSB ? "Fast USB" : overUSB ? "USB File transfer" : "Wi‑Fi"
     }
 
     func show(_ message: String) {
@@ -178,7 +229,7 @@ final class BrowserModel: ObservableObject {
         guard watcher == nil else { return }
         discovery.start()
         if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String {
-            Task { self.update = await Updates.newer(than: version) }
+            Task { await self.checkForUpdates(current: version) }
         }
         // The model lives as long as the window, so the loop holds it strongly.
         watcher = Task {
@@ -192,11 +243,26 @@ final class BrowserModel: ObservableObject {
     private func poll() {
         guard !busy else { return }
         let attached = MTPClient.attachedPhone()
+        let debugging = USBDebugging.attachedPhone()
         if attached == nil { skipped = nil }
+        if debugging == nil {
+            if usbDebugging { Diagnostics.log("USB debugging: phone gone") }
+            fastSkipped = nil; usbNeedsAllow = false
+            if usbPairable != nil { forgetUSBCandidate() }
+            USBDebugging.shared.disconnect()
+        } else if !usbDebugging {
+            Diagnostics.log("USB debugging: phone plugged in")
+        }
+        usbDebugging = debugging != nil
         if connected {
             if overUSB && attached == nil { drop("The phone was unplugged.") }
+            else if fastUSB && debugging == nil { drop("The phone was unplugged.") }
+            else if !overUSB && !fastUSB, let debugging, debugging != fastSkipped { upgradeToFastUSB(debugging) }
             return
         }
+        if usbPairable != nil { return }   // waiting for "Pair over USB"
+        // Fast USB first; File transfer when USB debugging is off or doesn't reach OpenBridge.
+        if let debugging, debugging != fastSkipped { connectFastUSB(); return }
         if let attached, attached != skipped { connectUSB(); return }
         // About every 4.5 seconds, look for a saved phone that's sharing.
         polls += 1
@@ -215,34 +281,70 @@ final class BrowserModel: ObservableObject {
 
     func isNearby(_ phone: SavedPhone) -> Bool { discovery.phones.contains { $0.phoneID == phone.id } }
 
-    /// Tries each saved phone quietly; the first that answers opens.
+    /// Tries each saved phone quietly; the first that answers opens. Each is tried where it was or is announced, and
+    /// at the default gateway: on the phone's own hotspot, the phone is the gateway.
     private func reconnectSaved() {
         probing = true
         let phones = saved.map(located)
         Task {
             defer { probing = false }
+            let gateway = await currentGateway()
             for phone in phones {
-                guard let client = try? phone.client() else { continue }
-                do {
-                    let entries = try await client.list(id: "", quick: true)
-                    guard !connected, !busy, autoConnect else { return }
-                    adopt(client, as: phone, entries: entries)
-                    return
-                } catch BridgeError.forgotten {
-                    forget(phone)
-                    error = "\(phone.name): \(BridgeError.forgotten.localizedDescription)"
-                } catch { continue }
+                var candidates = [(phone, false)]
+                if let gateway, gateway != phone.host {
+                    var hotspot = phone
+                    hotspot.host = gateway; hotspot.port = 41987
+                    candidates.append((hotspot, true))
+                }
+                for (candidate, viaGateway) in candidates {
+                    guard let client = try? candidate.client() else { continue }
+                    do {
+                        let entries = try await client.list(id: "", quick: true)
+                        guard !connected, !busy, autoConnect else { return }
+                        if viaGateway { Diagnostics.log("Reached a saved phone at the default gateway (its hotspot)") }
+                        adopt(client, as: candidate, entries: entries)
+                        return
+                    } catch BridgeError.forgotten where !viaGateway {
+                        forget(phone)
+                        error = "\(phone.name): \(BridgeError.forgotten.localizedDescription)"
+                        break
+                    } catch {
+                        // Another phone at the gateway, or nothing there: not this one.
+                        if !viaGateway && isNearby(phone) { noteUnreachable(phone.id) }
+                    }
+                }
             }
         }
+    }
+
+    private func currentGateway() async -> String? {
+        if let checked = gatewayChecked, Date().timeIntervalSince(checked.at) < 20 { return checked.address }
+        let address = await LocalNetwork.gateway()
+        gatewayChecked = (address, Date())
+        return address
+    }
+
+    /// A phone announced on this Wi‑Fi that can't be reached a few times in a row: the network keeps devices apart.
+    private func noteUnreachable(_ key: String) {
+        unreachable[key, default: 0] += 1
+        guard unreachable[key, default: 0] >= 3, !wifiIsolated else { return }
+        wifiIsolated = true
+        Diagnostics.log("Wi‑Fi: a phone is announced but can't be reached (client isolation?)")
     }
 
     /// Opens a saved phone now (the user clicked it).
     func connect(_ phone: SavedPhone) {
         guard !busy else { return }
         overUSB = false
+        let target = located(phone)
+        if target.host.isEmpty {
+            if usbDebugging { fastSkipped = nil; connectFastUSB() }
+            else { error = "\(phone.name) was paired over USB. Plug it in with USB debugging on, or start sharing on the same Wi‑Fi." }
+            return
+        }
         run {
             self.status = "Connecting to \(phone.name)…"
-            let target = self.located(phone)
+            Diagnostics.log("Wi‑Fi: connecting to a saved phone at \(target.host)")
             let client = try target.client()
             self.adopt(client, as: target, entries: try await client.list())
         }
@@ -253,17 +355,24 @@ final class BrowserModel: ObservableObject {
         SavedPhones.save(saved)
     }
 
-    /// Shows a connected Wi‑Fi phone and remembers it.
-    private func adopt(_ client: BridgeClient, as phone: SavedPhone, entries: [Entry]) {
+    /// Shows a phone connected over Wi‑Fi or Fast USB and remembers it. Over Fast USB the saved Wi‑Fi address stays.
+    private func adopt(_ client: BridgeClient, as phone: SavedPhone, entries: [Entry], fastUSB: Bool = false) {
         overUSB = false
-        self.client = client; deviceName = phone.name; host = phone.host
+        self.fastUSB = fastUSB
+        if !fastUSB { tunnel?.stop(); tunnel = nil }
+        self.client = client; deviceName = phone.name; host = fastUSB ? "" : phone.host
         path = [("", "Phone")]; self.entries = entries
         connected = true; status = ""; error = nil
         current = phone; autoConnect = true
+        wifiIsolated = false; unreachable = [:]
+        phoneInfo = nil; phoneOutdated = false
         saved = [phone] + saved.filter { $0.id != phone.id }
         SavedPhones.save(saved)
+        Diagnostics.log(fastUSB ? "Connected over Fast USB" : "Connected over Wi‑Fi at \(phone.host):\(phone.port)")
         startReceiving(client)
+        watchClipboard()
         didConnect(to: phone.name)
+        askInfo(client)   // after didConnect: it belongs to this connection
     }
 
     // MARK: Files sent from the phone
@@ -273,31 +382,221 @@ final class BrowserModel: ObservableObject {
             .appendingPathComponent("OpenBridge", isDirectory: true)
     }
 
-    /// Collects files shared to OpenBridge on the phone while this connection lasts, into Downloads/OpenBridge.
+    /// Collects what's sent from the phone while this connection lasts: files into Downloads/OpenBridge, texts onto
+    /// the clipboard (and into Texts).
     private func startReceiving(_ phone: BridgeClient) {
         receiver?.cancel()
+        let name = deviceName
         receiver = Task {
+            var withTexts = true
             while !Task.isCancelled {
-                let waiting: [Entry]
-                do { waiting = try await phone.outbox(wait: 20_000) }
-                catch BridgeError.message(let text) where text.contains("Unsupported operation") || text.contains("not available") {
+                let waiting: [OutboxItem]
+                do {
+                    if withTexts { waiting = try await phone.outboxAll(wait: 20_000) }
+                    else { waiting = try await phone.outbox(wait: 20_000).map { OutboxItem(entry: $0, text: false) } }
+                } catch let error where withTexts && BridgeError.isUnsupported(error) {
+                    withTexts = false   // a phone app before 0.13.0 sends only files
+                    continue
+                } catch BridgeError.message(let text) where text.contains("Unsupported operation") || text.contains("not available") {
                     return   // a phone app before 0.12.0 can't send: stop asking
                 } catch {
                     try? await Task.sleep(nanoseconds: 3_000_000_000); continue
                 }
                 for item in waiting {
                     guard !Task.isCancelled else { return }
-                    try? FileManager.default.createDirectory(at: Self.receivedFolder, withIntermediateDirectories: true)
-                    let target = Self.free(Self.receivedFolder.appendingPathComponent(item.name))
                     do {
-                        try await phone.receive(item, to: target)
-                        received = target
-                        show("Received “\(item.name)” from the phone")
+                        if item.text {
+                            let text = try await phone.text(item.entry)
+                            receivedText(text, from: name)
+                            try await phone.done(item.entry)
+                        } else {
+                            try? FileManager.default.createDirectory(at: Self.receivedFolder, withIntermediateDirectories: true)
+                            let target = Self.free(Self.receivedFolder.appendingPathComponent(Self.macName(item.entry.name)))
+                            try await phone.receive(item.entry, to: target)
+                            received = target
+                            show("Received “\(item.entry.name)” from the phone")
+                            Diagnostics.log("Received a file from the phone")
+                        }
                     } catch {
+                        Diagnostics.log("Receiving from the phone stopped: \(BrowserModel.redacted(error.localizedDescription))")
                         try? await Task.sleep(nanoseconds: 2_000_000_000); break
                     }
                 }
             }
+        }
+    }
+
+    /// A text from the phone: onto the clipboard, into Texts, and said out loud.
+    private func receivedText(_ text: String, from phone: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        fromPhone = pasteboard.changeCount
+        pasteboardSeen = fromPhone
+        lastShared = text
+        texts.add(text, fromPhone: true)
+        let message = "Text from \(phone) copied"
+        show(message)
+        Announce.spoken(message)
+        Announce.notification(message)
+        Diagnostics.log("Received a text from the phone")
+    }
+
+    /// The phone's app version, for diagnostics and to suggest updating it. Phones before 0.13.0 don't know INFO.
+    private func askInfo(_ client: BridgeClient) {
+        let epoch = connection
+        Task {
+            do {
+                let info = try await client.info()
+                guard epoch == connection else { return }
+                phoneInfo = info
+                Diagnostics.log("Phone app \(info.version), revision \(info.revision)")
+            } catch {
+                guard epoch == connection else { return }
+                if BridgeError.isUnsupported(error) {
+                    phoneOutdated = true
+                    Diagnostics.log("Phone app is older than 0.13 (no INFO)")
+                }
+            }
+        }
+    }
+
+    /// The connected phone's app is older than this Mac's (both have INFO): suggest updating it.
+    var phoneBehind: String? {
+        guard let info = phoneInfo, let mine = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
+              Updates.isNewer(mine, than: info.version) else { return nil }
+        return info.version
+    }
+
+    // MARK: Fast USB
+
+    /// Fast USB: the phone's own sharing over the cable, through USB debugging. Without `asking`, a phone that hasn't
+    /// allowed this Mac isn't asked (no surprise prompt on plugging in); "Use Fast USB" asks. Falls back to File
+    /// transfer on the next poll when it can't connect.
+    func connectFastUSB(asking: Bool = false) {
+        guard !busy else { return }
+        let device = USBDebugging.attachedPhone()
+        fastSkipped = device   // one quiet try per plug-in
+        usbNeedsAllow = false
+        overUSB = false
+        run {
+            self.status = asking ? "If your phone asks “Allow USB debugging?”, tap Allow." : "Connecting over Fast USB…"
+            Diagnostics.log("Fast USB: looking for OpenBridge over the cable")
+            let saved = self.saved
+            let prompt: (() -> Void)? = asking ? { Task { @MainActor in self.status = "Tap Allow on your phone." } } : nil
+            let found: FastUSB.Found?
+            do {
+                found = try await FastUSB.find(allowPrompt: prompt, startSharing: true,
+                                               known: { fingerprint in saved.contains { $0.fingerprint == fingerprint } },
+                                               log: { Diagnostics.log($0) })
+            } catch ADBError.notAllowed {
+                Diagnostics.log("Fast USB: the phone hasn't allowed USB debugging from this Mac")
+                self.usbNeedsAllow = true
+                self.status = ""
+                return
+            } catch {
+                Diagnostics.log("Fast USB unavailable: \(error.localizedDescription)")
+                USBDebugging.shared.closeIfUnused()
+                self.status = ""
+                if asking { throw error }
+                return
+            }
+            guard let found else {
+                Diagnostics.log("Fast USB: OpenBridge didn't answer on the phone")
+                USBDebugging.shared.closeIfUnused()
+                self.status = asking ? "OpenBridge didn't answer on the phone. Open it there and tap the sun, then try again." : ""
+                return
+            }
+            if let phone = saved.first(where: { $0.fingerprint == found.fingerprint }) {
+                try await self.adoptFastUSB(found, as: phone)
+            } else {
+                self.forgetUSBCandidate()
+                self.usbCandidate = found
+                self.usbPairable = found.model ?? "Your phone"
+                self.status = ""
+                Diagnostics.log("Fast USB: OpenBridge answers, but this Mac hasn't paired with the phone")
+            }
+        }
+    }
+
+    private func adoptFastUSB(_ found: FastUSB.Found, as phone: SavedPhone) async throws {
+        let client = try BridgeClient(tunnel: found.tunnel.localPort, fingerprint: phone.fingerprint, secret: phone.secret)
+        let entries: [Entry]
+        do { entries = try await client.list() } catch BridgeError.forgotten {
+            // The phone forgot this Mac: pair again, over the cable.
+            forget(phone)
+            forgetUSBCandidate()
+            usbCandidate = found; usbPairable = phone.name
+            status = ""
+            return
+        } catch {
+            found.tunnel.stop()
+            throw error
+        }
+        if tunnel !== found.tunnel { tunnel?.stop() }
+        tunnel = found.tunnel
+        adopt(client, as: phone, entries: entries, fastUSB: true)
+    }
+
+    /// Pairs with a phone that answers over the cable: the same code comparison as over Wi‑Fi.
+    func pairOverUSB() {
+        guard let found = usbCandidate, !busy else { return }
+        run {
+            self.status = "Connecting to the phone…"
+            Diagnostics.log("Fast USB: pairing")
+            let paired = try await BridgeClient.pair(tunnel: found.tunnel.localPort) { code in
+                self.pairingCode = code
+                self.status = "Check that your phone shows the same code, then tap Pair on the phone."
+            }
+            self.pairingCode = nil
+            let entries = try await paired.list()
+            let info = try? await paired.info()
+            // No Wi‑Fi address yet: it's learned when the phone is seen on Wi‑Fi.
+            let phone = SavedPhone(name: info?.name ?? found.model ?? "Phone", host: "", port: 41987,
+                                   fingerprint: paired.fingerprint, secret: paired.secret)
+            self.usbCandidate = nil; self.usbPairable = nil
+            if self.tunnel !== found.tunnel { self.tunnel?.stop() }
+            self.tunnel = found.tunnel
+            self.adopt(paired, as: phone, entries: entries, fastUSB: true)
+        }
+    }
+
+    func cancelUSBPairing() {
+        forgetUSBCandidate()
+        fastSkipped = USBDebugging.attachedPhone()
+        USBDebugging.shared.closeIfUnused()
+    }
+
+    private func forgetUSBCandidate() {
+        if let candidate = usbCandidate, candidate.tunnel !== tunnel { candidate.tunnel.stop() }
+        usbCandidate = nil; usbPairable = nil
+    }
+
+    /// Connected over Wi‑Fi and the same phone is plugged in with USB debugging: move to Fast USB, in the same folder.
+    /// Quiet: no prompt, no starting sharing on the phone, nothing shown if it doesn't work.
+    private func upgradeToFastUSB(_ device: String) {
+        // Phones before 0.13.0 have no Fast USB; wait for INFO, and for any transfer to finish.
+        guard let phone = current, !busy, transfer == nil || transfer?.done == true,
+              let revision = phoneInfo?.revision, revision >= 18 else { return }
+        fastSkipped = device
+        let names = trail
+        busy = true
+        Task {
+            defer { busy = false }
+            do {
+                guard let found = try await FastUSB.find(allowPrompt: nil, startSharing: false, known: { $0 == phone.fingerprint },
+                                                         log: { Diagnostics.log($0) }) else { return }
+                guard found.fingerprint == phone.fingerprint, connected, current?.id == phone.id else { found.tunnel.stop(); return }
+                let client = try BridgeClient(tunnel: found.tunnel.localPort, fingerprint: phone.fingerprint, secret: phone.secret)
+                let entries = try await client.list()
+                tunnel?.stop(); tunnel = found.tunnel
+                adopt(client, as: phone, entries: entries, fastUSB: true)
+                if let (trail, inside) = try? await resolve(names, client) { display(inside, at: trail) }
+                show("Switched to Fast USB")
+            } catch {
+                Diagnostics.log("Fast USB: staying on Wi‑Fi (\(error.localizedDescription))")
+            }
+            if !fastUSB { USBDebugging.shared.closeIfUnused() }
         }
     }
 
@@ -332,7 +631,7 @@ final class BrowserModel: ObservableObject {
             }
             self.transfer = Transfer(name: "Preparing…", upload: false)
             let at = trail.dropFirst().map(\.name)
-            try await self.perform(fresh.map { .download($0, to: Self.free(destination.appendingPathComponent($0.name)), at: at) }, client: client)
+            try await self.perform(fresh.map { .download($0, to: Self.free(destination.appendingPathComponent(Self.macName($0.name))), at: at) }, client: client)
             Imports.save(key, done.union(media.map(Imports.line)))
             self.show(fresh.count == 1 ? "Imported 1 photo or video" : "Imported \(fresh.count) photos and videos")
         }
@@ -348,12 +647,15 @@ final class BrowserModel: ObservableObject {
             do {
                 let usb = try await MTPClient.connectUSB()
                 let storages = try await usb.list(id: "")
+                Diagnostics.log("Connected over USB File transfer")
+                self.fastUSB = false
                 self.client = usb; self.deviceName = usb.name
                 self.path = [("", usb.name)]; self.entries = storages
                 self.connected = true; self.status = ""
                 self.didConnect(to: usb.name)
             } catch {
                 self.skipped = attached   // don't retry in a loop; replugging or Try again does
+                Diagnostics.log("USB File transfer failed: \(error.localizedDescription)")
                 throw error
             }
         }
@@ -364,11 +666,19 @@ final class BrowserModel: ObservableObject {
     func pair(name: String? = nil) {
         guard !busy else { return }
         overUSB = false
+        let address = host.trimmingCharacters(in: .whitespacesAndNewlines)
         run {
             self.status = "Connecting to the phone…"
-            let paired = try await BridgeClient.pair(host: self.host.trimmingCharacters(in: .whitespacesAndNewlines), port: self.port) { code in
-                self.pairingCode = code
-                self.status = "Check that your phone shows the same code, then tap Pair on the phone."
+            Diagnostics.log("Wi‑Fi: pairing with \(address)")
+            let paired: BridgeClient
+            do {
+                paired = try await BridgeClient.pair(host: address, port: self.port) { code in
+                    self.pairingCode = code
+                    self.status = "Check that your phone shows the same code, then tap Pair on the phone."
+                }
+            } catch {
+                if self.pairingCode == nil && self.discovery.phones.contains(where: { $0.host == address }) { self.noteUnreachable(address) }
+                throw error
             }
             self.pairingCode = nil
             let entries = try await paired.list()
@@ -380,13 +690,20 @@ final class BrowserModel: ObservableObject {
 
     func disconnect() {
         guard !busy else { return }
-        if overUSB { skipped = MTPClient.attachedPhone() } else { autoConnect = false }
+        if overUSB { skipped = MTPClient.attachedPhone() }
+        else {
+            autoConnect = false
+            // Don't come straight back over the cable either.
+            if fastUSB { fastSkipped = USBDebugging.attachedPhone(); skipped = MTPClient.attachedPhone() }
+        }
+        Diagnostics.log("Disconnected")
         drop("")
     }
 
     /// A new connection: old IDs are stale. If this phone had a transfer cut off, continue it.
     private func didConnect(to phone: String) {
         connection += 1
+        Announce.spoken("Connected to \(phone) over \(transportName)")
         guard let pending = interrupted, pending.phone == phone, !pending.remaining.isEmpty else { return }
         interrupted = nil
         showBrowser = true
@@ -396,6 +713,12 @@ final class BrowserModel: ObservableObject {
     }
 
     private func drop(_ reason: String) {
+        if connected { Announce.spoken(reason.isEmpty ? "Disconnected" : reason) }
+        if !reason.isEmpty { Diagnostics.log("Connection ended: \(reason)") }
+        if fastUSB { USBDebugging.shared.closeIfUnused() }
+        tunnel?.stop(); tunnel = nil; fastUSB = false
+        phoneInfo = nil; phoneOutdated = false
+        clipboardTimer?.invalidate(); clipboardTimer = nil
         if let cut = transfer, !cut.done, !cut.remaining.isEmpty { interrupted = cut }
         if let old = client { Task { await old.disconnect() } }
         client = nil; connected = false; showBrowser = false; entries = []; path = [("", "Phone")]
@@ -447,7 +770,7 @@ final class BrowserModel: ObservableObject {
     func sizeOf(_ entry: Entry) -> Int64 { entry.directory ? sizes[entry.id]?.bytes ?? 0 : entry.size }
 
     private func display(_ entries: [Entry], at path: [(id: String, name: String)]) {
-        self.path = path; self.entries = entries; selection = []; anchor = nil; query = ""; results = nil
+        self.path = path; self.entries = entries; selection = []; anchor = nil; cursor = nil; query = ""; results = nil
         for entry in sizeQueue { sizesPending.remove(entry.id) }
         sizeQueue = []
         // Previews still waiting belong to the folder just left.
@@ -528,9 +851,44 @@ final class BrowserModel: ObservableObject {
         } else {
             selection = [entry.id]; anchor = entry.id
         }
+        cursor = entry.id
     }
 
     func selectAll() { selection = Set(entries.map(\.id)) }
+
+    /// What the arrow keys walk through: search hits when they're shown, else the folder in its order.
+    private var keyboardOrder: [Entry.ID] { results != nil ? sortedResults.map(\.id) : sorted.map(\.id) }
+
+    /// Arrow keys: moves the selection by `step` items (a row in the grid); with Shift, extends it from the anchor.
+    func moveCursor(_ step: Int, extending: Bool = false) {
+        let order = keyboardOrder
+        guard !order.isEmpty else { return }
+        let from = cursor.flatMap { order.firstIndex(of: $0) } ?? (step > 0 ? -1 : order.count)
+        let to = min(max(from + step, 0), order.count - 1)
+        cursor = order[to]
+        if extending, let anchor, let start = order.firstIndex(of: anchor) {
+            selection = Set(order[min(start, to)...max(start, to)])
+        } else {
+            selection = [order[to]]; anchor = order[to]
+        }
+    }
+
+    /// ⌘↓ or ⌘O: opens the item the keyboard is on (a folder opens, a file downloads; a search hit likewise).
+    func openCursor() {
+        if results != nil, let id = cursor ?? selection.first, let hit = sortedResults.first(where: { $0.id == id }) { openFound(hit); return }
+        if let entry = selected.first(where: { $0.id == cursor }) ?? selected.first { open(entry) }
+    }
+
+    /// Return, as in Finder: rename the one selected item.
+    func renameSelected() {
+        guard results == nil, selected.count == 1 else { return }
+        renaming = selected[0]
+    }
+
+    /// Esc: clears the search first, then the selection.
+    func escape() {
+        if !query.isEmpty { query = "" } else { selection = []; cursor = nil }
+    }
 
     // MARK: Previews
 
@@ -678,6 +1036,8 @@ final class BrowserModel: ObservableObject {
         guard let text = NSPasteboard.general.string(forType: .string), !text.isEmpty else { show("The Mac's clipboard has no text."); return }
         run {
             try await bridge.setClipboard(text)
+            self.lastShared = text
+            self.texts.add(text, fromPhone: false)
             self.show("Sent to the phone's clipboard")
         }
     }
@@ -689,8 +1049,78 @@ final class BrowserModel: ObservableObject {
             guard !text.isEmpty else { self.show("The phone's clipboard is empty."); return }
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
+            self.fromPhone = NSPasteboard.general.changeCount
+            self.pasteboardSeen = self.fromPhone
+            self.lastShared = text
+            self.texts.add(text, fromPhone: true)
             self.show("Copied the phone's clipboard to your Mac")
         }
+    }
+
+    /// Puts a text on the phone's clipboard, from the Texts panel. `sent` runs once it's there.
+    func sendText(_ text: String, sent: @escaping () -> Void) {
+        guard let bridge = client as? BridgeClient, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        guard text.utf8.count <= Wire.maxClipboard else { textProblem = "That text is too long for the phone's clipboard (256 KB at most)."; return }
+        textProblem = nil
+        Task {
+            do {
+                try await bridge.setClipboard(text)
+                lastShared = text
+                texts.add(text, fromPhone: false)
+                sent()
+                show("Sent to the phone")
+                Diagnostics.log("Sent a text to the phone")
+            } catch {
+                textProblem = error.localizedDescription
+            }
+        }
+    }
+
+    /// While connected over Wi‑Fi or Fast USB with automatic sending on, looks at the clipboard every second.
+    private func watchClipboard() {
+        clipboardTimer?.invalidate(); clipboardTimer = nil
+        guard autoSendTexts, connected, client is BridgeClient else { return }
+        pasteboardSeen = NSPasteboard.general.changeCount
+        clipboardTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in self.clipboardChanged() }
+        }
+    }
+
+    private func clipboardChanged() {
+        let pasteboard = NSPasteboard.general
+        let count = pasteboard.changeCount
+        guard count != pasteboardSeen else { return }
+        pasteboardSeen = count
+        guard count != fromPhone, autoSendTexts, let bridge = client as? BridgeClient else { return }
+        // Password managers mark what they copy as concealed or transient: never send that.
+        let types = pasteboard.types ?? []
+        guard !types.contains(NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")),
+              !types.contains(NSPasteboard.PasteboardType("org.nspasteboard.TransientType")),
+              let text = pasteboard.string(forType: .string), !text.isEmpty, text.utf8.count <= Wire.maxClipboard,
+              text != lastShared else { return }
+        lastShared = text
+        Task {
+            do {
+                try await bridge.setClipboard(text)
+                texts.add(text, fromPhone: false)
+                Diagnostics.log("Sent copied text to the phone")
+            } catch {
+                Diagnostics.log("Couldn't send copied text: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    // MARK: Updates
+
+    /// Asks GitHub for a newer release. Returns it, or nil when up to date or the check failed.
+    @discardableResult
+    func checkForUpdates(current: String? = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) async -> AvailableUpdate? {
+        guard let current else { return nil }
+        let found = await Updates.newer(than: current)
+        Diagnostics.log(found.map { "Update check: \($0.version) is available" } ?? "Update check: no newer release found")
+        if let found { update = found }
+        return found
     }
 
     // MARK: Folders
@@ -726,7 +1156,7 @@ final class BrowserModel: ObservableObject {
         let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
         if items.count == 1, let file = items.first, !file.directory {
             let panel = NSSavePanel()
-            panel.nameFieldStringValue = file.name
+            panel.nameFieldStringValue = Self.macName(file.name)
             panel.directoryURL = downloads
             panel.message = "Choose where to save. OpenBridge never replaces existing files."
             guard panel.runModal() == .OK, let target = panel.url else { return }
@@ -749,7 +1179,7 @@ final class BrowserModel: ObservableObject {
         var jobs: [Job] = []
         for item in items {
             try Task.checkCancellation()
-            let target = Self.free(folder.appendingPathComponent(item.name))
+            let target = Self.free(folder.appendingPathComponent(Self.macName(item.name)))
             if item.directory {
                 try FileManager.default.createDirectory(at: target, withIntermediateDirectories: false)
                 jobs += try await plan(try await client.list(id: item.id), into: target, at: location + [item.name], client: client)
@@ -940,6 +1370,10 @@ final class BrowserModel: ObservableObject {
         }
         return name
     }
+
+    /// A phone's name for a file, short enough for the Mac (255 bytes, with room for " 2" and the partial download's
+    /// suffix). Phones allow longer names in Chinese and other scripts over USB.
+    static func macName(_ name: String) -> String { Wire.fitted(name, limit: 220) }
 
     /// A Mac destination that doesn't exist yet: "photo 2.jpg" if "photo.jpg" is there. Never replaces a file.
     static func free(_ url: URL) -> URL {

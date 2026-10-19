@@ -163,6 +163,14 @@ public final class USBTransport: MTPTransport {
         return interfaces.first { $0.code.isMTP || $0.code.isPTP }?.device
     }
 
+    /// Name of a phone attached with USB debugging on (its ADB interface present), without opening it. Same name as
+    /// `attachedPhone()` gives for the same phone.
+    public static func attachedDebugging() -> String? {
+        let interfaces = usbInterfaces()
+        defer { interfaces.forEach { IOObjectRelease($0.service) } }
+        return interfaces.first { $0.code.isADB }?.device
+    }
+
     struct InterfaceCode: CustomStringConvertible {
         let interfaceClass: Int, subclass: Int, interfaceProtocol: Int
         var isMTP: Bool { interfaceClass == 0xFF && subclass == 0xFF && interfaceProtocol == 0x00 }

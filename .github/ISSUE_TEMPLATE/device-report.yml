@@ -1,0 +1,60 @@
+name: Device report
+description: Tell us how OpenBridge works on your phone and computer (it helps everyone with the same phone).
+title: "[Device] "
+labels: ["device report"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing! The checklist is in [docs/verification.md](https://github.com/PredatorWoah/OpenBridge/blob/main/docs/verification.md#test-it-on-your-phone). Fill in what you tried; skip the rest.
+  - type: input
+    id: phone
+    attributes:
+      label: Phone
+      description: Brand, model and Android version (Settings › About phone).
+      placeholder: vivo X300 Pro, Android 15
+    validations:
+      required: true
+  - type: input
+    id: computer
+    attributes:
+      label: Computer
+      description: Mac, Windows or Linux, with the version.
+      placeholder: MacBook Air M1, macOS 15.1
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: OpenBridge version
+      placeholder: "1.0.0"
+    validations:
+      required: true
+  - type: checkboxes
+    id: worked
+    attributes:
+      label: What worked
+      options:
+        - label: Wi‑Fi pairing and browsing
+        - label: Big downloads and uploads over Wi‑Fi
+        - label: Reconnecting without a code
+        - label: USB cable (File transfer)
+        - label: Fast USB (USB debugging)
+        - label: Screen mirroring
+        - label: Share › OpenBridge from the phone
+        - label: Texts and clipboard
+        - label: Import new photos
+        - label: Search and folder sizes
+        - label: Phone hotspot
+        - label: In-app update
+  - type: textarea
+    id: problems
+    attributes:
+      label: What didn't work, or felt odd
+      description: What you did, what you expected, what happened. Screenshots welcome.
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Paste from Settings › Copy diagnostics (phone and computer). It contains no secrets or file contents.
+      render: text

@@ -12,7 +12,7 @@ import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 
-/** The phone's clipboard for a paired Mac. Android only lets an app read it while the app is on screen. */
+/** The phone's clipboard for a paired computer. Android only lets an app read it while the app is on screen. */
 class PhoneClipboard(private val context: Context) : Clipboard {
     private val manager = context.getSystemService(ClipboardManager::class.java)
     private val main = Handler(Looper.getMainLooper())
@@ -27,9 +27,24 @@ class PhoneClipboard(private val context: Context) : Clipboard {
 
     override fun read(): String = onMain {
         if (!Sharing.onScreen) throw IOException("Open OpenBridge on the phone to share its clipboard")
-        val clip = manager.primaryClip
-        if (clip == null || clip.itemCount == 0) "" else clip.getItemAt(0).coerceToText(context).toString()
+        text(context)
     }
 
-    override fun write(text: String) = onMain { manager.setPrimaryClip(ClipData.newPlainText("From your computer", text)) }
+    /** A text from the computer: onto the clipboard, into Texts, and a short notice when the app isn't in front. */
+    override fun write(text: String) {
+        val computer = Sharing.lastComputer
+        onMain {
+            manager.setPrimaryClip(ClipData.newPlainText("From your computer", text))
+            Texts.received(text, computer)
+            if (!Sharing.onScreen) ShareService.textReceived(context, computer)
+        }
+    }
+
+    companion object {
+        /** The clipboard's text, or "" (only while the app has focus). */
+        fun text(context: Context): String {
+            val clip = context.getSystemService(ClipboardManager::class.java).primaryClip
+            return if (clip == null || clip.itemCount == 0) "" else clip.getItemAt(0).coerceToText(context)?.toString().orEmpty()
+        }
+    }
 }

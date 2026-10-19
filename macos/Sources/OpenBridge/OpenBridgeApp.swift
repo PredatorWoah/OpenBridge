@@ -65,16 +65,18 @@ struct Breathing: ViewModifier {
 // MARK: - Screens
 
 struct RootView: View {
-    @StateObject private var model = BrowserModel()
+    @ObservedObject var model: BrowserModel
     @State private var wifi = false
     @AppStorage("openAutomatically") private var openAutomatically = false
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var browsing: Bool { model.showBrowser && model.connected }
 
     var body: some View {
         ZStack {
-            Palette.background.ignoresSafeArea()
+            Backdrop(energy: model.connected ? 1 : 0, level: model.transfer.map { $0.done ? 0 : $0.fraction } ?? 0)
+                .ignoresSafeArea()
             if browsing {
                 BrowserScreen(model: model, mirror: { openWindow(id: "mirror") })
                     .transition(.asymmetric(insertion: .scale(scale: 1.04).combined(with: .opacity), removal: .opacity))
@@ -83,19 +85,19 @@ struct RootView: View {
                     .transition(.scale(scale: 0.94).combined(with: .opacity))
             }
         }
-        .animation(.spring(response: 0.55, dampingFraction: 0.82), value: browsing)
+        .animation(reduceMotion ? .easeOut(duration: 0.15) : .spring(response: 0.55, dampingFraction: 0.82), value: browsing)
         .frame(minWidth: 780, minHeight: 580)
         .preferredColorScheme(.dark)
         .sheet(isPresented: $wifi) { WiFiSheet(model: model, discovery: model.discovery, isPresented: $wifi) }
+        .sheet(isPresented: $model.showTexts) { TextsPanel(model: model, history: model.texts) }
         .overlay(alignment: .topTrailing) {
             if let update = model.update {
-                Link("Update available: \(update.version)", destination: update.page)
-                    .font(.system(size: 12, weight: .bold)).foregroundStyle(Palette.background)
-                    .padding(.horizontal, 12).padding(.vertical, 5)
-                    .background(Palette.amber, in: Capsule())
+                UpdatePill(update: update, updater: model.updater, busy: model.busy || model.transfer.map { !$0.done } == true)
                     .padding(.top, 10).padding(.trailing, 14)
             }
         }
+        // Toasts show on every screen: texts from the phone arrive whatever is open.
+        .overlay(alignment: .bottom) { Toast(text: model.toast).animation(.easeOut(duration: 0.2), value: model.toast) }
         .onAppear { model.startWatching() }
         .onChange(of: model.connected) { connected in
             guard connected else { return }
@@ -111,22 +113,25 @@ struct ConnectScreen: View {
     @ObservedObject var model: BrowserModel
     @Binding var wifi: Bool
     @Binding var openAutomatically: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var title: String {
-        if model.connected { return model.overUSB ? "Connected over USB" : "Connected over Wi‑Fi" }
+        if model.connected { return model.fastUSB ? "Connected over Fast USB" : model.overUSB ? "Connected over USB" : "Connected over Wi‑Fi" }
+        if model.usbPairable != nil { return "Pair over USB" }
         if model.busy { return model.overUSB ? "Phone found" : "Connecting…" }
         return "Waiting for your phone"
     }
     private var subtitle: String {
         if model.connected { return "Your phone is ready." }
         if !model.status.isEmpty { return model.status }
+        if model.usbPairable != nil { return "OpenBridge is sharing over the cable. Pair once, then it connects by itself." }
         return "Plug it in, unlock it and choose File transfer."
     }
 
     var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .top) {
-                SunArch(active: true, connected: model.connected, centerY: 0.27, radius: 62, startScanning: true)
+                Hero(active: true, connected: model.connected, centerY: 0.27, radius: 62, startScanning: true, label: title)
                     .allowsHitTesting(false)
                     .ignoresSafeArea()
                 VStack(spacing: 6) {
@@ -138,6 +143,18 @@ struct ConnectScreen: View {
                             .padding(.top, 16)
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                     } else {
+                        if let phone = model.usbPairable {
+                            USBPairingCard(model: model, phone: phone).padding(.top, 16)
+                        } else if model.usbNeedsAllow {
+                            HintCard(symbol: "cable.connector", text: "USB debugging is on. Allow it for this Mac to use Fast USB: instant search, real folder sizes, resumable copies.",
+                                     action: "Use Fast USB", busy: model.busy) { model.connectFastUSB(asking: true) }
+                                .padding(.top, 16)
+                        }
+                        if model.wifiIsolated {
+                            HintCard(symbol: "wifi.exclamationmark",
+                                     text: "This Wi‑Fi keeps devices apart (common on guest, hotel and campus networks). On the phone, open OpenBridge › Settings › Phone hotspot and join that network from this computer, or use a USB cable.")
+                                .padding(.top, 12)
+                        }
                         if !model.saved.isEmpty {
                             SavedPhonesCard(model: model, discovery: model.discovery).padding(.top, 16)
                         }
@@ -157,7 +174,7 @@ struct ConnectScreen: View {
                 }
                 .padding(.horizontal, 24)
                 .frame(maxWidth: .infinity)
-                .animation(.spring(response: 0.6, dampingFraction: 0.68), value: model.connected)
+                .animation(reduceMotion ? nil : .spring(response: 0.6, dampingFraction: 0.68), value: model.connected)
             }
         }
     }
@@ -181,13 +198,14 @@ struct DeviceCard: View {
                 Image(systemName: "iphone")
                     .font(.system(size: 24, weight: .medium))
                     .frame(width: 52, height: 52)
+                    .accessibilityHidden(true)
                     .background(LinearGradient(colors: [Palette.violet, Palette.pink], startPoint: .topLeading, endPoint: .bottomTrailing),
                                 in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 VStack(alignment: .leading, spacing: 3) {
                     Text(model.deviceName).font(.system(size: 18, weight: .bold, design: .rounded)).lineLimit(1)
                     HStack(spacing: 6) {
-                        Circle().fill(Palette.ok).frame(width: 7, height: 7).shadow(color: Palette.ok, radius: 4)
-                        Text(model.overUSB ? "USB · File transfer" : "Wi‑Fi · \(model.host)").foregroundStyle(Palette.muted)
+                        Circle().fill(Palette.ok).frame(width: 7, height: 7).shadow(color: Palette.ok, radius: 4).accessibilityHidden(true)
+                        Text(model.fastUSB ? "Fast USB" : model.overUSB ? "USB · File transfer" : "Wi‑Fi · \(model.host)").foregroundStyle(Palette.muted)
                     }.font(.system(size: 12.5))
                 }
                 Spacer()
@@ -200,6 +218,27 @@ struct DeviceCard: View {
                 }
                 Button { model.importNewPhotos() } label: { Label("Import new photos", systemImage: "photo.stack") }
                     .buttonStyle(GhostButton()).disabled(model.busy)
+                if model.clipboardAvailable {
+                    Button { model.showTexts = true } label: { Label("Texts", systemImage: "text.bubble") }
+                        .buttonStyle(GhostButton()).help("Send texts to the phone, and see what it sent")
+                }
+            }
+            if model.overUSB && !model.usbDebugging {
+                Label("Turn on USB debugging for Fast USB: instant search, real folder sizes, resumable copies", systemImage: "bolt.horizontal")
+                    .font(.system(size: 12)).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)
+            } else if model.overUSB && model.usbNeedsAllow {
+                HStack(spacing: 8) {
+                    Label("Allow USB debugging for Fast USB", systemImage: "bolt.horizontal").foregroundStyle(Palette.muted)
+                    Button("Use Fast USB") { model.disconnect(); model.connectFastUSB(asking: true) }.buttonStyle(.link).disabled(model.busy)
+                }
+                .font(.system(size: 12))
+            }
+            if model.phoneOutdated {
+                Label("Update OpenBridge on the phone to get texts from it and Fast USB.", systemImage: "arrow.down.app")
+                    .font(.system(size: 12)).foregroundStyle(Palette.amber).fixedSize(horizontal: false, vertical: true)
+            } else if let behind = model.phoneBehind {
+                Label("The phone has OpenBridge \(behind). Update it there too, so both work alike.", systemImage: "arrow.down.app")
+                    .font(.system(size: 12)).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)
             }
             Button { model.showBrowser = true } label: { Text("Open phone  →") }
                 .buttonStyle(SunsetButton(wide: true))
@@ -228,7 +267,7 @@ struct SavedPhonesCard: View {
             ForEach(model.saved) { phone in
                 let here = discovery.phones.contains { $0.phoneID == phone.id }
                 HStack(spacing: 10) {
-                    Image(systemName: "iphone").foregroundStyle(here ? Palette.ok : .white).frame(width: 22)
+                    Image(systemName: "iphone").foregroundStyle(here ? Palette.ok : .white).frame(width: 22).accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(phone.name).font(.system(size: 13.5, weight: .semibold)).lineLimit(1)
                         Text(here ? "On this Wi‑Fi now" : "Reconnects by itself while the phone is sharing")
@@ -238,6 +277,7 @@ struct SavedPhonesCard: View {
                     Button("Connect") { model.connect(phone) }.buttonStyle(GhostButton()).disabled(model.busy)
                     Button { forgetting = phone } label: { Image(systemName: "xmark") }
                         .buttonStyle(.plain).foregroundStyle(Palette.muted).help("Forget this phone")
+                        .accessibilityLabel("Forget \(phone.name)")
                 }
                 .padding(10)
                 .glass(12, border: here ? Palette.ok.opacity(0.45) : .white.opacity(0.14))
@@ -292,13 +332,83 @@ struct FlowLayout: Layout {
     }
 }
 
+/// The 6-digit code to compare with the phone's.
+struct PairingCode: View {
+    let code: String
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Codes match? Tap Pair on the phone.").font(.caption).foregroundStyle(Palette.muted)
+            HStack(spacing: 6) {
+                ForEach(Array(code.enumerated()), id: \.offset) { index, digit in
+                    Text(String(digit))
+                        .font(.system(size: 30, weight: .bold, design: .rounded))
+                        .frame(width: 42, height: 54)
+                        .glass(12)
+                        .padding(.leading, index == 3 ? 10 : 0)
+                }
+            }
+            .textSelection(.enabled)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Pairing code \(code.map { String($0) }.joined(separator: " "))")
+        }
+    }
+}
+
+/// A phone sharing over the cable that this Mac hasn't paired with: pair once, with the same code as over Wi‑Fi.
+struct USBPairingCard: View {
+    @ObservedObject var model: BrowserModel
+    let phone: String
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                Image(systemName: "cable.connector").font(.system(size: 20)).foregroundStyle(Palette.amber).accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(phone).font(.system(size: 15, weight: .bold, design: .rounded))
+                    Text("Fast USB: instant search, real folder sizes, resumable copies").font(.system(size: 12)).foregroundStyle(Palette.muted)
+                }
+                Spacer()
+            }
+            if let code = model.pairingCode {
+                PairingCode(code: code)
+            }
+            HStack {
+                Button("Not now", action: model.cancelUSBPairing).buttonStyle(GhostButton()).disabled(model.busy)
+                Spacer()
+                Button("Pair over USB", action: model.pairOverUSB).buttonStyle(SunsetButton()).disabled(model.busy)
+            }
+        }
+        .padding(16)
+        .frame(width: 460)
+        .glass(20, border: Palette.amber.opacity(0.45))
+    }
+}
+
+/// A calm suggestion on the waiting screen, with an optional action.
+struct HintCard: View {
+    let symbol: String
+    let text: String
+    var action: String?
+    var busy = false
+    var perform: () -> Void = {}
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: symbol).foregroundStyle(Palette.amber).accessibilityHidden(true)
+            Text(text).font(.system(size: 12.5)).frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
+            if let action { Button(action, action: perform).buttonStyle(GhostButton()).disabled(busy) }
+        }
+        .padding(14)
+        .frame(width: 460)
+        .glass(16)
+    }
+}
+
 struct ErrorCard: View {
     var message: String
     var busy = false
     var retry: () -> Void
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Palette.amber)
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Palette.amber).accessibilityLabel("Problem")
             Text(message).font(.system(size: 13)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
             Button("Try again", action: retry).buttonStyle(GhostButton()).disabled(busy)
         }
@@ -356,19 +466,7 @@ struct WiFiSheet: View {
             }
             .textFieldStyle(.roundedBorder)
             if let code = model.pairingCode {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Codes match? Tap Pair on the phone.").font(.caption).foregroundStyle(Palette.muted)
-                    HStack(spacing: 6) {
-                        ForEach(Array(code.enumerated()), id: \.offset) { index, digit in
-                            Text(String(digit))
-                                .font(.system(size: 30, weight: .bold, design: .rounded))
-                                .frame(width: 42, height: 54)
-                                .glass(12)
-                                .padding(.leading, index == 3 ? 10 : 0)
-                        }
-                    }
-                    .textSelection(.enabled)
-                }
+                PairingCode(code: code)
             } else if !model.status.isEmpty && model.busy {
                 Text(model.status).foregroundStyle(Palette.muted)
             }
@@ -413,13 +511,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct OpenBridgeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    /// One model for the app, so every window and Settings see the same connection.
+    @StateObject private var model = BrowserModel()
+    @StateObject private var looks = LookStore.shared
 
     var body: some Scene {
-        WindowGroup { RootView() }
+        // A new look rebuilds the window, so every colour and picture follows it.
+        WindowGroup { RootView(model: model).id(looks.look) }
             .windowStyle(.hiddenTitleBar)
             .defaultSize(width: 980, height: 660)
         Window("Phone Screen", id: "mirror") { MirrorView() }
             .windowStyle(.hiddenTitleBar)
             .defaultSize(width: 380, height: 780)
+        Settings { SettingsView(model: model) }
     }
 }

@@ -4,6 +4,38 @@ All notable changes to OpenBridge are recorded here. Every release has an entry;
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-19
+
+The big one before 1.0: Linux, Fast USB, texts, Windows USB browsing, a new phone design with three looks, and updates that install themselves.
+
+### Added
+- **OpenBridge for Linux.** A `.deb` and a portable `.tar.gz`, with discovery, pairing, browsing, texts and screen mirroring (scrcpy bundled), in English and 简体中文.
+- **Fast USB.** Turn on USB debugging once and the cable gets everything Wi‑Fi has: instant search, real folder sizes, resumable copies, texts. Plug in and the computer starts sharing on the phone by itself, pairs a new phone over the cable with the usual 6 digits, and moves a Wi‑Fi connection onto the cable (and back when you unplug). On the Mac, Windows and Linux.
+- **Windows: browse the phone over USB inside OpenBridge.** File transfer mode now opens in OpenBridge's own window, with previews, sizes, search, rename, delete and drag and drop, through Windows' own driver. Open in File Explorer is still there.
+- **Texts.** Share text to OpenBridge on the phone, tap the new **Send clipboard** quick settings tile or notification button, or type on the computer and send it. It lands on the other clipboard, with a history of the last 30 on both sides. Optionally, text you copy on the computer goes to the phone by itself (off by default; never what password managers mark as secret).
+- **A new phone design** with an animated background, a big share button, smooth cards for computers, sending and texts, and a Settings sheet.
+- **Three looks:** Dusk, plus **Aurora** (northern lights, a shimmering halo) and **Tide** (rolling waves, a glass pool that fills when a computer connects), in preview. Pick one in Settings on the phone and the computer.
+- **Updates that install themselves.** Click **Update**: the new version is downloaded, checked against the release's `SHA256SUMS.txt`, and installed (Android asks you to confirm).
+- **Phone hotspot** (Android 13+), for hotel, campus and guest Wi‑Fi that keeps devices apart. The computers notice such networks, explain them, and find a phone on its own hotspot by themselves.
+- **Instant search** for photos, videos and music, from the phone's own media index.
+- **Big shares don't eat storage.** Sharing a big video sends it from where it is instead of copying it first (with All files access).
+- **Copy diagnostics** in Settings on every app: a short report for bug reports, with no secrets, texts or file contents.
+- **Accessibility:** screen-reader labels everywhere, full keyboard use of the computer browsers, announcements when a phone connects or leaves, and still backgrounds with reduce motion.
+- Import new photos works over every connection, including plain USB on Windows.
+- The computer tells you when the phone's OpenBridge is older than its own.
+
+### Changed
+- **Mac: Return renames** the selected item, like Finder; ⌘↓ or ⌘O opens it.
+- Wording says "computer" rather than "PC" or "Mac" where it means any of them.
+- The wire protocol gains OUTBOX ALL (texts) and INFO, and is frozen for 1.0: a 1.x computer works with any 1.x phone. Every build fuzzes the phone's protocol handler with 35,000 random and half-valid requests.
+
+### Fixed
+- Mac over USB: an item listed twice by the phone showed twice; an item whose name the phone left out of its property list was hidden from search; very long names (common in Chinese) were hidden; an SD card reporting more free space than its size showed a nonsense used size.
+
+### Notes
+- Update the phone app too: texts, Fast USB and the hotspot need 0.13 on both sides.
+- Fast USB uses Android's USB debugging, which gives a trusted computer broad access to the phone (see SECURITY.md). It's optional; File transfer still works without it.
+
 ## [0.12.2] - 2026-10-18
 
 Fixes from real-device testing of 0.12.1.
