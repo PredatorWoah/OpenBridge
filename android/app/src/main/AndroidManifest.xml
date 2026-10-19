@@ -29,9 +29,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <!-- Share › OpenBridge: files sent from any app wait here for a paired computer to collect them. -->
+        <!-- Share › OpenBridge: files sent from any app wait here for a paired computer to collect them. It handles
+             rotation and other changes itself: being recreated would queue everything a second time. -->
         <activity android:name=".ShareReceiver" android:exported="true" android:label="OpenBridge"
-            android:theme="@android:style/Theme.Translucent.NoTitleBar" android:excludeFromRecents="true" android:taskAffinity="">
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" android:excludeFromRecents="true" android:taskAffinity=""
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection">
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <action android:name="android.intent.action.SEND_MULTIPLE" />
@@ -40,9 +42,10 @@
             </intent-filter>
         </activity>
         <!-- Send clipboard (tile and notification): Android lets only the focused app read the clipboard, so this
-             invisible screen opens for a moment to read it. -->
+             invisible screen opens for a moment to read it (and isn't recreated, which would send the text twice). -->
         <activity android:name=".SendClipboard" android:exported="false" android:noHistory="true"
-            android:theme="@android:style/Theme.Translucent.NoTitleBar" android:excludeFromRecents="true" android:taskAffinity="" />
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" android:excludeFromRecents="true" android:taskAffinity=""
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" />
         <receiver android:name=".UpdateReceiver" android:exported="false" />
         <service android:name=".ShareService" android:exported="false" android:foregroundServiceType="dataSync" />
         <service android:name=".ClipboardTile" android:exported="true" android:label="@string/send_clipboard"
