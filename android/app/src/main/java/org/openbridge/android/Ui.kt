@@ -17,6 +17,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -121,7 +122,7 @@ fun IconAction(icon: ImageVector, label: String, onClick: () -> Unit, modifier: 
 @Composable
 fun ToggleRow(title: String, detail: String, checked: Boolean, onChange: (Boolean) -> Unit, modifier: Modifier = Modifier) {
     Row(modifier.fillMaxWidth().heightIn(min = 56.dp).clip(RoundedCornerShape(14.dp))
-        .clickable(role = Role.Switch) { onChange(!checked) }.padding(vertical = 6.dp),
+        .toggleable(checked, role = Role.Switch, onValueChange = onChange).padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(title, color = Palette.fg, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)

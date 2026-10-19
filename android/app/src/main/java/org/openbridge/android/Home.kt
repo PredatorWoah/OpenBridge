@@ -200,7 +200,7 @@ private fun Where(model: Sharing) {
             model.busy -> Pill(S.starting, lit = false)
             endpoints.isEmpty() -> Pill(S.notSharing, lit = false)
         }
-        if (!model.paired) for (endpoint in endpoints) Pill(if (endpoint.via == Via.USB) S.fastUsb else "${S.via(endpoint.via)} · ${endpoint.host}", lit = false)
+        if (!model.paired) for (endpoint in endpoints) Pill(if (endpoint.via == Via.USB) S.fastUsb else "${S.via(endpoint.via)} · ${endpoint.host}:${endpoint.port}", lit = false)
     }
     val network = endpoints.firstOrNull { it.via != Via.USB }
     AnimatedVisibility(network != null && !model.paired, enter = fadeIn() + expandVertically(), exit = fadeOut() + shrinkVertically()) {
