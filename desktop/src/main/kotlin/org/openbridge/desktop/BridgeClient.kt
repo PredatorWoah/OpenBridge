@@ -208,7 +208,7 @@ class BridgeClient internal constructor(
 
     /** Downloads `entry`, continuing an earlier interrupted download to the same place when there is one. */
     override fun download(entry: Entry, destination: File, cancelled: () -> Boolean, progress: (Long, Long) -> Unit) {
-        if (destination.exists()) throw BridgeException("${destination.name} already exists. Choose a new name; OpenBridge never replaces files.")
+        if (destination.exists()) throw BridgeException(S.alreadyHere(destination.name))
         val partial = Partial.location(destination, entry.size)
         var offset = if (partial.exists() && partial.length() in 1 until entry.size) partial.length() else 0L
         if (offset == 0L) partial.delete()
@@ -257,9 +257,9 @@ class BridgeClient internal constructor(
     override fun upload(source: File, directoryId: String, cancelled: () -> Boolean, progress: (Long, Long) -> Unit) {
         val name = source.name
         Wire.validateName(name)
-        if (!source.isFile) throw BridgeException("Choose a regular file.")
+        if (!source.isFile) throw BridgeException(S.regularFile)
         val size = source.length()
-        if (size > Wire.MAX_FILE) throw BridgeException("Files up to 64 GiB can be sent.")
+        if (size > Wire.MAX_FILE) throw BridgeException(S.tooBig)
         val key = contentKey(source)
         try {
             send(12, source, directoryId, { Wire.writeString(it, name); it.writeLong(size); it.write(key) }, resumable = true, cancelled, progress)
@@ -285,7 +285,7 @@ class BridgeClient internal constructor(
                 while (sent < size) {
                     if (cancelled()) throw InterruptedException()
                     val read = stream.read(buffer, 0, minOf(buffer.size.toLong(), size - sent).toInt())
-                    if (read < 0) throw BridgeException("$name changed during the upload.")
+                    if (read < 0) throw BridgeException(S.changedDuringUpload(name))
                     output.write(buffer, 0, read)
                     sent += read
                     if (sent - reported >= 1 shl 20 || sent == size) { reported = sent; progress(sent, size) }
@@ -333,7 +333,7 @@ class BridgeClient internal constructor(
 
     /** Saves a file sent from the phone, continuing an interrupted copy, then tells the phone it can drop it. */
     fun receive(entry: Entry, destination: File, progress: (Long, Long) -> Unit = { _, _ -> }) {
-        if (destination.exists()) throw BridgeException("${destination.name} already exists.")
+        if (destination.exists()) throw BridgeException(S.alreadyHere(destination.name))
         val partial = Partial.location(destination, entry.size)
         val offset = if (partial.exists() && partial.length() in 1 until entry.size) partial.length() else 0L
         if (offset == 0L) partial.delete()
@@ -438,7 +438,7 @@ class BridgeClient internal constructor(
     fun clipboard(): String = request(7, "") { input, _ -> status(input); Wire.readString(input, Wire.MAX_CLIPBOARD) }
 
     fun setClipboard(text: String) {
-        if (text.toByteArray().size > Wire.MAX_CLIPBOARD) throw BridgeException("That text is too long for the phone's clipboard.")
+        if (text.toByteArray().size > Wire.MAX_CLIPBOARD) throw BridgeException(S.tooLong)
         request(8, "", { Wire.writeString(it, text) }) { input, _ -> status(input) }
     }
 }
@@ -464,6 +464,6 @@ fun contentKey(file: File): ByteArray {
 
 /** An interrupted download, kept beside its destination: `.<name>.<size>.openbridge-part`, as on the Mac. */
 object Partial {
-    const val CHANGED = "The file on the phone changed since the download started. Download it again."
+    val CHANGED get() = S.fileChanged
     fun location(destination: File, size: Long) = File(destination.parentFile, ".${destination.name}.$size.openbridge-part")
 }

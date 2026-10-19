@@ -102,6 +102,13 @@ object S {
     val showInFolder2 = t("Show in folder", "在文件夹中显示")
     val open = t("Open", "打开")
     val folderGone = t("That folder is no longer on the phone.", "该文件夹已不在手机上。")
+    fun goneFromPhone(name: String) = t("“$name” is no longer on the phone.", "“$name”已不在手机上。")
+    fun alreadyHere(name: String) = t("$name already exists. Choose a new name; OpenBridge never replaces files.",
+        "$name 已存在。请换个名称；OpenBridge 从不覆盖文件。")
+    fun changedDuringUpload(name: String) = t("$name changed during the upload.", "$name 在上传过程中发生了变化。")
+    val fileChanged = t("The file on the phone changed since the download started. Download it again.", "手机上的文件在下载开始后发生了变化。请重新下载。")
+    val regularFile = t("Choose a regular file.", "请选择普通文件。")
+    val tooBig = t("Files up to 64 GiB can be sent.", "最大可发送 64 GiB 的文件。")
     val showAll = t("All files", "所有文件")
     val showMedia = t("Photos and videos", "照片和视频")
     val delete = t("Delete…", "删除…")

@@ -39,6 +39,9 @@ public final class MTPClient: FileSource, @unchecked Sendable {
     /// Previews that broke the USB connection. Some phones choke on GetThumb for some files; after two,
     /// previews stay off for this connection so browsing stays reliable. Only touched on `queue`.
     private var previewFailures = 0
+    /// Set by `disconnect`: work still queued (a folder size being counted) fails instead of opening the phone again.
+    /// Only touched on `queue`.
+    private var closed = false
 
     init(name: String, identity: MTPDeviceIdentity, session: MTPSession?, reconnect: @escaping () throws -> MTPSession) {
         self.name = name; self.identity = identity; self.session = session; self.reconnect = reconnect
@@ -308,7 +311,7 @@ public final class MTPClient: FileSource, @unchecked Sendable {
 
     public func disconnect() async {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            queue.async { self.session?.close(); self.session = nil; continuation.resume() }
+            queue.async { self.closed = true; self.session?.close(); self.session = nil; continuation.resume() }
         }
     }
 
@@ -345,6 +348,7 @@ public final class MTPClient: FileSource, @unchecked Sendable {
         try await withCheckedThrowingContinuation { continuation in
             queue.async {
                 do {
+                    guard !self.closed else { throw BridgeError.message("Disconnected from the phone.") }
                     let current = try self.session ?? self.reconnectSamePhone()
                     self.session = current
                     continuation.resume(returning: try work(current))

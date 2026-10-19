@@ -141,14 +141,17 @@ struct Backdrop: View {
     var energy: Double = 0
     var level: Double = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Minimized or hidden: nothing to see, so no frames to draw.
+    @Environment(\.scenePhase) private var scenePhase
     @State private var clock = BackdropClock()
 
     var body: some View {
         let look = Palette.look
+        let paused: Bool = reduceMotion || scenePhase == .background
         if look == .dusk {
             Rectangle().fill(Palette.background)
         } else {
-            TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion)) { timeline in
+            TimelineView(.animation(minimumInterval: 1.0 / 30, paused: paused)) { timeline in
                 Canvas { context, size in
                     let now = clock.step(timeline.date, energy: energy, level: level, still: reduceMotion)
                     LookArt.backdrop(look, &context, size: size, time: now.time, energy: now.energy, level: now.level)

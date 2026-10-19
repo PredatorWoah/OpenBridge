@@ -199,6 +199,8 @@ struct Hero: View {
     /// What VoiceOver reads for it; without one it's decoration and hidden.
     var label: String?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Minimized or hidden: nothing to see, so no frames to draw.
+    @Environment(\.scenePhase) private var scenePhase
     @State private var engine: SunEngine
 
     init(active: Bool, connected: Bool, centerY: Double = 0.3, radius: Double = 62, startScanning: Bool = false, label: String? = nil) {
@@ -208,8 +210,10 @@ struct Hero: View {
 
     var body: some View {
         let look = Palette.look
+        let interval: Double? = look == .dusk ? nil : 1.0 / 30
+        let hidden: Bool = scenePhase == .background
         // Dusk's sun keeps the display's frame rate; the drafts' richer pictures are capped at about 30 frames a second.
-        TimelineView(.animation(minimumInterval: look == .dusk ? nil : 1.0 / 30)) { timeline in
+        TimelineView(.animation(minimumInterval: interval, paused: hidden)) { timeline in
             Canvas { context, size in
                 let dt = engine.elapsed(until: timeline.date)
                 var frame = engine.step(dt, active: active, connected: connected, reduceMotion: reduceMotion)

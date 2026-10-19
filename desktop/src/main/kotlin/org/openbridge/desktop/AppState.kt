@@ -96,6 +96,8 @@ class AppState {
     private var current: SavedPhone? = null
     /** The cable a Fast USB connection runs through. */
     private var usbSerial: String? = null
+    /** A cable whose Fast USB didn't work when switching to it from Wi‑Fi: not tried again until it's plugged in anew. */
+    private var noSwitch: String? = null
     /** Who the open phone is, for imports and to continue transfers: its fingerprint ID, or its USB device. */
     private var openKey: String? = null
     /** Off after Disconnect, so the phone doesn't reconnect straight away; on again with the next connection. */
@@ -139,6 +141,8 @@ class AppState {
     private val watch = ClipboardWatch()
     private var adb: AdbTool? = null
     private var fastUsb: FastUsb? = null
+    /** Set when quitting or installing an update: Fast USB stops calling adb, which would start its server again. */
+    @Volatile private var quitting = false
     @Volatile private var cancelled = false
     // Counts connections, on the worker thread, so a transfer planned on an earlier one finds its files again.
     @Volatile private var connection = 0
@@ -176,6 +180,7 @@ class AppState {
             val usb = FastUsb(tool).also { fastUsb = it }
             daemon("openbridge-fast-usb") {
                 while (true) {
+                    if (quitting) { Thread.sleep(1_000); continue }
                     val inUse = usbSerial.takeIf { source != null && transport == Transport.FAST_USB }
                     val links = runCatching { usb.scan(saved, inUse) }.getOrDefault(emptyList())
                     ui { usbChanged(links) }
@@ -198,6 +203,7 @@ class AppState {
         }
         // Forwards to the phone end with the app; so does the adb server, if this app started it.
         Runtime.getRuntime().addShutdownHook(Thread {
+            quitting = true
             runCatching { fastUsb?.close() }
             if (!mirroring) runCatching { adb?.stopOwnServer() }
         })
@@ -313,7 +319,12 @@ class AppState {
 
     /** Moves the open phone to another connection to the same phone (Wi‑Fi ⇄ Fast USB), staying in the same folder. */
     private fun switchTo(phone: BridgeClient, via: Transport, serial: String?) = run {
-        val (listed, trail) = follow(phone, path.drop(1).map { it.second })
+        // A switch that fails keeps the connection that works, and isn't tried again until the cable is plugged in anew.
+        val (listed, trail) = try { follow(phone, path.drop(1).map { it.second }) } catch (e: Exception) {
+            Log.add("Staying on ${transport.english}: ${e.message ?: e.javaClass.simpleName}")
+            ui { noSwitch = serial }
+            return@run
+        }
         connection++   // IDs may differ between the phone's listeners: a later Resume finds its files by name
         Log.add("Switched to ${via.english}")
         ui {
@@ -589,11 +600,12 @@ class AppState {
         usbLinks = links
         val open = source
         if (open != null && transport == Transport.FAST_USB && links.none { it.serial == usbSerial && it.ready }) { cableOut(); return }
+        if (links.none { it.serial == noSwitch }) noSwitch = null
         if (busy || !autoConnect) return
         val known = links.firstOrNull { it.ready && it.phone != null } ?: return
         when {
             open == null -> connectUsb(known)
-            transport == Transport.WIFI && current != null -> links.firstOrNull { it.ready && it.phone == current }?.let { link ->
+            transport == Transport.WIFI && current != null -> links.firstOrNull { it.ready && it.phone == current && it.serial != noSwitch }?.let { link ->
                 switchTo(link.phone!!.overUsb(link.port), Transport.FAST_USB, link.serial)
             }
         }
@@ -932,7 +944,7 @@ class AppState {
             var id = ""
             var entries = listing("", emptyList())
             names.forEachIndexed { depth, name ->
-                val next = entries.firstOrNull { it.directory && it.name == name } ?: throw BridgeException("“${names.joinToString(" › ")}” is no longer on the phone.")
+                val next = entries.firstOrNull { it.directory && it.name == name } ?: throw BridgeException(S.goneFromPhone(names.joinToString(" › ")))
                 id = next.id
                 entries = listing(id, names.take(depth + 1))
             }
@@ -941,7 +953,7 @@ class AppState {
         return when (job) {
             is Job.Download -> {
                 val file = folder(job.at).second.firstOrNull { !it.directory && it.name == job.entry.name }
-                    ?: throw BridgeException("“${job.entry.name}” is no longer on the phone.")
+                    ?: throw BridgeException(S.goneFromPhone(job.entry.name))
                 Job.Download(file, job.target, job.at)
             }
             is Job.Upload -> Job.Upload(job.file, folder(job.at).first, job.at, job.name)
@@ -998,6 +1010,7 @@ class AppState {
                         ui { updating = S.openingInstaller }
                         // The installer replaces files that mirroring and adb run from: close them first.
                         Mirror.stop()
+                        quitting = true
                         runCatching { fastUsb?.close() }
                         runCatching { adb?.stopOwnServer() }
                         ProcessBuilder(file.path).start()
@@ -1008,6 +1021,7 @@ class AppState {
                     Updater.Package.LINUX_ARCHIVE -> { Platform.reveal(file); ui { updating = S.archiveSaved(file.name); updateProgress = null } }
                 }
             } catch (e: Exception) {
+                quitting = false   // the installer didn't start: Fast USB carries on
                 Log.add("Update failed: ${e.message}")
                 ui { updating = null; updateProgress = null; error = if (e.message == S.checksumFailed) S.checksumFailed else S.updateFailed }
                 openPage(release.page)

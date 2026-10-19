@@ -587,8 +587,15 @@ final class BrowserModel: ObservableObject {
                 guard let found = try await FastUSB.find(allowPrompt: nil, startSharing: false, known: { $0 == phone.fingerprint },
                                                          log: { Diagnostics.log($0) }) else { return }
                 guard found.fingerprint == phone.fingerprint, connected, current?.id == phone.id else { found.tunnel.stop(); return }
-                let client = try BridgeClient(tunnel: found.tunnel.localPort, fingerprint: phone.fingerprint, secret: phone.secret)
-                let entries = try await client.list()
+                let client: BridgeClient
+                let entries: [Entry]
+                do {
+                    client = try BridgeClient(tunnel: found.tunnel.localPort, fingerprint: phone.fingerprint, secret: phone.secret)
+                    entries = try await client.list()
+                } catch {
+                    found.tunnel.stop()   // staying on Wi‑Fi: the tunnel's listener and thread would stay open
+                    throw error
+                }
                 tunnel?.stop(); tunnel = found.tunnel
                 adopt(client, as: phone, entries: entries, fastUSB: true)
                 if let (trail, inside) = try? await resolve(names, client) { display(inside, at: trail) }
@@ -1074,6 +1081,16 @@ final class BrowserModel: ObservableObject {
                 textProblem = error.localizedDescription
             }
         }
+    }
+
+    /// Copies a text from the Texts history. It's already been between the phone and this Mac, so automatic sending
+    /// leaves it alone.
+    func copyText(_ text: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        pasteboardSeen = pasteboard.changeCount
+        lastShared = text
     }
 
     /// While connected over Wi‑Fi or Fast USB with automatic sending on, looks at the clipboard every second.

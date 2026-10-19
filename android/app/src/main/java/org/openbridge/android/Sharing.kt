@@ -66,7 +66,7 @@ object Sharing {
     private var awaitingWholePhone = false
     private val worker = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
-    private var generation = 0
+    @Volatile private var generation = 0
 
     /** 6-digit code of a pairing request waiting for the user, shown in a sheet (or a notification). */
     var pairingCode by mutableStateOf<String?>(null); private set
@@ -226,13 +226,14 @@ object Sharing {
 
     /**
      * After files or a text were queued from another app: when sharing is off but can start by itself (whole phone,
-     * permission granted), start it, and call [done] once it's up, since Android only lets a visible app start the
-     * background service. [done] gets whether a computer can collect now. On the main thread.
+     * permission granted, background sharing on), start it, and call [done] once it's up, since Android only lets a
+     * visible app start the background service. Without background sharing it would run unseen, with no notification
+     * to stop it, once this screen closes. [done] gets whether a computer can collect now. On the main thread.
      */
     fun handOver(done: (sharing: Boolean) -> Unit) {
         when {
             server != null -> done(true)
-            wholePhone && AllFiles.granted(app) -> {
+            inBackground && wholePhone && AllFiles.granted(app) -> {
                 start()
                 val started = SystemClock.uptimeMillis()
                 main.post(object : Runnable {
@@ -262,6 +263,8 @@ object Sharing {
                     SafStore(app.contentResolver, root)
                 }
                 val created = SharingServer(app, store, Trusted, approver, PhoneClipboard(app), cableOnly, events(current))
+                // Stopped meanwhile: free the ports now, so a start queued behind this one gets the usual ones.
+                if (generation != current) { created.close(); return@execute }
                 main.post {
                     if (generation != current) created.close() else {
                         server = created; busy = false

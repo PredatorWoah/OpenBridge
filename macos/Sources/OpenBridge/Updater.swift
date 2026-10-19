@@ -94,6 +94,10 @@ final class Updater: ObservableObject {
                 throw error
             }
             Diagnostics.log("Update \(version): installed, reopening")
+            // Quitting skips the cleanup above: eject the disk image and remove the download now.
+            _ = try? await Updater.tool("/usr/bin/hdiutil", ["detach", mount.path, "-force", "-quiet"])
+            mounted = false
+            try? FileManager.default.removeItem(at: work)
             Updater.relaunch(current)
         } catch {
             Diagnostics.log("Update \(version) failed: \(error.localizedDescription)")

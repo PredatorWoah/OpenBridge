@@ -4,6 +4,37 @@ All notable changes to OpenBridge are recorded here. Every release has an entry;
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-19
+
+OpenBridge 1.0: files, text and your screen between an Android phone and a Mac, Windows or Linux computer, over Wi‑Fi, a cable or the phone's own hotspot. No account, no cloud. Everything from 0.13 (Fast USB, texts, Linux, Windows USB browsing, the new phone design and looks, self-installing updates), plus a bug-fix pass over all four apps.
+
+### What 1.0 promises
+- **The protocol is frozen.** Any 1.x computer works with any 1.x phone; new features only ever add operations (see docs/protocol.md).
+- **Updates in place.** The APK is signed with the OpenBridge key, and every app can update itself from here on, checked against each release's `SHA256SUMS.txt`.
+
+### Fixed
+- Android: sharing files or the clipboard to OpenBridge no longer queues everything twice when the phone is rotated meanwhile.
+- Android: trusted computers, texts and waiting files are no longer copied to a new phone in Android 12+ device-to-device transfers.
+- Android: with "Keep sharing in the background" off, sharing to OpenBridge from another app or the tile no longer starts sharing unseen; it opens the app instead.
+- Android: stopping and restarting sharing quickly keeps the usual port, so saved computers find the phone right away.
+- Android: a rare crash when sharing stopped just as its background notification was starting.
+- Android: the share button no longer animates behind Settings or when scrolled away, saving battery.
+- Whole phone: previews no longer hold up browsing, downloads and search while a computer loads them.
+- Windows and Linux: Fast USB no longer stops working, and quitting no longer hangs, when adb gets stuck on a phone.
+- Windows: installing an update no longer risks adb keeping the app's files in use; Fast USB carries on if the installer fails to start.
+- Windows and Linux: if switching from Wi‑Fi to Fast USB fails, the app stays connected over Wi‑Fi instead of dropping the phone.
+- Windows and Linux: transfer errors (file gone, already exists, changed, too large) are shown in Chinese too.
+- Mac: no leftover Fast USB tunnel when moving from Wi‑Fi to the cable doesn't work.
+- Mac: after Disconnect, a phone in File transfer mode is no longer reopened in the background.
+- Mac: after a self-update, the downloaded disk image is ejected and removed.
+- Mac: Aurora and Tide stop animating while the window is minimized or hidden.
+- Mac: ⌘↑ and ⌘↓ in the search field move the text cursor instead of changing folders or downloading.
+- Mac: copying a text from Texts history no longer sends it back to the phone when automatic sending is on.
+
+### Notes
+- Coming from 0.13: just click **Update** in each app. From older versions, download once from the release page.
+- Aurora and Tide are still marked Preview: tell us what you think.
+
 ## [0.13.0] - 2026-10-19
 
 The big one before 1.0: Linux, Fast USB, texts, Windows USB browsing, a new phone design with three looks, and updates that install themselves.
