@@ -76,7 +76,7 @@ class SunEngine {
             while (trail.size > length) trail.removeFirst()
             glow = min(abs(velocity) / 700, 1.0) * (if (state == State.SCAN) 0.4 else 1.0)
             if (state == State.SPIN && t > (if (windup) 0.2 else 0.0) + 1.1 && abs(velocity) < 6 && abs(to - angle) < 0.6) finish(connected)
-            if (homing && abs(velocity) < 4 && abs(to - angle) < 0.4) { homing = false; angle = 0.0; velocity = 0.0 }
+            if (homing && abs(velocity) < 4 && abs(to - angle) < 0.4) { homing = false; rest(0.0); velocity = 0.0 }
         } else {
             trail.removeFirstOrNull()
             jellyVelocity += (-320 * jelly - 16 * jellyVelocity) * dt; jelly += jellyVelocity * dt
@@ -108,7 +108,13 @@ class SunEngine {
         }
     }
 
-    private fun normalize() { angle = ((angle % 360) + 360) % 360 }
+    private fun normalize() { rest(((angle % 360) + 360) % 360) }
+    /** Moves the sun to [to], the same place give or take whole turns, and its tail with it, so the tail never sweeps the ring. */
+    private fun rest(to: Double) {
+        val turns = Math.round((angle - to) / 360.0) * 360.0
+        for (i in trail.indices) trail[i] -= turns
+        angle = to
+    }
     private fun spin(windup: Boolean) {
         normalize(); homing = false; this.windup = windup; from = angle
         to = kotlin.math.ceil((angle + (if (windup) 1 else 200)) / 360) * 360
@@ -122,7 +128,7 @@ class SunEngine {
     }
     private fun scan() { normalize(); state = State.SCAN; start = clock; from = angle }
     private fun finish(connected: Boolean) {
-        if (connected) { state = State.DONE; settledAt = clock; angle = 0.0; velocity = 0.0; onConnect() }
+        if (connected) { state = State.DONE; settledAt = clock; rest(0.0); velocity = 0.0; onConnect() }
         else { angle = to; scan() }
     }
 }

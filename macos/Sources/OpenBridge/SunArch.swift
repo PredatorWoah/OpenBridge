@@ -60,7 +60,7 @@ final class SunEngine {
             if trail.count > length { trail.removeFirst(trail.count - length) }
             frame.glow = min(abs(velocity) / 700, 1) * (state == .scan ? 0.4 : 1)
             if state == .spin && t > (windup ? 0.2 : 0) + 1.1 && abs(velocity) < 6 && abs(to - angle) < 0.6 { finish(connected) }
-            if homing && abs(velocity) < 4 && abs(to - angle) < 0.4 { homing = false; angle = 0; velocity = 0 }
+            if homing && abs(velocity) < 4 && abs(to - angle) < 0.4 { homing = false; rest(0); velocity = 0 }
         } else {
             if !trail.isEmpty { trail.removeFirst() }
             jellyVelocity += (-320 * jelly - 16 * jellyVelocity) * dt; jelly += jellyVelocity * dt
@@ -87,7 +87,13 @@ final class SunEngine {
         if t < w + 1.05 { return f + (to - f) * easeInOut((t - w) / 1.05) }
         return to
     }
-    private func normalize() { angle = (angle.truncatingRemainder(dividingBy: 360) + 360).truncatingRemainder(dividingBy: 360) }
+    private func normalize() { rest((angle.truncatingRemainder(dividingBy: 360) + 360).truncatingRemainder(dividingBy: 360)) }
+    /// Moves the sun to `to`, the same place give or take whole turns, and its tail with it, so the tail never sweeps the ring.
+    private func rest(_ to: Double) {
+        let turns: Double = ((angle - to) / 360).rounded() * 360
+        trail = trail.map { $0 - turns }
+        angle = to
+    }
     private func spin(windup: Bool) {
         normalize(); homing = false; self.windup = windup; from = angle
         to = ((angle + (windup ? 1 : 200)) / 360).rounded(.up) * 360
@@ -101,7 +107,7 @@ final class SunEngine {
     }
     private func scan() { normalize(); homing = false; state = .scan; start = clock; from = angle }
     private func finish(_ connected: Bool) {
-        if connected { state = .done; settledAt = clock; angle = 0; velocity = 0 } else { angle = to; scan() }
+        if connected { state = .done; settledAt = clock; rest(0); velocity = 0 } else { angle = to; scan() }
     }
 }
 

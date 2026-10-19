@@ -4,6 +4,11 @@ All notable changes to OpenBridge are recorded here. Every release has an entry;
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-10-19
+
+### Fixed
+- **A glow ran down the side of the share button when it reached the top.** As the sun, comet or droplet settled at the top, its tail was drawn the long way round the ring for a moment, leaving a trail of bright beads down one side. Most visible in Aurora. The tail now stays behind it, on the phone, Windows, Linux and the Mac.
+
 ## [1.0.0] - 2026-10-19
 
 OpenBridge 1.0: files, text and your screen between an Android phone and a Mac, Windows or Linux computer, over Wi‑Fi, a cable or the phone's own hotspot. No account, no cloud. Everything from 0.13 (Fast USB, texts, Linux, Windows USB browsing, the new phone design and looks, self-installing updates), plus a bug-fix pass over all four apps.
