@@ -69,6 +69,7 @@ struct RootView: View {
     @State private var wifi = false
     @AppStorage("openAutomatically") private var openAutomatically = false
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var browsing: Bool { model.showBrowser && model.connected }
 
@@ -84,7 +85,7 @@ struct RootView: View {
                     .transition(.scale(scale: 0.94).combined(with: .opacity))
             }
         }
-        .animation(.spring(response: 0.55, dampingFraction: 0.82), value: browsing)
+        .animation(reduceMotion ? .easeOut(duration: 0.15) : .spring(response: 0.55, dampingFraction: 0.82), value: browsing)
         .frame(minWidth: 780, minHeight: 580)
         .preferredColorScheme(.dark)
         .sheet(isPresented: $wifi) { WiFiSheet(model: model, discovery: model.discovery, isPresented: $wifi) }
@@ -112,6 +113,7 @@ struct ConnectScreen: View {
     @ObservedObject var model: BrowserModel
     @Binding var wifi: Bool
     @Binding var openAutomatically: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var title: String {
         if model.connected { return model.fastUSB ? "Connected over Fast USB" : model.overUSB ? "Connected over USB" : "Connected over Wi‑Fi" }
@@ -172,7 +174,7 @@ struct ConnectScreen: View {
                 }
                 .padding(.horizontal, 24)
                 .frame(maxWidth: .infinity)
-                .animation(.spring(response: 0.6, dampingFraction: 0.68), value: model.connected)
+                .animation(reduceMotion ? nil : .spring(response: 0.6, dampingFraction: 0.68), value: model.connected)
             }
         }
     }
@@ -196,12 +198,13 @@ struct DeviceCard: View {
                 Image(systemName: "iphone")
                     .font(.system(size: 24, weight: .medium))
                     .frame(width: 52, height: 52)
+                    .accessibilityHidden(true)
                     .background(LinearGradient(colors: [Palette.violet, Palette.pink], startPoint: .topLeading, endPoint: .bottomTrailing),
                                 in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 VStack(alignment: .leading, spacing: 3) {
                     Text(model.deviceName).font(.system(size: 18, weight: .bold, design: .rounded)).lineLimit(1)
                     HStack(spacing: 6) {
-                        Circle().fill(Palette.ok).frame(width: 7, height: 7).shadow(color: Palette.ok, radius: 4)
+                        Circle().fill(Palette.ok).frame(width: 7, height: 7).shadow(color: Palette.ok, radius: 4).accessibilityHidden(true)
                         Text(model.fastUSB ? "Fast USB" : model.overUSB ? "USB · File transfer" : "Wi‑Fi · \(model.host)").foregroundStyle(Palette.muted)
                     }.font(.system(size: 12.5))
                 }
@@ -264,7 +267,7 @@ struct SavedPhonesCard: View {
             ForEach(model.saved) { phone in
                 let here = discovery.phones.contains { $0.phoneID == phone.id }
                 HStack(spacing: 10) {
-                    Image(systemName: "iphone").foregroundStyle(here ? Palette.ok : .white).frame(width: 22)
+                    Image(systemName: "iphone").foregroundStyle(here ? Palette.ok : .white).frame(width: 22).accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(phone.name).font(.system(size: 13.5, weight: .semibold)).lineLimit(1)
                         Text(here ? "On this Wi‑Fi now" : "Reconnects by itself while the phone is sharing")
@@ -274,6 +277,7 @@ struct SavedPhonesCard: View {
                     Button("Connect") { model.connect(phone) }.buttonStyle(GhostButton()).disabled(model.busy)
                     Button { forgetting = phone } label: { Image(systemName: "xmark") }
                         .buttonStyle(.plain).foregroundStyle(Palette.muted).help("Forget this phone")
+                        .accessibilityLabel("Forget \(phone.name)")
                 }
                 .padding(10)
                 .glass(12, border: here ? Palette.ok.opacity(0.45) : .white.opacity(0.14))
@@ -404,7 +408,7 @@ struct ErrorCard: View {
     var retry: () -> Void
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Palette.amber)
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Palette.amber).accessibilityLabel("Problem")
             Text(message).font(.system(size: 13)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
             Button("Try again", action: retry).buttonStyle(GhostButton()).disabled(busy)
         }

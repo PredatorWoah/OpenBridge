@@ -455,7 +455,7 @@ struct MirrorView: View {
                         key("speaker.wave.3", "Volume up", Scrcpy.Key.volumeUp)
                         key("power", "Power", Scrcpy.Key.power)
                         Button { session.send(Scrcpy.rotate()) } label: { Image(systemName: "rotate.right") }
-                            .buttonStyle(GhostButton()).help("Rotate")
+                            .buttonStyle(GhostButton()).help("Rotate").accessibilityLabel("Rotate")
                         Divider().frame(height: 18)
                         if session.wireless {
                             Label("Wi‑Fi", systemImage: "wifi").font(.system(size: 12, weight: .semibold)).foregroundStyle(Palette.ok)
@@ -493,12 +493,12 @@ struct MirrorView: View {
     }
 
     private func key(_ symbol: String, _ help: String, _ code: Int32) -> some View {
-        Button { session.press(code) } label: { Image(systemName: symbol) }.buttonStyle(GhostButton()).help(help)
+        Button { session.press(code) } label: { Image(systemName: symbol) }.buttonStyle(GhostButton()).help(help).accessibilityLabel(help)
     }
 
     private func status(title: String, text: String, spinner: Bool) -> some View {
         VStack(spacing: 12) {
-            Hero(active: spinner, connected: false, centerY: 0.5, radius: 42, startScanning: spinner)
+            Hero(active: spinner, connected: false, centerY: 0.5, radius: 42, startScanning: spinner, label: spinner ? "Working" : nil)
                 .frame(width: 160, height: 140)
             Text(title).font(.system(size: 18, weight: .bold, design: .rounded))
             Text(text).font(.system(size: 13)).foregroundStyle(Palette.muted).multilineTextAlignment(.center).frame(maxWidth: 300)

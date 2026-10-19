@@ -46,6 +46,10 @@ final class BrowserModel: ObservableObject {
     /// Whether the file browser is showing (instead of the connect screen).
     @Published var showBrowser = false
     @Published var selection: Set<Entry.ID> = []
+    /// The item the keyboard is on (arrow keys move it); it shows a ring and stays scrolled into view.
+    @Published var cursor: Entry.ID?
+    /// Items per row in the grid, so ↑ and ↓ move by a row.
+    @Published var gridColumns = 1
     @Published var transfer: Transfer?
     @Published var thumbnails: [Entry.ID: NSImage] = [:]
     /// A downloaded copy shown with Quick Look.
@@ -766,7 +770,7 @@ final class BrowserModel: ObservableObject {
     func sizeOf(_ entry: Entry) -> Int64 { entry.directory ? sizes[entry.id]?.bytes ?? 0 : entry.size }
 
     private func display(_ entries: [Entry], at path: [(id: String, name: String)]) {
-        self.path = path; self.entries = entries; selection = []; anchor = nil; query = ""; results = nil
+        self.path = path; self.entries = entries; selection = []; anchor = nil; cursor = nil; query = ""; results = nil
         for entry in sizeQueue { sizesPending.remove(entry.id) }
         sizeQueue = []
         // Previews still waiting belong to the folder just left.
@@ -847,9 +851,44 @@ final class BrowserModel: ObservableObject {
         } else {
             selection = [entry.id]; anchor = entry.id
         }
+        cursor = entry.id
     }
 
     func selectAll() { selection = Set(entries.map(\.id)) }
+
+    /// What the arrow keys walk through: search hits when they're shown, else the folder in its order.
+    private var keyboardOrder: [Entry.ID] { results != nil ? sortedResults.map(\.id) : sorted.map(\.id) }
+
+    /// Arrow keys: moves the selection by `step` items (a row in the grid); with Shift, extends it from the anchor.
+    func moveCursor(_ step: Int, extending: Bool = false) {
+        let order = keyboardOrder
+        guard !order.isEmpty else { return }
+        let from = cursor.flatMap { order.firstIndex(of: $0) } ?? (step > 0 ? -1 : order.count)
+        let to = min(max(from + step, 0), order.count - 1)
+        cursor = order[to]
+        if extending, let anchor, let start = order.firstIndex(of: anchor) {
+            selection = Set(order[min(start, to)...max(start, to)])
+        } else {
+            selection = [order[to]]; anchor = order[to]
+        }
+    }
+
+    /// ⌘↓ or ⌘O: opens the item the keyboard is on (a folder opens, a file downloads; a search hit likewise).
+    func openCursor() {
+        if results != nil, let id = cursor ?? selection.first, let hit = sortedResults.first(where: { $0.id == id }) { openFound(hit); return }
+        if let entry = selected.first(where: { $0.id == cursor }) ?? selected.first { open(entry) }
+    }
+
+    /// Return, as in Finder: rename the one selected item.
+    func renameSelected() {
+        guard results == nil, selected.count == 1 else { return }
+        renaming = selected[0]
+    }
+
+    /// Esc: clears the search first, then the selection.
+    func escape() {
+        if !query.isEmpty { query = "" } else { selection = []; cursor = nil }
+    }
 
     // MARK: Previews
 
