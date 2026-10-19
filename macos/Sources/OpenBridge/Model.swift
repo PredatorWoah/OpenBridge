@@ -587,8 +587,15 @@ final class BrowserModel: ObservableObject {
                 guard let found = try await FastUSB.find(allowPrompt: nil, startSharing: false, known: { $0 == phone.fingerprint },
                                                          log: { Diagnostics.log($0) }) else { return }
                 guard found.fingerprint == phone.fingerprint, connected, current?.id == phone.id else { found.tunnel.stop(); return }
-                let client = try BridgeClient(tunnel: found.tunnel.localPort, fingerprint: phone.fingerprint, secret: phone.secret)
-                let entries = try await client.list()
+                let client: BridgeClient
+                let entries: [Entry]
+                do {
+                    client = try BridgeClient(tunnel: found.tunnel.localPort, fingerprint: phone.fingerprint, secret: phone.secret)
+                    entries = try await client.list()
+                } catch {
+                    found.tunnel.stop()   // staying on Wi‑Fi: the tunnel's listener and thread would stay open
+                    throw error
+                }
                 tunnel?.stop(); tunnel = found.tunnel
                 adopt(client, as: phone, entries: entries, fastUSB: true)
                 if let (trail, inside) = try? await resolve(names, client) { display(inside, at: trail) }
