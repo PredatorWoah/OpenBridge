@@ -205,7 +205,8 @@ object S {
     val cableRemoved get() = t("USB cable disconnected or tethering turned off", "USB 数据线已断开，或网络共享已关闭")
     val noWifi get() = t("No Wi‑Fi: connect a computer by USB cable with USB debugging, or use Phone hotspot in Settings.",
         "没有 Wi‑Fi：请用数据线连接电脑并打开 USB 调试，或在“设置”中使用“手机热点”。")
-    fun stillSharing(problem: String) = t("$problem. Still sharing over the phone hotspot and Fast USB.", "$problem。仍在通过手机热点和高速 USB 共享。")
+    fun stillSharing(problem: String) = t("$problem. Still sharing over the phone hotspot or Fast USB, while they're in use.",
+        "$problem。手机热点或高速 USB 仍在使用时，会继续通过它们共享。")
 
     // Fast USB (over USB debugging)
     val fastUsb get() = t("Fast USB", "高速 USB")

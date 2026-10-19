@@ -51,6 +51,9 @@ object Hotspot {
     /** Names Android gives Wi-Fi access point interfaces. */
     private val accessPoint = Regex("(wlan|swlan|ap|softap|wifi|wigig)\\d+")
 
+    /** A hotspot is on or starting (any thread). */
+    val on: Boolean get() = ours || anyOn || starting
+
     /** Android 13 lets apps start a local-only hotspot with the Nearby devices permission instead of location. */
     val supported get() = Build.VERSION.SDK_INT >= 33
 

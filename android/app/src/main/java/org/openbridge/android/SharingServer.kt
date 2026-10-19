@@ -182,7 +182,8 @@ class SharingServer(private val context: Context, private val store: Store, priv
             network()
             hotspot()
             // Losing the network ends sharing, as it always has, unless the hotspot or Fast USB is what's being used.
-            if (problem != null && doors.none { it.via == Via.HOTSPOT } && !usedCable) end = problem
+            // Many phones drop Wi-Fi while their hotspot starts, so a hotspot on its way counts too.
+            if (networkLost && doors.none { it.via != Via.USB } && !Hotspot.on && !usedCable) end = problem ?: S.wifiDisconnected
             changed = publish()
             if (end == null) announce()
         }
