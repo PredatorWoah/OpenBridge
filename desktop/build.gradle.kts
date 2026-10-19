@@ -28,7 +28,7 @@ dependencies {
 
 tasks.test { useJUnitPlatform() }
 
-val appVersion = providers.gradleProperty("appVersion").orElse("0.12.2")
+val appVersion = providers.gradleProperty("appVersion").orElse("0.13.0")
 
 // The version for development runs (the installed app gets it from its launcher): diagnostics, the phone-app check.
 val versionResource = tasks.register("versionResource") {
