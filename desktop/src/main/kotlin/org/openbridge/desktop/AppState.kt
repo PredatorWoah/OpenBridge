@@ -139,6 +139,8 @@ class AppState {
     private val watch = ClipboardWatch()
     private var adb: AdbTool? = null
     private var fastUsb: FastUsb? = null
+    /** Set when quitting or installing an update: Fast USB stops calling adb, which would start its server again. */
+    @Volatile private var quitting = false
     @Volatile private var cancelled = false
     // Counts connections, on the worker thread, so a transfer planned on an earlier one finds its files again.
     @Volatile private var connection = 0
@@ -175,7 +177,7 @@ class AppState {
             val tool = AdbTool(program).also { adb = it }
             val usb = FastUsb(tool).also { fastUsb = it }
             daemon("openbridge-fast-usb") {
-                while (true) {
+                while (!quitting) {
                     val inUse = usbSerial.takeIf { source != null && transport == Transport.FAST_USB }
                     val links = runCatching { usb.scan(saved, inUse) }.getOrDefault(emptyList())
                     ui { usbChanged(links) }
@@ -198,6 +200,7 @@ class AppState {
         }
         // Forwards to the phone end with the app; so does the adb server, if this app started it.
         Runtime.getRuntime().addShutdownHook(Thread {
+            quitting = true
             runCatching { fastUsb?.close() }
             if (!mirroring) runCatching { adb?.stopOwnServer() }
         })
@@ -998,6 +1001,7 @@ class AppState {
                         ui { updating = S.openingInstaller }
                         // The installer replaces files that mirroring and adb run from: close them first.
                         Mirror.stop()
+                        quitting = true
                         runCatching { fastUsb?.close() }
                         runCatching { adb?.stopOwnServer() }
                         ProcessBuilder(file.path).start()
