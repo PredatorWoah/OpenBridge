@@ -179,7 +179,8 @@ class AppState {
             val tool = AdbTool(program).also { adb = it }
             val usb = FastUsb(tool).also { fastUsb = it }
             daemon("openbridge-fast-usb") {
-                while (!quitting) {
+                while (true) {
+                    if (quitting) { Thread.sleep(1_000); continue }
                     val inUse = usbSerial.takeIf { source != null && transport == Transport.FAST_USB }
                     val links = runCatching { usb.scan(saved, inUse) }.getOrDefault(emptyList())
                     ui { usbChanged(links) }
@@ -1020,6 +1021,7 @@ class AppState {
                     Updater.Package.LINUX_ARCHIVE -> { Platform.reveal(file); ui { updating = S.archiveSaved(file.name); updateProgress = null } }
                 }
             } catch (e: Exception) {
+                quitting = false   // the installer didn't start: Fast USB carries on
                 Log.add("Update failed: ${e.message}")
                 ui { updating = null; updateProgress = null; error = if (e.message == S.checksumFailed) S.checksumFailed else S.updateFailed }
                 openPage(release.page)
