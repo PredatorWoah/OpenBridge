@@ -24,3 +24,15 @@ interface PhoneSource {
     /** Files and folders whose names contain `query`, anywhere below `folderId`. */
     fun search(folderId: String, query: String): SearchResult
 }
+
+/** How the open phone is connected; decides what the browser can offer. */
+enum class Transport(val english: String) {
+    /** OB01 over the network: everything, including texts, the clipboard and files sent from the phone. */
+    WIFI("Wi-Fi"),
+    /** OB01 through USB debugging (adb forward to the phone's loopback listener): everything, and faster. */
+    FAST_USB("Fast USB"),
+    /** File transfer mode (MTP through Windows Portable Devices): files only. */
+    USB("USB");
+
+    val label: String get() = when (this) { WIFI -> S.wifi; FAST_USB -> S.fastUsb; USB -> S.usb }
+}

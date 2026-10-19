@@ -49,7 +49,7 @@ for required in ["LICENSE", "SECURITY.md", "README.md", "docs/protocol.md", "doc
                  "CHANGELOG.md", "docs/images/screens.png", "docs/images/connect.png", "docs/images/how-it-works.svg",
                  "macos/AppIcon.icns", "assets/icon/icon.svg",
                  "android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml",
-                 "third_party/scrcpy/LICENSE", "third_party/scrcpy/README.md", "README.zh-CN.md",
+                 "third_party/scrcpy/LICENSE", "third_party/scrcpy/README.md", "README.zh-CN.md", "scripts/fetch-scrcpy-linux.sh",
                  "desktop/build.gradle.kts", "desktop/src/main/resources/OpenBridge.ico",
                  "shared/compose/org/openbridge/ui/Sun.kt"]:
     assert (root / required).is_file(), required
@@ -62,6 +62,13 @@ assert f'version = "{pinned_version}"' in (root / "macos/Sources/BridgeCore/Scrc
 # The Windows build of scrcpy is pinned too, and listed in the same notice.
 windows_pin = re.search(r'sha256="([0-9a-f]{64})"', (root / "scripts/fetch-scrcpy-windows.sh").read_text()).group(1)
 assert windows_pin in (root / "third_party/scrcpy/README.md").read_text(), "scrcpy notice must list the Windows SHA-256"
+# So is the Linux build, of the same scrcpy version.
+linux_fetch = (root / "scripts/fetch-scrcpy-linux.sh").read_text()
+linux_pin = re.search(r'sha256="([0-9a-f]{64})"', linux_fetch).group(1)
+assert linux_pin in (root / "third_party/scrcpy/README.md").read_text(), "scrcpy notice must list the Linux SHA-256"
+assert re.search(r'version="([0-9.]+)"', linux_fetch).group(1) == \
+    re.search(r'version="([0-9.]+)"', (root / "scripts/fetch-scrcpy-windows.sh").read_text()).group(1), "Windows and Linux bundle different scrcpy versions"
+assert "TargetFormat.Deb" in (root / "desktop/build.gradle.kts").read_text(), "the Linux .deb must be built"
 for script in (root / "scripts").glob("*.sh"):
     subprocess.run(["bash", "-n", str(script)], check=True)
 # Every app version must have a changelog entry before it can be released.

@@ -8,7 +8,6 @@ import java.io.DataOutputStream
 import java.io.File
 import java.io.IOException
 import java.io.RandomAccessFile
-import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.nio.file.Files
 import java.security.MessageDigest
@@ -23,9 +22,12 @@ data class Entry(val id: String, val name: String, val directory: Boolean, val s
 
 /**
  * A problem to show the user as is. `lost` means the phone can't be reached any more (stopped sharing, left the
- * Wi‑Fi); `forgotten` that it no longer trusts this PC (Forget on the phone, or the app reinstalled): pair again.
+ * Wi‑Fi); `forgotten` that it no longer trusts this computer (Forget on the phone, or the app reinstalled): pair again.
  */
-class BridgeException(message: String, val lost: Boolean = false, val forgotten: Boolean = false) : IOException(message)
+class BridgeException(message: String, val lost: Boolean = false, val forgotten: Boolean = false) : IOException(message) {
+    /** The phone app is too old for the operation ("Unsupported operation; update OpenBridge on the phone"). */
+    val unsupported: Boolean get() = message?.contains("Unsupported operation") == true
+}
 
 /** A search hit, and the folder it's in by name relative to where the search started ("DCIM/Camera"). */
 data class Found(val entry: Entry, val location: String)
@@ -36,12 +38,19 @@ data class SearchResult(val found: List<Found>, val complete: Boolean)
 /** What MEASURE found in a folder; `complete` is false when the phone stopped counting early. */
 data class FolderSize(val bytes: Long, val files: Long, val complete: Boolean)
 
+/** Something sent from the phone, waiting to be collected: a file, or a text for the clipboard. */
+data class Waiting(val entry: Entry, val text: Boolean)
+
+/** What INFO says about the phone: its OpenBridge version, the highest operation it answers, and its name. */
+data class PhoneInfo(val version: String, val revision: Int, val name: String)
+
 /**
  * The OB01 client (see docs/protocol.md): one authenticated request per TLS connection, pinned to the phone's
  * certificate learned by 6-digit pairing. Blocking: call from a background thread.
+ * Over Wi‑Fi it talks only to private addresses; over Fast USB only to 127.0.0.1, where adb forwards to the phone.
  */
 class BridgeClient internal constructor(
-    val host: String, val port: Int, val fingerprint: ByteArray, internal val secret: ByteArray,
+    val host: String, val port: Int, val fingerprint: ByteArray, internal val secret: ByteArray, val transport: Transport = Transport.WIFI,
 ) : PhoneSource {
     companion object {
         private const val TIMEOUT = 30_000
@@ -54,7 +63,7 @@ class BridgeClient internal constructor(
         private fun connect(host: String, port: Int, pin: ByteArray?, seen: (ByteArray) -> Unit = {}): SSLSocket {
             var attempt = 0
             while (true) {
-                try { return open(host, port, pin, seen) }
+                try { return open(host, port, pin, 10_000, seen) }
                 catch (e: BridgeException) {
                     if (e.message == S.certificateChanged || ++attempt >= 4) throw e
                     Thread.sleep(250L * attempt)
@@ -62,7 +71,7 @@ class BridgeClient internal constructor(
             }
         }
 
-        private fun open(host: String, port: Int, pin: ByteArray?, seen: (ByteArray) -> Unit): SSLSocket {
+        private fun open(host: String, port: Int, pin: ByteArray?, timeout: Int, seen: (ByteArray) -> Unit): SSLSocket {
             val trust = object : X509TrustManager {
                 override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) = throw CertificateException()
                 override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {
@@ -75,9 +84,10 @@ class BridgeClient internal constructor(
             val context = SSLContext.getInstance("TLS").apply { init(null, arrayOf(trust), SecureRandom()) }
             val socket = context.socketFactory.createSocket() as SSLSocket
             socket.enabledProtocols = socket.supportedProtocols.filter { it == "TLSv1.2" || it == "TLSv1.3" }.toTypedArray()
-            socket.soTimeout = TIMEOUT
+            // A probe gives up quickly; requests wait as long as the phone may take to answer.
+            socket.soTimeout = if (timeout < 10_000) timeout else TIMEOUT
             try {
-                socket.connect(InetSocketAddress(host, port), 10_000)
+                socket.connect(InetSocketAddress(host, port), timeout)
                 socket.startHandshake()
             } catch (e: Exception) {
                 socket.close()
@@ -87,15 +97,22 @@ class BridgeClient internal constructor(
             return socket
         }
 
+        /**
+         * The certificate fingerprint of whatever answers TLS at the address, or null. Sends nothing after the
+         * handshake: this is how Fast USB tells which phone is at the other end of a cable before using a secret.
+         */
+        fun fingerprintAt(host: String, port: Int, timeout: Int = 3_000): ByteArray? {
+            var seen: ByteArray? = null
+            return try { open(host, port, null, timeout) { seen = it }.close(); seen } catch (_: Exception) { null }
+        }
+
         /** Whether anything listens at the address, checked quickly, before trying a saved phone for real. */
         fun reachable(host: String, port: Int, timeout: Int = 1_500): Boolean =
             runCatching { java.net.Socket().use { it.connect(InetSocketAddress(host, port), timeout) }; true }.getOrDefault(false)
 
         /** Only private Wi‑Fi addresses, as on the phone and the Mac. */
         fun checkAddress(host: String, port: String): Int {
-            val parts = host.split(".")
-            val valid = parts.size == 4 && parts.all { it.isNotEmpty() && it.all(Char::isDigit) && it.toInt() in 0..255 && it == it.toInt().toString() }
-            if (!valid || !Wire.isPrivateIPv4(InetAddress.getByName(host))) throw BridgeException(S.badAddress)
+            if (!privateIPv4(host)) throw BridgeException(S.badAddress)
             return port.toIntOrNull()?.takeIf { it in 1..65535 } ?: throw BridgeException(S.badPort)
         }
 
@@ -106,23 +123,20 @@ class BridgeClient internal constructor(
         fun pair(host: String, portText: String, opened: (Closeable) -> Unit = {}, show: (String) -> Unit): BridgeClient =
             pairAt(host, checkAddress(host, portText), opened, show = show)
 
-        /** This PC's name, shown on the phone when pairing and in its list of trusted computers. */
-        val computerName: String = System.getenv("COMPUTERNAME")?.takeIf { it.isNotBlank() }
-            ?: runCatching { InetAddress.getLocalHost().hostName }.getOrNull() ?: "Windows PC"
-
         /**
-         * Pairing without the address check, for loopback tests. `opened` gets the connection, so Cancel can close it.
-         * Sends this PC's name (OBP2); a phone older than 0.11.0 answers that with "Pairing rejected" at once, and
-         * pairing starts over without the name (OBP1).
+         * Pairing without the address check: through a Fast USB tunnel (`transport`), and in loopback tests.
+         * `opened` gets the connection, so Cancel can close it. Sends this computer's name (OBP2); a phone older than
+         * 0.11.0 answers that with "Pairing rejected" at once, and pairing starts over without the name (OBP1).
          */
-        internal fun pairAt(host: String, port: Int, opened: (Closeable) -> Unit = {}, named: Boolean = true, show: (String) -> Unit): BridgeClient {
-            try { return exchange(host, port, opened, if (named) computerName else null, show) }
-            catch (e: BridgeException) { if (named && e.message == REJECTED) return exchange(host, port, opened, null, show); throw e }
+        internal fun pairAt(host: String, port: Int, opened: (Closeable) -> Unit = {}, named: Boolean = true, transport: Transport = Transport.WIFI,
+                            show: (String) -> Unit): BridgeClient {
+            try { return exchange(host, port, opened, if (named) Platform.computerName else null, transport, show) }
+            catch (e: BridgeException) { if (named && e.message == REJECTED) return exchange(host, port, opened, null, transport, show); throw e }
         }
 
         private const val REJECTED = "Pairing rejected"
 
-        private fun exchange(host: String, port: Int, opened: (Closeable) -> Unit, name: String?, show: (String) -> Unit): BridgeClient {
+        private fun exchange(host: String, port: Int, opened: (Closeable) -> Unit, name: String?, transport: Transport, show: (String) -> Unit): BridgeClient {
             var fingerprint: ByteArray? = null
             connect(host, port, null) { fingerprint = it }.also(opened).use { socket ->
                 val f = fingerprint ?: throw BridgeException("The phone sent no certificate.")
@@ -141,7 +155,7 @@ class BridgeClient internal constructor(
                 socket.soTimeout = 75_000   // the phone's user has about a minute to compare and tap Pair
                 status(input)
                 val secret = ByteArray(32).also(input::readFully)
-                return BridgeClient(host, port, f, secret)
+                return BridgeClient(host, port, f, secret, transport)
             }
         }
 
@@ -149,7 +163,7 @@ class BridgeClient internal constructor(
             when (input.readUnsignedByte()) {
                 0 -> return
                 1 -> Wire.readString(input, 512).let { message ->
-                    // Only the authentication check answers this: the phone no longer knows this PC's secret.
+                    // Only the authentication check answers this: the phone no longer knows this computer's secret.
                     throw if (message == REJECTED) BridgeException(message, lost = true, forgotten = true) else BridgeException(message)
                 }
                 else -> throw BridgeException("The phone sent an invalid reply.")
@@ -157,8 +171,12 @@ class BridgeClient internal constructor(
         }
     }
 
-    private fun <T> request(operation: Int, id: String, extra: (DataOutputStream) -> Unit = {}, body: (DataInputStream, DataOutputStream) -> T): T =
-        connect(host, port, fingerprint).use { socket ->
+    /** Where the secret may go: the phone's private Wi‑Fi address, or the Fast USB tunnel on this computer. */
+    private val allowed = if (transport == Transport.FAST_USB) host == "127.0.0.1" else privateIPv4(host)
+
+    private fun <T> request(operation: Int, id: String, extra: (DataOutputStream) -> Unit = {}, body: (DataInputStream, DataOutputStream) -> T): T {
+        if (!allowed) throw BridgeException(S.badAddress)
+        return connect(host, port, fingerprint).use { socket ->
             try {
                 val input = DataInputStream(socket.inputStream.buffered(1 shl 16))
                 val output = DataOutputStream(socket.outputStream.buffered(1 shl 16))
@@ -170,6 +188,7 @@ class BridgeClient internal constructor(
             // Reset, timed out or closed mid-request: the phone stopped sharing or left the network.
             catch (e: IOException) { throw BridgeException(S.dropped, lost = true) }
         }
+    }
 
     override fun list(id: String): List<Entry> = request(1, id) { input, _ ->
         status(input)
@@ -277,6 +296,26 @@ class BridgeClient internal constructor(
         }
     }
 
+    /**
+     * Files and texts sent from the phone (Share › OpenBridge, Send clipboard), waiting up to `wait` milliseconds for
+     * one. Phones before 0.13.0 answer "Unsupported operation": use [outbox] then, which lists only files.
+     */
+    fun outboxAll(wait: Int): List<Waiting> = request(17, "", { it.writeInt(wait.coerceIn(0, 25_000)) }) { input, _ ->
+        status(input)
+        val count = input.readInt()
+        if (count !in 0..1_000) throw BridgeException("The phone sent an invalid reply.")
+        List(count) {
+            val id = Wire.readString(input, 128)
+            val name = Wire.readString(input, 255)
+            val kind = input.readUnsignedByte()
+            val size = input.readLong()
+            if (id.isEmpty() || kind !in 0..1 || size !in 0..Wire.MAX_FILE) throw BridgeException("The phone sent an invalid reply.")
+            // A file's name becomes a file here; a text's is only a label.
+            if (kind == 0) Wire.validateName(name)
+            Waiting(Entry(id, name, false, size), text = kind == 1)
+        }
+    }
+
     /** Files sent from the phone (Share › OpenBridge), waiting up to `wait` milliseconds for one. */
     fun outbox(wait: Int): List<Entry> = request(13, "", { it.writeInt(wait.coerceIn(0, 25_000)) }) { input, _ ->
         status(input)
@@ -317,7 +356,27 @@ class BridgeClient internal constructor(
             }
         }
         Files.move(partial.toPath(), destination.toPath())
-        request(15, entry.id) { input, _ -> status(input) }
+        collected(entry)
+    }
+
+    /** A text sent from the phone, for the clipboard. Call [collected] once it's there. */
+    fun readText(entry: Entry): String = request(14, entry.id, { it.writeLong(0) }) { input, _ ->
+        status(input)
+        val size = input.readLong()
+        if (size !in 0..Wire.MAX_CLIPBOARD.toLong()) throw BridgeException("The phone sent an invalid reply.")
+        val bytes = ByteArray(size.toInt()).also(input::readFully)
+        java.nio.charset.StandardCharsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(bytes)).toString()
+    }
+
+    /** Tells the phone this computer has a file or text it sent, so it drops its copy. */
+    fun collected(entry: Entry) = request(15, entry.id) { input, _ -> status(input) }
+
+    /** The phone app's version and name (from 0.13.0; older phones answer "Unsupported operation"). */
+    fun info(): PhoneInfo = request(18, "") { input, _ ->
+        status(input)
+        val version = Wire.readString(input, 64)
+        val revision = input.readInt()
+        PhoneInfo(version, revision, Wire.readString(input, 128))
     }
 
     override fun makeFolder(name: String, directoryId: String): Entry {

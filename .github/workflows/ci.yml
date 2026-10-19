@@ -122,6 +122,47 @@ jobs:
           path: |
             desktop/build/OpenBridge-Windows.zip
             desktop/build/compose/binaries/main/exe/OpenBridge-*.exe
+  linux:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+      - name: Tools for the .deb and a virtual display
+        run: sudo apt-get update && sudo apt-get install -y fakeroot xvfb
+      - run: bash scripts/fetch-scrcpy-linux.sh desktop/build/app-resources
+      - run: gradle -PdesktopOnly :desktop:test :desktop:createDistributable :desktop:packageDeb --stacktrace
+      - name: Check the app carries screen mirroring
+        run: |
+          app=desktop/build/compose/binaries/main/app/OpenBridge
+          test -x "$app/bin/OpenBridge"
+          test -x "$app/lib/app/resources/scrcpy/scrcpy" && test -x "$app/lib/app/resources/scrcpy/adb"
+          test -f "$app/lib/app/resources/scrcpy/scrcpy-server"
+      - name: Launch the app on a virtual display and check it keeps running
+        run: |
+          set +e
+          timeout 20 xvfb-run -a desktop/build/compose/binaries/main/app/OpenBridge/bin/OpenBridge
+          code=$?
+          set -e
+          # 124: still running when the time was up, as it should be.
+          [ "$code" = 124 ] || { echo "::error::OpenBridge exited at startup with code $code"; exit 1; }
+      - name: Pack the portable app
+        run: tar -C desktop/build/compose/binaries/main/app -czf desktop/build/OpenBridge-Linux-x86_64.tar.gz OpenBridge
+      - name: Check the package was built
+        run: ls -l desktop/build/compose/binaries/main/deb/*.deb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpenBridge-Linux
+          path: |
+            desktop/build/OpenBridge-Linux-x86_64.tar.gz
+            desktop/build/compose/binaries/main/deb/*.deb
   repository:
     runs-on: ubuntu-latest
     steps:
