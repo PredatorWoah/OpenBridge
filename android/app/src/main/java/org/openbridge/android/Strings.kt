@@ -89,6 +89,8 @@ object S {
     val sharingWholePhoneTitle get() = t("Sharing your whole phone", "正在共享整部手机")
     val sharingOneFolderTitle get() = t("Sharing one folder", "正在共享一个文件夹")
     fun onComputer(host: String, port: Int) = t("On your computer: $host · port $port", "在电脑上输入：$host · 端口 $port")
+    val overCable get() = t("Open OpenBridge on your computer; it connects over the USB cable.", "在电脑上打开 OpenBridge，它会通过数据线连接。")
+    val sharingOverCableTitle get() = t("Sharing over the USB cable", "正在通过数据线共享")
     val pausedInBackground get() = t("Android paused sharing in the background after a few hours. Tap the sun to share again.",
         "Android 在后台运行几小时后暂停了共享。点一下太阳即可重新共享。")
 
@@ -100,10 +102,27 @@ object S {
     val chooseFolderAgain get() = t("Choose the folder again", "请重新选择文件夹")
     val folderDenied get() = t("Android denied access to the folder. Choose it again.", "Android 拒绝访问该文件夹，请重新选择。")
     val couldNotStart get() = t("Couldn't start sharing.", "无法开始共享。")
-    val checkWifi get() = t("Couldn't start sharing. Check that Wi‑Fi is on.", "无法开始共享，请确认 Wi‑Fi 已打开。")
-    val needNetwork get() = t("Connect to Wi‑Fi or turn on USB tethering first", "请先连接 Wi‑Fi 或打开 USB 网络共享")
     val wifiDisconnected get() = t("Wi‑Fi disconnected", "Wi‑Fi 已断开")
-    val wifiChanged get() = t("Wi‑Fi address changed", "Wi‑Fi 地址已变化")
     val serverStopped get() = t("Sharing stopped unexpectedly", "共享意外停止")
     val cableRemoved get() = t("USB cable disconnected or tethering turned off", "USB 数据线已断开，或网络共享已关闭")
+    val noWifi get() = t("No Wi‑Fi: connect a computer by USB cable with USB debugging, or use Phone hotspot in Settings.",
+        "没有 Wi‑Fi：请用数据线连接电脑并打开 USB 调试，或在“设置”中使用“手机热点”。")
+    fun stillSharing(problem: String) = t("$problem. Still sharing over the phone hotspot and Fast USB.", "$problem。仍在通过手机热点和高速 USB 共享。")
+
+    // Fast USB (over USB debugging)
+    val fastUsb get() = t("Fast USB", "高速 USB")
+    val fastUsbBusy get() = t("Fast USB ports 41987–41990 are all in use.", "高速 USB 端口 41987–41990 都被占用了。")
+    val cableUnplugged get() = t("USB cable unplugged", "USB 数据线已拔出")
+    val cableNeedsDebugging get() = t("To share over the cable, plug it in with USB debugging on, or tap to share over Wi‑Fi.",
+        "要通过数据线共享，请在打开 USB 调试后连接数据线，或点一下通过 Wi‑Fi 共享。")
+    val cableNeedsSetup get() = t("Your computer wants to connect over the cable. Tap to share, and allow access first.",
+        "电脑想通过数据线连接。请点一下开始共享，并先允许访问。")
+
+    // Phone hotspot
+    val hotspotBusy get() = t("Android can't start this hotspot now. Turn off the regular hotspot, or use it instead.",
+        "Android 现在无法开启这个热点。请关闭普通热点，或改用普通热点。")
+    val hotspotDisallowed get() = t("This phone doesn't allow apps to start a hotspot.", "这部手机不允许应用开启热点。")
+    val hotspotFailed get() = t("Couldn't start the hotspot. Try again in a moment.", "无法开启热点，请稍后再试。")
+    val hotspotPermission get() = t("Allow Nearby devices for OpenBridge to start the hotspot (it doesn't use your location).",
+        "请允许 OpenBridge 使用“附近的设备”权限来开启热点（不会使用你的位置）。")
 }

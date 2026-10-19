@@ -65,27 +65,13 @@ import org.openbridge.ui.drawSunArch
 class MainActivity : ComponentActivity() {
     private val model = Sharing
 
-    /** Android's sticky USB state broadcast: whether a computer is attached, and in which mode. */
-    private val usbState = object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) {
-            val extras = intent.extras ?: return
-            val attached = extras.getBoolean("connected") && extras.getBoolean("configured")
-            val transfer = extras.getBoolean("mtp") || extras.getBoolean("ptp")
-            model.cable = when {
-                attached && transfer -> Cable.FILE_TRANSFER
-                extras.getBoolean("connected") -> Cable.CHARGING
-                else -> Cable.NONE
-            }
-        }
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge(statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
         Sharing.attach(this)
+        if (savedInstanceState == null) handle(intent)
         val notifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
-        ContextCompat.registerReceiver(this, usbState, IntentFilter("android.hardware.usb.action.USB_STATE"), ContextCompat.RECEIVER_EXPORTED)
         val picker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             val uri = result.data?.data
             if (result.resultCode == RESULT_OK && uri != null) model.select(uri) else model.folderCancelled()
@@ -141,9 +127,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onDestroy() {
-        unregisterReceiver(usbState)
-        super.onDestroy()
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handle(intent)
+    }
+
+    /** A computer asked over USB debugging to share over the cable (see Sharing.SHARE_USB); handled once. */
+    private fun handle(intent: Intent?) {
+        if (intent?.action != Sharing.SHARE_USB) return
+        intent.action = Intent.ACTION_MAIN
+        model.shareOverCable()
     }
 
     override fun onResume() {
@@ -229,12 +222,13 @@ private fun ShareScreen(model: Sharing, tapSun: () -> Unit, onWholePhone: () -> 
             }
             StatusPill(model)
             Spacer(Modifier.height(12.dp))
-            if (sharing != null && !model.paired) {
+            val network = model.endpoints.firstOrNull { it.via != Via.USB }
+            if (network != null && !model.paired) {
                 Text(S.typeOnComputer, color = Palette.muted, fontSize = 13.sp)
                 SelectionContainer {
-                    Text(sharing.host, color = Palette.fg, fontSize = 30.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                    Text(network.host, color = Palette.fg, fontSize = 30.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
                 }
-                Text(S.port(sharing.port), color = Palette.muted, fontSize = 15.sp, fontFamily = FontFamily.Monospace)
+                Text(S.port(network.port), color = Palette.muted, fontSize = 15.sp, fontFamily = FontFamily.Monospace)
             }
             if (byCable && (sharing == null || model.paired)) {
                 Text(S.openOnComputer, color = Palette.muted, fontSize = 13.sp, textAlign = TextAlign.Center)

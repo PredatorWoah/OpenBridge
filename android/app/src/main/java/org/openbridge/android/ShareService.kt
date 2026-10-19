@@ -80,14 +80,21 @@ class ShareService : Service() {
         private fun sharing(context: Context): Notification {
             channels(context)
             val server = Sharing.server
+            val network = Sharing.endpoints.firstOrNull { it.via != Via.USB }
             val text = when {
                 Sharing.paired -> S.connectedTo(Sharing.computer)
-                server != null -> S.onComputer(server.host, server.port)
-                else -> S.starting
+                server == null -> S.starting
+                network != null -> S.onComputer(network.host, network.port)
+                else -> S.overCable
+            }
+            val title = when {
+                server?.cableOnly == true -> S.sharingOverCableTitle
+                Sharing.wholePhone -> S.sharingWholePhoneTitle
+                else -> S.sharingOneFolderTitle
             }
             return NotificationCompat.Builder(context, SHARING_CHANNEL)
                 .setSmallIcon(R.drawable.ic_launcher_monochrome)
-                .setContentTitle(if (Sharing.wholePhone) S.sharingWholePhoneTitle else S.sharingOneFolderTitle)
+                .setContentTitle(title)
                 .setContentText(text)
                 .setOngoing(true)
                 .setContentIntent(openApp(context))
