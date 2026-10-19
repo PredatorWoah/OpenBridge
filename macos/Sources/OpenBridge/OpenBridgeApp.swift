@@ -349,7 +349,7 @@ struct PairingCode: View {
             }
             .textSelection(.enabled)
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Pairing code \(code.map(String.init).joined(separator: " "))")
+            .accessibilityLabel("Pairing code \(code.map { String($0) }.joined(separator: " "))")
         }
     }
 }

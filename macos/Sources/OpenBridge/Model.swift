@@ -411,7 +411,7 @@ final class BrowserModel: ObservableObject {
                             try await phone.done(item.entry)
                         } else {
                             try? FileManager.default.createDirectory(at: Self.receivedFolder, withIntermediateDirectories: true)
-                            let target = Self.free(Self.receivedFolder.appendingPathComponent(Wire.fitted(item.entry.name, limit: 220)))
+                            let target = Self.free(Self.receivedFolder.appendingPathComponent(Self.macName(item.entry.name)))
                             try await phone.receive(item.entry, to: target)
                             received = target
                             show("Received “\(item.entry.name)” from the phone")
@@ -631,7 +631,7 @@ final class BrowserModel: ObservableObject {
             }
             self.transfer = Transfer(name: "Preparing…", upload: false)
             let at = trail.dropFirst().map(\.name)
-            try await self.perform(fresh.map { .download($0, to: Self.free(destination.appendingPathComponent($0.name)), at: at) }, client: client)
+            try await self.perform(fresh.map { .download($0, to: Self.free(destination.appendingPathComponent(Self.macName($0.name))), at: at) }, client: client)
             Imports.save(key, done.union(media.map(Imports.line)))
             self.show(fresh.count == 1 ? "Imported 1 photo or video" : "Imported \(fresh.count) photos and videos")
         }
@@ -1155,7 +1155,7 @@ final class BrowserModel: ObservableObject {
         let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
         if items.count == 1, let file = items.first, !file.directory {
             let panel = NSSavePanel()
-            panel.nameFieldStringValue = file.name
+            panel.nameFieldStringValue = Self.macName(file.name)
             panel.directoryURL = downloads
             panel.message = "Choose where to save. OpenBridge never replaces existing files."
             guard panel.runModal() == .OK, let target = panel.url else { return }
@@ -1178,7 +1178,7 @@ final class BrowserModel: ObservableObject {
         var jobs: [Job] = []
         for item in items {
             try Task.checkCancellation()
-            let target = Self.free(folder.appendingPathComponent(item.name))
+            let target = Self.free(folder.appendingPathComponent(Self.macName(item.name)))
             if item.directory {
                 try FileManager.default.createDirectory(at: target, withIntermediateDirectories: false)
                 jobs += try await plan(try await client.list(id: item.id), into: target, at: location + [item.name], client: client)
@@ -1369,6 +1369,10 @@ final class BrowserModel: ObservableObject {
         }
         return name
     }
+
+    /// A phone's name for a file, short enough for the Mac (255 bytes, with room for " 2" and the partial download's
+    /// suffix). Phones allow longer names in Chinese and other scripts over USB.
+    static func macName(_ name: String) -> String { Wire.fitted(name, limit: 220) }
 
     /// A Mac destination that doesn't exist yet: "photo 2.jpg" if "photo.jpg" is there. Never replaces a file.
     static func free(_ url: URL) -> URL {
