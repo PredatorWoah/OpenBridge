@@ -26,7 +26,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-/** The Windows client against the real Java server (the phone's Session) over real TLS on loopback. */
+/** The desktop client against the real Java server (the phone's Session) over real TLS on loopback. */
 class BridgeClientTest {
     private lateinit var base: File
     private lateinit var phone: File
@@ -35,6 +35,7 @@ class BridgeClientTest {
     private val secret = ByteArray(32) { 0x5a }
     private var clip = "phone clipboard"
     private val sent = linkedMapOf("1" to ByteArray(70_000) { (it % 13).toByte() })
+    private val texts = linkedMapOf<String, ByteArray>()
 
     @BeforeTest
     fun start() {
@@ -58,15 +59,16 @@ class BridgeClientTest {
             override fun write(text: String) { clip = text }
         }
         val outbox = object : Outbox {
-            override fun waitFor(millis: Long, texts: Boolean) = sent.map { (id, data) -> Outbox.Item(id, "IMG_$id.jpg", data.size.toLong(), Outbox.FILE) }
+            override fun waitFor(millis: Long, withTexts: Boolean) = sent.map { (id, data) -> Outbox.Item(id, "IMG_$id.jpg", data.size.toLong(), Outbox.FILE) } +
+                (if (withTexts) texts.map { (id, data) -> Outbox.Item(id, "Text", data.size.toLong(), Outbox.TEXT) } else emptyList())
             override fun open(id: String): Store.Read {
-                val data = sent[id] ?: throw java.io.IOException("Already collected")
+                val data = sent[id] ?: texts[id] ?: throw java.io.IOException("Already collected")
                 val stream = data.inputStream()
                 return object : Store.Read { override fun size() = data.size.toLong(); override fun stream() = stream; override fun close() {} }
             }
-            override fun done(id: String) { sent.remove(id) }
+            override fun done(id: String) { sent.remove(id); texts.remove(id) }
         }
-        val session = Session(store, Trust.single(secret), fingerprint, { true }, clipboard, outbox)
+        val session = Session(store, Trust.single(secret), fingerprint, { true }, clipboard, outbox).describe("0.13.0", "vivo X300 Pro")
         server = tls.serverSocketFactory.createServerSocket(0, 8, InetAddress.getByName("127.0.0.1")) as SSLServerSocket
         thread(isDaemon = true) {
             while (!server.isClosed) {
@@ -80,12 +82,12 @@ class BridgeClientTest {
     @AfterTest
     fun stop() { server.close(); base.deleteRecursively() }
 
-    private fun client() = BridgeClient("127.0.0.1", server.localPort, fingerprint, secret)
+    private fun client() = BridgeClient("127.0.0.1", server.localPort, fingerprint, secret, Transport.FAST_USB)
 
     @Test
     fun pairsWithTheSameCodeAndPin() {
         var shown = ""
-        val paired = BridgeClient.pairAt("127.0.0.1", server.localPort) { shown = it }
+        val paired = BridgeClient.pairAt("127.0.0.1", server.localPort, transport = Transport.FAST_USB) { shown = it }
         assertTrue(shown.matches(Regex("[0-9]{6}")), "6-digit code")
         assertEquals(listOf("DCIM", "notes.txt"), paired.list().map { it.name })   // pinned and holding the secret
         assertFailsWith<BridgeException> { BridgeClient.pair("127.0.0.1", server.localPort.toString()) { } }   // public path: LAN only
@@ -127,16 +129,16 @@ class BridgeClientTest {
         assertEquals("jpeg:notes.txt:256", String(client.thumbnail(notes)))
 
         assertEquals("phone clipboard", client.clipboard())
-        client.setClipboard("from Windows ✓")
-        assertEquals("from Windows ✓", clip)
+        client.setClipboard("from the computer ✓")
+        assertEquals("from the computer ✓", clip)
     }
 
     @Test
     fun refusesAnotherCertificateOrSecret() {
         // Either means the saved pairing is no longer any good: the PC forgets the phone and asks to pair again.
-        val wrongPin = BridgeClient("127.0.0.1", server.localPort, ByteArray(32), secret)
+        val wrongPin = BridgeClient("127.0.0.1", server.localPort, ByteArray(32), secret, Transport.FAST_USB)
         assertTrue(assertFailsWith<BridgeException> { wrongPin.list() }.forgotten)
-        val wrongSecret = BridgeClient("127.0.0.1", server.localPort, fingerprint, ByteArray(32))
+        val wrongSecret = BridgeClient("127.0.0.1", server.localPort, fingerprint, ByteArray(32), Transport.FAST_USB)
         assertTrue(assertFailsWith<BridgeException> { wrongSecret.list() }.forgotten)
     }
 
@@ -195,7 +197,9 @@ class BridgeClientTest {
     fun savedPhonesKeepTheirPairing() {
         val saved = SavedPhone("vivo X300 Pro", fingerprint, "127.0.0.1", server.localPort, secret)
         assertEquals(fingerprint.take(8).joinToString("") { "%02x".format(it) }, saved.id)
-        assertEquals(listOf("DCIM", "notes.txt"), saved.client().list().map { it.name })
+        assertEquals(listOf("DCIM", "notes.txt"), saved.overUsb(server.localPort).list().map { it.name })
+        // Over Wi‑Fi the secret only goes to private addresses, never to this computer itself.
+        assertFailsWith<BridgeException> { saved.client().list() }
         assertTrue(BridgeClient.reachable("127.0.0.1", server.localPort))
     }
 
@@ -205,6 +209,27 @@ class BridgeClientTest {
         assertFalse(assertFailsWith<BridgeException> { client.list("no-such-id") }.lost)   // the phone answered: not lost
         // Nothing listens on that port any more, as when the phone stopped sharing.
         val stopped = java.net.ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")).use { it.localPort }
-        assertTrue(assertFailsWith<BridgeException> { BridgeClient("127.0.0.1", stopped, fingerprint, secret).list() }.lost)
+        assertTrue(assertFailsWith<BridgeException> { BridgeClient("127.0.0.1", stopped, fingerprint, secret, Transport.FAST_USB).list() }.lost)
+    }
+
+    @Test
+    fun receivesTextsAndDescribesThePhone() {
+        val client = client()
+        texts["t1"] = "Hello from the phone ✓".toByteArray()
+        val waiting = client.outboxAll(0)
+        assertEquals(listOf(false, true), waiting.map { it.text })
+        assertEquals(listOf("IMG_1.jpg"), client.outbox(0).map { it.name })   // the old operation never lists texts
+        val text = waiting.first { it.text }
+        assertEquals("Hello from the phone ✓", client.readText(text.entry))
+        client.collected(text.entry)
+        assertTrue(texts.isEmpty())
+        assertEquals(PhoneInfo("0.13.0", 18, "vivo X300 Pro"), client.info())
+    }
+
+    @Test
+    fun readsTheCertificateWithoutSendingAnything() {
+        assertContentEquals(fingerprint, BridgeClient.fingerprintAt("127.0.0.1", server.localPort))
+        val nothing = java.net.ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")).use { it.localPort }
+        assertEquals(null, BridgeClient.fingerprintAt("127.0.0.1", nothing, 1_000))
     }
 }

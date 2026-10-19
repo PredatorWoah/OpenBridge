@@ -254,7 +254,7 @@ private fun UsbCard(state: AppState) {
                 Text(S.cableFound(phone), color = Palette.fg, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                SunsetButton(S.openExplorer, modifier = Modifier.weight(1f)) { Usb.openExplorer() }
+                SunsetButton(S.openExplorer, modifier = Modifier.weight(1f)) { Platform.openThisPc() }
                 GhostButton(S.mirror, enabled = !state.mirroring) { state.mirror() }
                 GhostButton(S.mirrorWireless, enabled = !state.mirroring) { state.mirror(wireless = true) }
             }
@@ -450,7 +450,7 @@ private fun TransferBar(state: AppState, transfer: Transfer) {
             when {
                 transfer.done -> {
                     Text(if (transfer.upload) S.uploaded else S.saved, color = Palette.ok, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    transfer.saved?.let { file -> GhostButton(S.showInFolder) { runCatching { ProcessBuilder("explorer.exe", "/select,", file.absolutePath).start() } } }
+                    transfer.saved?.let { file -> GhostButton(S.showInFolder) { Platform.reveal(file) } }
                     IconButton(Icons.Filled.Close, S.done) { state.dismissTransfer() }
                 }
                 !state.busy -> {

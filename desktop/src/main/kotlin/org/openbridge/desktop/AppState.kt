@@ -120,7 +120,7 @@ class AppState {
             ui { searchedLong = true }
             while (true) {
                 // Asking PowerShell costs some CPU, so only look while the cable card is on screen.
-                if (client == null) { val found = Usb.phones(); ui { usbPhones = found } }
+                if (client == null) { val found = org.openbridge.desktop.wpd.Wpd.phones().map { it.name }; ui { usbPhones = found } }
                 Thread.sleep(4_000)
             }
         }.apply { isDaemon = true }.start()
@@ -212,8 +212,8 @@ class AppState {
     fun openReceived() {
         val file = received
         runCatching {
-            if (file != null && file.exists()) ProcessBuilder("explorer.exe", "/select,", file.absolutePath).start()
-            else ProcessBuilder("explorer.exe", receivedFolder.apply { mkdirs() }.absolutePath).start()
+            if (file != null && file.exists()) Platform.reveal(file)
+            else Platform.openFolder(receivedFolder.apply { mkdirs() })
         }
     }
 

@@ -30,6 +30,15 @@ tasks.test { useJUnitPlatform() }
 
 val appVersion = providers.gradleProperty("appVersion").orElse("0.12.2")
 
+// The version for development runs (the installed app gets it from its launcher): diagnostics, the phone-app check.
+val versionResource = tasks.register("versionResource") {
+    val output = layout.buildDirectory.dir("generated/version")
+    inputs.property("version", appVersion)
+    outputs.dir(output)
+    doLast { output.get().file("openbridge-version.txt").asFile.writeText(appVersion.get()) }
+}
+sourceSets["main"].resources.srcDir(versionResource)
+
 compose.desktop {
     application {
         mainClass = "org.openbridge.desktop.MainKt"
