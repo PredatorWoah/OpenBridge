@@ -19,7 +19,8 @@ assert permissions == {"android.permission.INTERNET", "android.permission.ACCESS
                        "android.permission.WRITE_EXTERNAL_STORAGE", "android.permission.FOREGROUND_SERVICE",
                        "android.permission.FOREGROUND_SERVICE_DATA_SYNC", "android.permission.POST_NOTIFICATIONS",
                        "android.permission.WAKE_LOCK", "android.permission.CHANGE_WIFI_STATE",
-                       "android.permission.NEARBY_WIFI_DEVICES"}, permissions
+                       "android.permission.NEARBY_WIFI_DEVICES", "android.permission.REQUEST_INSTALL_PACKAGES"}, permissions
+assert all(r.attrib[ns + "exported"] == "false" for r in manifest.find("application").findall("receiver")), "receivers stay private"
 # The phone hotspot needs Nearby devices, which must never give location (and no location permission is asked for).
 assert all(p.attrib.get(ns + "usesPermissionFlags") == "neverForLocation" for p in manifest.findall("uses-permission")
            if p.attrib[ns + "name"].endswith("NEARBY_WIFI_DEVICES")), "Nearby devices must be neverForLocation"

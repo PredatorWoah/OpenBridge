@@ -101,6 +101,21 @@ object S {
 
     // Updates
     fun update(version: String) = t("Update available: $version", "有新版本：$version")
+    val updateNow get() = t("Update", "更新")
+    val whatsNew get() = t("What's new", "更新内容")
+    fun downloading(percent: Int) = t("Downloading… $percent%", "正在下载… $percent%")
+    val verifying get() = t("Checking the download…", "正在校验下载…")
+    val installing get() = t("Installing…", "正在安装…")
+    val allowInstall get() = t("Allow installing apps from OpenBridge, then come back.", "请允许 OpenBridge 安装应用，然后返回。")
+    val updateNeedsPermission get() = t("OpenBridge isn't allowed to install updates. Get it from the release page instead.",
+        "OpenBridge 没有安装更新的权限。请从发布页面下载。")
+    val updateMismatch get() = t("The download didn't match its checksum, so it wasn't installed. Get it from the release page.",
+        "下载的文件与校验值不符，因此没有安装。请从发布页面下载。")
+    val updateFailed get() = t("The update didn't go through. Get it from the release page.", "更新没有完成。请从发布页面下载。")
+    val openReleasePage get() = t("Open the release page", "打开发布页面")
+    val checkForUpdates get() = t("Check for updates", "检查更新")
+    val checking get() = t("Checking…", "正在检查…")
+    val upToDate get() = t("You have the latest version.", "已是最新版本。")
 
     // Notification
     val channelSharing get() = t("Sharing", "共享")

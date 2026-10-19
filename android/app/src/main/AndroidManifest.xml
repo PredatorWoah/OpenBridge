@@ -16,6 +16,8 @@
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" android:usesPermissionFlags="neverForLocation"
         tools:targetApi="33" />
+    <!-- Update in the app: Android's installer still asks the user and checks the signing key. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <application android:allowBackup="false" android:label="OpenBridge"
         android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round"
         android:theme="@android:style/Theme.Material.NoActionBar"
@@ -41,6 +43,7 @@
              invisible screen opens for a moment to read it. -->
         <activity android:name=".SendClipboard" android:exported="false" android:noHistory="true"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" android:excludeFromRecents="true" android:taskAffinity="" />
+        <receiver android:name=".UpdateReceiver" android:exported="false" />
         <service android:name=".ShareService" android:exported="false" android:foregroundServiceType="dataSync" />
         <service android:name=".ClipboardTile" android:exported="true" android:label="@string/send_clipboard"
             android:icon="@drawable/ic_tile_clipboard" android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
