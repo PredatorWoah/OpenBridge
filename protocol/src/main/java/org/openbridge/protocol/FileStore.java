@@ -22,8 +22,18 @@ public final class FileStore implements Store {
         byte[] make(File file, int size) throws IOException;
     }
 
+    /**
+     * The platform's index of file names (Android's MediaStore), which answers searches at once. It may be incomplete
+     * or out of date: every hit is checked against the filesystem, and the search still walks the folders for the rest.
+     */
+    public interface Index {
+        /** Files whose names contain `query`, ignoring case, below `folder` (anywhere when null); at most `limit`. */
+        List<File> find(String query, File folder, int limit) throws IOException;
+    }
+
     private static final int MAX_DOCUMENTS = 50_000;
     private final Thumbnails thumbnails;
+    private final Index index;
     private final List<Root> roots = new ArrayList<>();
     private final List<Path> rootPaths = new ArrayList<>();
     private final Map<String, Path> documents = new HashMap<>();
@@ -32,8 +42,12 @@ public final class FileStore implements Store {
 
     public FileStore(List<Root> roots) throws IOException { this(roots, null); }
 
-    public FileStore(List<Root> roots, Thumbnails thumbnails) throws IOException {
+    public FileStore(List<Root> roots, Thumbnails thumbnails) throws IOException { this(roots, thumbnails, null); }
+
+    /** With `index`, searches start with what the platform's file index knows (see {@link Index}). */
+    public FileStore(List<Root> roots, Thumbnails thumbnails, Index index) throws IOException {
         this.thumbnails = thumbnails;
+        this.index = index;
         if (roots.isEmpty()) throw new IOException("No storage is available");
         for (Root root : roots) {
             this.roots.add(root);
@@ -207,14 +221,28 @@ public final class FileStore implements Store {
 
     @Override public List<Store.Found> search(String directoryId, String query, long deadline, boolean[] complete) throws IOException {
         Path start;
+        boolean everywhere;
         synchronized (this) {
-            if (directoryId.isEmpty() && roots.size() > 1) return Store.super.search(directoryId, query, deadline, complete);
-            start = directory(directoryId);
+            everywhere = directoryId.isEmpty() && roots.size() > 1;
+            start = everywhere ? null : directory(directoryId);
         }
         String needle = query.toLowerCase(Locale.ROOT);
         List<Store.Found> found = new ArrayList<>();
-        long[] seen = {0};
+        // IDs already found, so the walk doesn't repeat what the index answered.
+        Set<String> have = new HashSet<>();
         complete[0] = true;
+        if (index != null) indexed(start, query, needle, deadline, found, have, complete);
+        if (everywhere) {
+            // Several storage areas: walk them through the listing, as before, after the index's hits.
+            boolean[] walked = {true};
+            for (Store.Found hit : Store.super.search(directoryId, query, deadline, walked)) {
+                if (found.size() >= SEARCH_LIMIT) { walked[0] = false; break; }
+                if (have.add(hit.entry.id)) found.add(hit);
+            }
+            complete[0] &= walked[0];
+            return found;
+        }
+        long[] seen = {0};
         // Walks the filesystem directly, skipping links and hidden uploads, and hands out IDs only for matches.
         Files.walkFileTree(start, new SimpleFileVisitor<Path>() {
             private FileVisitResult visit(Path item, boolean folder, long size) throws IOException {
@@ -226,8 +254,9 @@ public final class FileStore implements Store {
                 if (name.toLowerCase(Locale.ROOT).contains(needle)) {
                     try {
                         Wire.validateName(name);
-                        String location = start.relativize(item.getParent()).toString().replace(java.io.File.separatorChar, '/');
-                        synchronized (FileStore.this) { found.add(new Store.Found(new Entry(id(item), name, folder, size), location)); }
+                        String id;
+                        synchronized (FileStore.this) { id = id(item); }
+                        if (have.add(id)) found.add(new Store.Found(new Entry(id, name, folder, size), location(start, item)));
                     } catch (IOException unsupported) { /* a name the protocol can't carry */ }
                 }
                 return FileVisitResult.CONTINUE;
@@ -241,6 +270,80 @@ public final class FileStore implements Store {
             @Override public FileVisitResult visitFileFailed(Path file, IOException error) { return FileVisitResult.CONTINUE; }
         });
         return found;
+    }
+
+    /**
+     * Adds the index's hits below `start` (every storage area when null) to `found`. The index is only a hint: each hit
+     * must still be a file or folder the listing would show, and its name must contain the query.
+     */
+    private void indexed(Path start, String query, String needle, long deadline, List<Store.Found> found, Set<String> have, boolean[] complete) {
+        List<File> hits;
+        try { hits = index.find(query, start == null ? null : start.toFile(), SEARCH_LIMIT); }
+        catch (IOException | RuntimeException unavailable) { return; }   // the walk still finds everything
+        if (hits == null) return;
+        for (File file : hits) {
+            if (System.currentTimeMillis() > deadline || found.size() >= SEARCH_LIMIT) { complete[0] = false; return; }
+            try {
+                Path item = located(file);
+                if (item == null || (start != null && (!item.startsWith(start) || item.equals(start)))) continue;
+                String name = item.getFileName().toString();
+                if (!name.toLowerCase(Locale.ROOT).contains(needle)) continue;
+                boolean folder = Files.isDirectory(item, LinkOption.NOFOLLOW_LINKS);
+                long size = folder ? 0 : Files.size(item);
+                String location = start != null ? location(start, item) : topLocation(item);
+                String id;
+                synchronized (this) { id = id(item); }
+                if (location != null && have.add(id)) found.add(new Store.Found(new Entry(id, name, folder, size), location));
+            } catch (IOException | RuntimeException gone) { /* changed since it was indexed */ }
+        }
+    }
+
+    /** The folder `item` is in, by name relative to `start` ("DCIM/Camera"; empty directly inside it). */
+    private static String location(Path start, Path item) {
+        return start.relativize(item.getParent()).toString().replace(java.io.File.separatorChar, '/');
+    }
+
+    /** Like {@link #location}, from the top when there are several storage areas: "SD card/DCIM". */
+    private String topLocation(Path item) {
+        for (int i = 0; i < rootPaths.size(); i++) {
+            Path root = rootPaths.get(i);
+            if (!item.startsWith(root)) continue;
+            String inside = location(root, item);
+            String area = safeName(roots.get(i).name, i);
+            return inside.isEmpty() ? area : area + "/" + inside;
+        }
+        return null;
+    }
+
+    /**
+     * The ID of `file`, the same one listing its folder hands out, or null when it isn't a file or folder inside a
+     * storage area, is a symbolic link, or is hidden from listings (an upload in progress, or a name the protocol
+     * can't carry, anywhere on its way down from the storage area).
+     */
+    public synchronized String idOf(File file) {
+        Path item = located(file);
+        if (item == null) return null;
+        try { return id(item); } catch (IOException full) { return null; }
+    }
+
+    /** `file` as the listing reaches it: its real path inside a storage area, or null (see {@link #idOf}). */
+    private Path located(File file) {
+        try {
+            Path given = file.toPath().toAbsolutePath().normalize();
+            if (Files.isSymbolicLink(given)) return null;
+            if (!Files.isDirectory(given, LinkOption.NOFOLLOW_LINKS) && !Files.isRegularFile(given, LinkOption.NOFOLLOW_LINKS)) return null;
+            Path real = given.toRealPath();
+            for (Path root : rootPaths) {
+                if (!real.startsWith(root) || real.equals(root)) continue;
+                for (Path part : root.relativize(real)) {
+                    String name = part.toString();
+                    if (Names.isTemporary(name)) return null;
+                    Wire.validateName(name);
+                }
+                return real;
+            }
+        } catch (IOException | RuntimeException unusable) { /* missing, unreadable or a name the protocol can't carry */ }
+        return null;
     }
 
     @Override public Store.Size measure(String directoryId, long deadline) throws IOException {

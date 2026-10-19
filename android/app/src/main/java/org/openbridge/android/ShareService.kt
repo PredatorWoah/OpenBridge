@@ -27,6 +27,8 @@ class ShareService : Service() {
         private const val PAIRING_CHANNEL = "pairing"
         private const val SHARING_ID = 1
         private const val PAIRING_ID = 2
+        private const val TEXTS_CHANNEL = "texts"
+        private const val TEXT_ID = 3
         private const val STOP = "org.openbridge.android.STOP"
         private const val PAIR = "org.openbridge.android.PAIR"
         private const val DECLINE = "org.openbridge.android.DECLINE"
@@ -34,7 +36,7 @@ class ShareService : Service() {
         fun start(context: Context) = ContextCompat.startForegroundService(context, Intent(context, ShareService::class.java))
         fun stop(context: Context) { context.stopService(Intent(context, ShareService::class.java)) }
 
-        /** Updates the ongoing notification, for example once a Mac has paired. */
+        /** Updates the ongoing notification, for example once a computer has paired. */
         fun refresh(context: Context) {
             if (Sharing.server != null && Sharing.inBackground) notify(context, SHARING_ID, sharing(context))
         }
@@ -69,6 +71,7 @@ class ShareService : Service() {
             val manager = context.getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(NotificationChannel(SHARING_CHANNEL, S.channelSharing, NotificationManager.IMPORTANCE_LOW))
             manager.createNotificationChannel(NotificationChannel(PAIRING_CHANNEL, S.channelPairing, NotificationManager.IMPORTANCE_HIGH))
+            manager.createNotificationChannel(NotificationChannel(TEXTS_CHANNEL, S.channelTexts, NotificationManager.IMPORTANCE_LOW))
         }
 
         private fun openApp(context: Context) = PendingIntent.getActivity(context, 0,
@@ -80,19 +83,39 @@ class ShareService : Service() {
         private fun sharing(context: Context): Notification {
             channels(context)
             val server = Sharing.server
+            val network = Sharing.endpoints.firstOrNull { it.via != Via.USB }
             val text = when {
                 Sharing.paired -> S.connectedTo(Sharing.computer)
-                server != null -> S.onComputer(server.host, server.port)
-                else -> S.starting
+                server == null -> S.starting
+                network != null -> S.onComputer(network.host, network.port)
+                else -> S.overCable
+            }
+            val title = when {
+                server?.cableOnly == true -> S.sharingOverCableTitle
+                Sharing.wholePhone -> S.sharingWholePhoneTitle
+                else -> S.sharingOneFolderTitle
             }
             return NotificationCompat.Builder(context, SHARING_CHANNEL)
                 .setSmallIcon(R.drawable.ic_launcher_monochrome)
-                .setContentTitle(if (Sharing.wholePhone) S.sharingWholePhoneTitle else S.sharingOneFolderTitle)
+                .setContentTitle(title)
                 .setContentText(text)
                 .setOngoing(true)
                 .setContentIntent(openApp(context))
+                .addAction(0, S.sendClipboard, PendingIntent.getActivity(context, 3, SendClipboard.intent(context), PendingIntent.FLAG_IMMUTABLE))
                 .addAction(0, S.stopSharing, action(context, STOP))
                 .build()
+        }
+
+        /** A computer put a text on the phone's clipboard while the app wasn't in front. The text itself isn't shown. */
+        fun textReceived(context: Context, computer: String?) {
+            channels(context)
+            notify(context, TEXT_ID, NotificationCompat.Builder(context, TEXTS_CHANNEL)
+                .setSmallIcon(R.drawable.ic_launcher_monochrome)
+                .setContentTitle(S.textCopied(computer))
+                .setContentIntent(openApp(context))
+                .setAutoCancel(true)
+                .setTimeoutAfter(15_000)
+                .build())
         }
     }
 

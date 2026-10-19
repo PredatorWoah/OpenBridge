@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Only what the system shows before the app runs: the Quick Settings tile's name. Everything else is in Strings.kt. -->
+<resources>
+    <string name="send_clipboard">Send clipboard</string>
+</resources>
