@@ -66,7 +66,7 @@ object Sharing {
     private var awaitingWholePhone = false
     private val worker = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
-    private var generation = 0
+    @Volatile private var generation = 0
 
     /** 6-digit code of a pairing request waiting for the user, shown in a sheet (or a notification). */
     var pairingCode by mutableStateOf<String?>(null); private set
@@ -263,6 +263,8 @@ object Sharing {
                     SafStore(app.contentResolver, root)
                 }
                 val created = SharingServer(app, store, Trusted, approver, PhoneClipboard(app), cableOnly, events(current))
+                // Stopped meanwhile: free the ports now, so a start queued behind this one gets the usual ones.
+                if (generation != current) { created.close(); return@execute }
                 main.post {
                     if (generation != current) created.close() else {
                         server = created; busy = false
