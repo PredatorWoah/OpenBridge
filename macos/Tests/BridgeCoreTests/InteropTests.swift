@@ -108,5 +108,20 @@ final class InteropTests: XCTestCase {
         }
         do { _ = try await client.list(id: "../../etc"); XCTFail("Traversal ID must fail") }
         catch { }
+
+        // Fast USB reaches the phone on loopback: the probe sees its certificate, the tunnel client works as on Wi‑Fi.
+        let seen = try await BridgeClient.fingerprint(tunnel: port)
+        XCTAssertEqual(seen, fingerprint)
+        let tunnelled = try BridgeClient(tunnel: port, fingerprint: fingerprint, secret: secret)
+        XCTAssertTrue(tunnelled.overTunnel)
+        let viaTunnel = try await tunnelled.list()
+        XCTAssertEqual(viaTunnel.map(\.name), afterDelete.map(\.name))
+        XCTAssertThrowsError(try BridgeClient(saved: "127.0.0.1", port: port, fingerprint: fingerprint, secret: secret),
+                             "loopback only through the tunnel initializer")
+        let info = try await tunnelled.info()
+        XCTAssertEqual(info.revision, 18)
+        // This fixture has no outbox: OUTBOX ALL is answered with an error, not misparsed.
+        do { _ = try await tunnelled.outboxAll(wait: 0); XCTFail("No outbox in the fixture") }
+        catch { XCTAssertFalse(BridgeError.isUnsupported(error), error.localizedDescription) }
     }
 }

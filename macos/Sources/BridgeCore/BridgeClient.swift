@@ -28,6 +28,30 @@ public struct BridgeClient {
         self.host = host; self.port = port; self.fingerprint = fingerprint; self.secret = secret
     }
 
+    /// A phone reached by Fast USB, through an `ADBTunnel` on this Mac's loopback address. Only this initializer accepts
+    /// 127.0.0.1; the pin and secret are checked exactly as over Wi‑Fi, end to end through the tunnel.
+    public init(tunnel port: UInt16, fingerprint: Data, secret: Data) throws {
+        guard port > 0, fingerprint.count == 32, secret.count == 32 else {
+            throw BridgeError.message("The saved phone's details aren't valid. Pair again.")
+        }
+        self.host = BridgeClient.loopback; self.port = port; self.fingerprint = fingerprint; self.secret = secret
+    }
+
+    static let loopback = "127.0.0.1"
+
+    /// Whether this connection goes through Fast USB rather than Wi‑Fi.
+    public var overTunnel: Bool { host == BridgeClient.loopback }
+
+    /// The certificate fingerprint of whatever answers on a Fast USB tunnel's `port`. Nothing is sent but the TLS
+    /// handshake, so the Mac learns which phone it is before deciding whether to send a secret or pair.
+    public static func fingerprint(tunnel port: UInt16, timeout: TimeInterval = 5) async throws -> Data {
+        let channel = TLSChannel(host: loopback, port: port, fingerprint: nil)
+        defer { channel.close() }
+        try await channel.connect(timeout: timeout)
+        guard let seen = channel.peerFingerprint else { throw BridgeError.message("The phone sent no certificate.") }
+        return seen
+    }
+
     /// The short ID the phone announces on the network: the first 8 bytes of its certificate fingerprint.
     public var phoneID: String { fingerprint.prefix(8).map { String(format: "%02x", $0) }.joined() }
 
@@ -169,9 +193,65 @@ public struct BridgeClient {
             partial.end(after: error)
             throw error
         }
-        let done = try await open(operation: 15, id: entry.id)
-        defer { done.close() }
-        try await done.status()
+        try await done(entry)
+    }
+
+    /// Files and texts sent from the phone, waiting up to `wait` milliseconds for one (OUTBOX ALL). Phones before 0.13.0
+    /// answer "Unsupported operation"; then `outbox(wait:)` still collects files.
+    public func outboxAll(wait: Int32) async throws -> [OutboxItem] {
+        let channel = try await open(operation: 17, id: "", extra: Wire.integer(min(max(wait, 0), 25_000)))
+        defer { channel.close() }
+        try await channel.status(timeout: 35)
+        let count = try await channel.number(4)
+        guard count <= 1_000 else { throw BridgeError.message("Invalid reply.") }
+        var result: [OutboxItem] = []
+        for _ in 0..<Int(count) {
+            let id = try await channel.string(limit: 128)
+            let name = try await channel.string(limit: 255)
+            let kind = try await channel.number(1)
+            let size = try await channel.number(8)
+            guard !id.isEmpty, kind <= 1 else { throw BridgeError.message("Invalid reply.") }
+            if kind == 0 {
+                // A file's name becomes a file name on this Mac; a text's is only a label.
+                try Wire.validateName(name)
+                guard size <= UInt64(Wire.maxFile) else { throw BridgeError.message("Invalid reply.") }
+            } else {
+                guard size <= UInt64(Wire.maxClipboard) else { throw BridgeError.message("Invalid reply.") }
+            }
+            result.append(OutboxItem(entry: Entry(id: id, name: name, directory: false, size: Int64(size)), text: kind == 1))
+        }
+        return result
+    }
+
+    /// A text sent from the phone, read whole (OUTBOX GET from the start). The phone keeps it until `done`.
+    public func text(_ item: Entry) async throws -> String {
+        let channel = try await open(operation: 14, id: item.id, extra: Wire.integer(Int64(0)))
+        defer { channel.close() }
+        try await channel.status()
+        let size = try await channel.number(8)
+        guard size <= UInt64(Wire.maxClipboard) else { throw BridgeError.message("That text is too long.") }
+        guard let text = String(data: try await channel.read(Int(size)), encoding: .utf8) else {
+            throw BridgeError.message("The phone sent text that isn't valid UTF-8.")
+        }
+        return text
+    }
+
+    /// The Mac has what the phone sent (a file saved completely, or a text): the phone drops its copy.
+    public func done(_ item: Entry) async throws {
+        let channel = try await open(operation: 15, id: item.id)
+        defer { channel.close() }
+        try await channel.status()
+    }
+
+    /// The phone app's version, the highest operation it answers, and the phone's name (INFO, from 0.13.0).
+    public func info() async throws -> PhoneInfo {
+        let channel = try await open(operation: 18, id: "")
+        defer { channel.close() }
+        try await channel.status()
+        let version = try await channel.string(limit: 64)
+        let revision = Int32(bitPattern: UInt32(truncatingIfNeeded: try await channel.number(4)))
+        let name = try await channel.string(limit: 128)
+        return PhoneInfo(version: version, revision: Int(revision), name: name)
     }
 
     /// Deletes a file, or a folder with everything in it.

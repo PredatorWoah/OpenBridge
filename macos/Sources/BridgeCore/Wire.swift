@@ -12,6 +12,29 @@ public enum BridgeError: LocalizedError {
     }
 }
 
+extension BridgeError {
+    /// The phone app is too old for this operation ("Unsupported operation; update OpenBridge on the phone").
+    public static func isUnsupported(_ error: Error) -> Bool {
+        if case BridgeError.message(let text)? = error as? BridgeError { return text.contains("Unsupported operation") }
+        return false
+    }
+}
+
+/// Something the phone is sending: a file for Downloads/OpenBridge, or a text for the clipboard (its `size` in bytes).
+public struct OutboxItem: Equatable {
+    public let entry: Entry
+    public let text: Bool
+    public init(entry: Entry, text: Bool) { self.entry = entry; self.text = text }
+}
+
+/// What INFO says about the phone: its OpenBridge version, the highest operation it answers, and its name.
+public struct PhoneInfo: Equatable {
+    public let version: String
+    public let revision: Int
+    public let name: String
+    public init(version: String, revision: Int, name: String) { self.version = version; self.revision = revision; self.name = name }
+}
+
 /// A search hit, and the folder it's in by name, relative to where the search started ("DCIM/Camera").
 public struct Found: Identifiable, Equatable {
     public let entry: Entry

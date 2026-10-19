@@ -28,6 +28,24 @@ final class WireTests: XCTestCase {
         }
     }
 
+    func testLongNamesFitTheMac() {
+        let long = String(repeating: "长", count: 250) + ".txt"
+        let fitted = Wire.fitted(long)
+        XCTAssertLessThanOrEqual(fitted.utf8.count, 255)
+        XCTAssertTrue(fitted.hasSuffix("长.txt"))
+        XCTAssertEqual(Wire.fitted("photo.jpg"), "photo.jpg")
+        XCTAssertEqual(Wire.fitted("ééééé", limit: 5), "éé")
+        let partial = PartialFile.location(for: URL(fileURLWithPath: "/tmp/" + long), size: 123_456)
+        XCTAssertLessThanOrEqual(partial.lastPathComponent.utf8.count, 255)
+        XCTAssertTrue(partial.lastPathComponent.hasSuffix(".txt.123456.openbridge-part"))
+    }
+
+    func testOldPhonesAreRecognized() {
+        XCTAssertTrue(BridgeError.isUnsupported(BridgeError.message("Unsupported operation; update OpenBridge on the phone")))
+        XCTAssertFalse(BridgeError.isUnsupported(BridgeError.message("Sending from the phone is not available")))
+        XCTAssertFalse(BridgeError.isUnsupported(CancellationError()))
+    }
+
     func testPairingMatchesTheAndroidImplementation() {
         // Same reference vector as ProtocolTest.java and scripts/test-tls.py.
         let fingerprint = Data(repeating: 1, count: 32), macNonce = Data(repeating: 2, count: 32), phoneNonce = Data(repeating: 3, count: 32)

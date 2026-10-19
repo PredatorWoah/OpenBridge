@@ -2,6 +2,16 @@ import Foundation
 import Security
 import MTPCore
 
+public enum ADBError: LocalizedError {
+    /// USB debugging is on, but the phone hasn't allowed this Mac yet (and wasn't asked to).
+    case notAllowed
+    public var errorDescription: String? {
+        switch self {
+        case .notAllowed: return "The phone hasn't allowed USB debugging from this Mac yet."
+        }
+    }
+}
+
 /// One ADB packet: a 24-byte little-endian header and an optional payload.
 struct ADBMessage: Equatable {
     static let connect: UInt32 = 0x4e58_4e43    // CNXN
@@ -177,15 +187,29 @@ public final class ADBConnection: @unchecked Sendable {
 
     init(transport: MTPTransport) { self.transport = transport }
 
-    /// Connects and authenticates. `allowPrompt` runs when the phone shows "Allow USB debugging?".
-    public static func connect(transport: MTPTransport, key: ADBKey, name: String, allowPrompt: @escaping () -> Void) throws -> ADBConnection {
+    /// Connects and authenticates. `allowPrompt` runs when the phone shows "Allow USB debugging?". With `offerKey` false,
+    /// a phone that doesn't know this Mac yet fails with `ADBError.notAllowed` instead of asking its user. `ready` runs
+    /// after authentication, before anything else is read (to lift a handshake timeout, for example).
+    public static func connect(transport: MTPTransport, key: ADBKey, name: String, offerKey: Bool = true,
+                               ready: (() -> Void)? = nil, allowPrompt: @escaping () -> Void) throws -> ADBConnection {
         let connection = ADBConnection(transport: transport)
-        try connection.handshake(key: key, name: name, allowPrompt: allowPrompt)
+        try connection.handshake(key: key, name: name, offerKey: offerKey, allowPrompt: allowPrompt)
+        ready?()
         Thread { connection.readLoop() }.start()
         return connection
     }
 
-    private func handshake(key: ADBKey, name: String, allowPrompt: () -> Void) throws {
+    /// Whether the connection has ended (unplugged, or the phone restarted USB debugging).
+    public var isClosed: Bool { state.lock(); defer { state.unlock() }; return closed }
+
+    /// The phone's model from its banner ("ro.product.model=V2514;"), like what `adb devices -l` shows.
+    public var model: String? {
+        guard let range = banner.range(of: "ro.product.model=") else { return nil }
+        let value = banner[range.upperBound...].prefix { $0 != ";" }
+        return value.isEmpty ? nil : String(value)
+    }
+
+    private func handshake(key: ADBKey, name: String, offerKey: Bool, allowPrompt: () -> Void) throws {
         try send(ADBMessage(command: ADBMessage.connect, arg0: ADBMessage.version, arg1: ADBMessage.maxPayload, payload: Data("host::\0".utf8)))
         var signed = false, offered = false
         let deadline = Date().addingTimeInterval(120)
@@ -202,6 +226,7 @@ public final class ADBConnection: @unchecked Sendable {
                     try send(ADBMessage(command: ADBMessage.auth, arg0: 2, arg1: 0, payload: try key.sign(message.payload)))
                 } else if !offered {
                     // The phone doesn't know this Mac yet: offer the key, and the phone asks its user.
+                    guard offerKey else { throw ADBError.notAllowed }
                     offered = true
                     try send(ADBMessage(command: ADBMessage.auth, arg0: 3, arg1: 0, payload: try key.androidPublicKey(name: name)))
                     allowPrompt()
@@ -272,8 +297,10 @@ public final class ADBConnection: @unchecked Sendable {
             switch message.command {
             case ADBMessage.okay: stream?.okay(remote: message.arg0)
             case ADBMessage.write:
-                stream?.received(message.payload)
-                try? send(ADBMessage(command: ADBMessage.okay, arg0: message.arg1, arg1: message.arg0))
+                // The phone sends a stream's next data only after this OKAY; a stream with a backlog sends it later.
+                if stream?.received(message.payload) ?? true {
+                    try? send(ADBMessage(command: ADBMessage.okay, arg0: message.arg1, arg1: message.arg0))
+                }
             case ADBMessage.close:
                 if let stream { state.lock(); streams[stream.local] = nil; state.unlock(); stream.peerClosed() }
             default: break
@@ -313,8 +340,29 @@ public final class ADBStream: @unchecked Sendable {
         condition.broadcast(); condition.unlock()
     }
 
-    func received(_ data: Data) {
-        condition.lock(); incoming.append(data); condition.broadcast(); condition.unlock()
+    /// Unread data beyond which the phone's next write waits (its OKAY is held back) until the reader catches up, so a
+    /// slow reader of a fast stream (a Fast USB download) never makes the Mac buffer the whole file.
+    static let backlog = 4 << 20
+    private var owesOkay = false
+
+    /// Takes data from the phone; returns whether to acknowledge it now.
+    func received(_ data: Data) -> Bool {
+        condition.lock(); defer { condition.unlock() }
+        incoming.append(data); condition.broadcast()
+        guard incoming.count > ADBStream.backlog else { return true }
+        owesOkay = true
+        return false
+    }
+
+    /// After a read (lock held): whether a held-back OKAY can go now. The caller sends it once unlocked.
+    private func caughtUp() -> UInt32? {
+        guard owesOkay, incoming.count <= ADBStream.backlog, !finished else { return nil }
+        owesOkay = false
+        return remote
+    }
+
+    private func acknowledge(_ remote: UInt32?) {
+        if let remote { try? connection.send(ADBMessage(command: ADBMessage.okay, arg0: local, arg1: remote)) }
     }
 
     func peerClosed() {
@@ -339,21 +387,27 @@ public final class ADBStream: @unchecked Sendable {
 
     /// Reads exactly `count` bytes, waiting for them.
     public func read(_ count: Int) throws -> Data {
-        condition.lock(); defer { condition.unlock() }
+        condition.lock()
         while incoming.count < count && !finished { condition.wait() }
-        guard incoming.count >= count else { throw BridgeError.message("The phone closed the connection.") }
+        guard incoming.count >= count else { condition.unlock(); throw BridgeError.message("The phone closed the connection.") }
         let result = Data(incoming.prefix(count))
         incoming.removeFirst(count)
+        let okay = caughtUp()
+        condition.unlock()
+        acknowledge(okay)
         return result
     }
 
     /// Reads whatever has arrived (at least one byte), or nil once the stream has ended.
     public func readAvailable() -> Data? {
-        condition.lock(); defer { condition.unlock() }
+        condition.lock()
         while incoming.isEmpty && !finished { condition.wait() }
-        guard !incoming.isEmpty else { return nil }
+        guard !incoming.isEmpty else { condition.unlock(); return nil }
         let result = incoming
         incoming = Data()
+        let okay = caughtUp()
+        condition.unlock()
+        acknowledge(okay)
         return result
     }
 
