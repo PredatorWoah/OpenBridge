@@ -46,7 +46,7 @@ object Hotspot {
     @Volatile private var ours = false
     private var reservation: WifiManager.LocalOnlyHotspotReservation? = null
     private var stopRequested = false
-    private lateinit var app: Context
+    private var attached = false
     private val main = Handler(Looper.getMainLooper())
     /** Names Android gives Wi-Fi access point interfaces. */
     private val accessPoint = Regex("(wlan|swlan|ap|softap|wifi|wigig)\\d+")
@@ -55,8 +55,9 @@ object Hotspot {
     val supported get() = Build.VERSION.SDK_INT >= 33
 
     fun attach(context: Context) {
-        if (::app.isInitialized) return
-        app = context.applicationContext
+        if (attached) return
+        attached = true
+        val app = context.applicationContext
         val receiver = object : BroadcastReceiver() { override fun onReceive(context: Context, intent: Intent) = apState(intent) }
         apState(ContextCompat.registerReceiver(app, receiver, IntentFilter(AP_STATE), ContextCompat.RECEIVER_EXPORTED))
     }

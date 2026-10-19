@@ -1,5 +1,6 @@
 package org.openbridge.android
 
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.PendingIntent
 import android.content.Context
@@ -59,6 +60,7 @@ class ClipboardTile : TileService() {
         if (isLocked) unlockAndRun(::open) else open()
     }
 
+    @SuppressLint("StartActivityAndCollapseDeprecated")   // the Intent form only runs below Android 14, where it's the only one
     private fun open() {
         val intent = SendClipboard.intent(this)
         if (Build.VERSION.SDK_INT >= 34) startActivityAndCollapse(PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE))
