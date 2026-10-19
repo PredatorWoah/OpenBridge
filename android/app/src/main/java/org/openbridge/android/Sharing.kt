@@ -226,13 +226,14 @@ object Sharing {
 
     /**
      * After files or a text were queued from another app: when sharing is off but can start by itself (whole phone,
-     * permission granted), start it, and call [done] once it's up, since Android only lets a visible app start the
-     * background service. [done] gets whether a computer can collect now. On the main thread.
+     * permission granted, background sharing on), start it, and call [done] once it's up, since Android only lets a
+     * visible app start the background service. Without background sharing it would run unseen, with no notification
+     * to stop it, once this screen closes. [done] gets whether a computer can collect now. On the main thread.
      */
     fun handOver(done: (sharing: Boolean) -> Unit) {
         when {
             server != null -> done(true)
-            wholePhone && AllFiles.granted(app) -> {
+            inBackground && wholePhone && AllFiles.granted(app) -> {
                 start()
                 val started = SystemClock.uptimeMillis()
                 main.post(object : Runnable {
