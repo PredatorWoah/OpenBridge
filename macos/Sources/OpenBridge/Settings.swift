@@ -20,10 +20,57 @@ struct SettingsView: View {
                 Text("Aurora and Tide are previews: they may change before they're finished.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Section("Texts") {
+                Toggle("Send copied text to the phone automatically", isOn: $model.autoSendTexts)
+                Text("While connected over Wi‑Fi or Fast USB. Passwords copied from password managers are never sent.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("Updates") {
+                HStack {
+                    Button(checking ? "Checking…" : "Check for Updates") { check() }.disabled(checking)
+                    Spacer()
+                    Text(updateStatus).foregroundStyle(.secondary)
+                }
+            }
+            Section {
+                HStack {
+                    Button(copied ? "Copied" : "Copy Diagnostics") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(Diagnostics.report(for: model), forType: .string)
+                        copied = true
+                    }
+                    Spacer()
+                }
+                Text("Versions, the connection and recent events, to paste into a bug report. No pairing secrets, texts or file names; nothing is sent anywhere.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } header: { Text("Diagnostics") }
+            Section("About") {
+                LabeledContent("Version", value: Diagnostics.appVersion)
+                Text("OpenBridge moves files between your Android phone and this Mac. No accounts, no cloud. Free and open source (MIT).")
+                    .font(.caption).foregroundStyle(.secondary)
+                Link("OpenBridge on GitHub", destination: URL(string: "https://github.com/PredatorWoah/OpenBridge")!)
+            }
         }
         .formStyle(.grouped)
         .frame(width: 520)
         .fixedSize(horizontal: false, vertical: true)
+    }
+
+    @State private var checking = false
+    @State private var checked = false
+    @State private var copied = false
+
+    private var updateStatus: String {
+        if let update = model.update { return "OpenBridge \(update.version) is available" }
+        return checked ? "You have the latest version" : ""
+    }
+
+    @MainActor private func check() {
+        checking = true
+        Task {
+            await model.checkForUpdates()
+            checking = false; checked = true
+        }
     }
 }
 

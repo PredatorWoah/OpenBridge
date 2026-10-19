@@ -55,7 +55,6 @@ struct BrowserScreen: View {
             }
             .animation(.spring(response: 0.5, dampingFraction: 0.75), value: model.transfer != nil)
         }
-        .overlay(alignment: .bottom) { Toast(text: model.toast) }
         .quickLookPreview($model.previewURL)
         .background { Shortcuts(model: model, searching: searching) }
         .confirmationDialog(deleteTitle, isPresented: Binding(get: { !model.pendingDelete.isEmpty }, set: { if !$0 { model.pendingDelete = [] } })) {
@@ -254,7 +253,7 @@ private struct Sidebar: View {
                 ArchMark(size: 26)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(model.deviceName).font(.system(size: 13.5, weight: .semibold)).lineLimit(1)
-                    Text(model.overUSB ? "USB · File transfer" : "Wi‑Fi").font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.75))
+                    Text(model.fastUSB ? "Fast USB" : model.overUSB ? "USB · File transfer" : "Wi‑Fi").font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.75))
                 }
             }
             .padding(10).frame(maxWidth: .infinity, alignment: .leading)
@@ -262,7 +261,12 @@ private struct Sidebar: View {
                         in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             Button { model.showBrowser = false } label: { Label("Devices", systemImage: "chevron.left") }
                 .buttonStyle(.plain).foregroundStyle(Palette.muted).font(.system(size: 12.5)).padding(10)
-            if model.overUSB {
+            if model.clipboardAvailable {
+                Button { model.showTexts = true } label: { Label("Texts", systemImage: "text.bubble") }
+                    .buttonStyle(.plain).font(.system(size: 13, weight: .semibold)).padding(10)
+                    .help("Send texts to the phone, and see what it sent")
+            }
+            if model.overUSB || model.fastUSB {
                 Button(action: mirror) { Label("Mirror screen", systemImage: "rectangle.on.rectangle") }
                     .buttonStyle(.plain).font(.system(size: 13, weight: .semibold)).padding(10)
                     .help("Show and control the phone's screen on your Mac (needs USB debugging)")
@@ -363,10 +367,11 @@ private struct Toolbar: View {
                 Button("Rename…") { model.renaming = model.selected.first }.disabled(model.selection.count != 1)
                 Button("Delete…") { model.confirmDelete(model.selected) }.disabled(model.selection.isEmpty)
                 Divider()
+                Button("Texts…") { model.showTexts = true }.disabled(!model.clipboardAvailable)
                 Button("Send Mac clipboard to phone", action: model.sendClipboard).disabled(!model.clipboardAvailable)
                 Button("Copy phone clipboard to Mac", action: model.fetchClipboard).disabled(!model.clipboardAvailable)
                 if !model.clipboardAvailable {
-                    Text("Clipboard sharing works over Wi‑Fi, or while mirroring the screen.")
+                    Text("Texts and the clipboard work over Wi‑Fi and Fast USB, or while mirroring the screen.")
                 }
                 Divider()
                 Button("Refresh", action: model.refresh)

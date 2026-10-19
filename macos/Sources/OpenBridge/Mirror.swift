@@ -24,6 +24,10 @@ final class MirrorSession: ObservableObject, @unchecked Sendable {
 
     private let lock = NSLock()
     private var adb: ADBConnection?
+    /// On the cable, mirroring borrows the USB debugging connection Fast USB may be using too: stopping closes only
+    /// mirroring's own streams. Over Wi‑Fi the connection is mirroring's alone.
+    private var borrowed = false
+    private var streams: [ADBStream] = []
     private var control: ADBStream?
     private var running = false
     /// Bumped by every start, so a finished session's thread never reports into or stops the next one.
@@ -55,12 +59,26 @@ final class MirrorSession: ObservableObject, @unchecked Sendable {
     func stop() {
         lock.lock()
         running = false
-        let adb = self.adb
-        self.adb = nil; control = nil
+        let adb = self.adb, borrowed = self.borrowed, streams = self.streams
+        self.adb = nil; control = nil; self.streams = []
         lock.unlock()
         // Over Wi‑Fi, put the phone back to cable-only debugging so it doesn't stay open on the network.
-        if wireless, let adb { Thread { ADBWireless.stopListening(adb) }.start() } else { adb?.close() }
+        if wireless, let adb, !borrowed { Thread { ADBWireless.stopListening(adb) }.start() }
+        else if borrowed { streams.forEach { $0.close() } }   // the server exits when its streams close
+        else { adb?.close() }
+        returnConnection()
         clipboardTimer?.invalidate(); clipboardTimer = nil
+    }
+
+    /// Done with the shared cable connection (once, however mirroring ends).
+    private func returnConnection() {
+        lock.lock(); let was = borrowed; borrowed = false; lock.unlock()
+        if was { USBDebugging.shared.giveBack() }
+    }
+
+    /// Remembers a stream to close when mirroring stops.
+    private func keep(_ stream: ADBStream) {
+        lock.lock(); streams.append(stream); lock.unlock()
     }
 
     /// Switches a cable session to Wi‑Fi: same picture, no cable.
@@ -85,7 +103,10 @@ final class MirrorSession: ObservableObject, @unchecked Sendable {
             let key = try ADBKey.loadOrCreate()
             let name = "OpenBridge@" + (Host.current().localizedName ?? "Mac").replacingOccurrences(of: " ", with: "-")
             let allow = { self.main { self.phase = .allow } }
-            var adb = try ADBConnection.connect(transport: try USBTransport.openADB(), key: key, name: name, allowPrompt: allow)
+            var adb = try USBDebugging.shared.connection(allowPrompt: allow)
+            USBDebugging.shared.borrow()
+            lock.lock(); borrowed = true; lock.unlock()
+            var onCable = true
             if wireless {
                 // Ask the phone where it is on Wi‑Fi, switch its debugging to the network, and reconnect there.
                 main { self.phase = .connecting("Switching the phone to Wi‑Fi…") }
@@ -101,9 +122,11 @@ final class MirrorSession: ObservableObject, @unchecked Sendable {
                 }
                 guard let wifi else { throw BridgeError.message("The phone didn't answer over Wi‑Fi. Check that the Mac and phone are on the same network.") }
                 adb = wifi
+                onCable = false
+                returnConnection()   // the cable connection restarted; this one is mirroring's own
             }
             lock.lock(); self.adb = adb; let stillRunning = running; lock.unlock()
-            guard stillRunning else { adb.close(); return }
+            guard stillRunning else { if onCable { returnConnection() } else { adb.close() }; return }
             main { self.phase = .connecting("Starting mirroring on the phone…") }
 
             guard let url = Bundle.main.url(forResource: "scrcpy-server", withExtension: "jar"), let jar = try? Data(contentsOf: url) else {
@@ -112,6 +135,7 @@ final class MirrorSession: ObservableObject, @unchecked Sendable {
             try adb.push(jar, to: Scrcpy.serverPath)
             let scid = UInt32.random(in: 0...0x7FFF_FFFF)
             let shell = try adb.open("shell:" + Scrcpy.command(scid: scid, maxSize: wireless ? 1600 : 1920))
+            keep(shell)
             let log = ShellLog(shell)
 
             // The server listens once it's up: retry for about ten seconds.
@@ -121,8 +145,10 @@ final class MirrorSession: ObservableObject, @unchecked Sendable {
                 Thread.sleep(forTimeInterval: 0.1)
             }
             guard let video else { throw BridgeError.message("The phone didn't start mirroring. \(log.text)") }
+            keep(video)
             _ = try video.read(1)                                   // dummy byte
             let control = try adb.open(Scrcpy.socket(scid))
+            keep(control)
             lock.lock(); self.control = control; lock.unlock()
             let device = String(decoding: try video.read(64).prefix { $0 != 0 }, as: UTF8.self)
             let codec = try video.read(4).reduce(UInt32(0)) { $0 << 8 | UInt32($1) }

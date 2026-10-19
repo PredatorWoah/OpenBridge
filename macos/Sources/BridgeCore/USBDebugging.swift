@@ -45,6 +45,18 @@ public final class USBDebugging: @unchecked Sendable {
     /// Whether the shared connection is open now.
     public var isOpen: Bool { alive() != nil }
 
+    private var borrowers = 0
+
+    /// Mirroring uses the connection until `giveBack`: `closeIfUnused` leaves it open meanwhile.
+    public func borrow() { lock.lock(); borrowers += 1; lock.unlock() }
+    public func giveBack() { lock.lock(); borrowers = max(0, borrowers - 1); lock.unlock() }
+
+    /// Closes the connection unless mirroring is using it, so other tools (adb, Android Studio) can reach the phone.
+    public func closeIfUnused() {
+        lock.lock(); let idle = borrowers == 0; lock.unlock()
+        if idle { disconnect() }
+    }
+
     /// Closes the shared connection (the phone was unplugged, or nothing needs it any more).
     public func disconnect() {
         lock.lock(); let adb = current; current = nil; lock.unlock()

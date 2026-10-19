@@ -16,9 +16,10 @@ public enum FastUSB {
     }
 
     /// Looks for OpenBridge on the phone's loopback ports and keeps the first whose certificate `known` accepts (a
-    /// saved phone), or else the first that answers TLS at all. If nothing answers, starts sharing on the phone once
-    /// and keeps looking for about ten seconds. Returns nil when nothing answers. `allowPrompt`: see `USBDebugging`.
-    public static func find(allowPrompt: (() -> Void)?, known: @escaping (Data) -> Bool,
+    /// saved phone), or else the first that answers TLS at all. If nothing answers and `startSharing`, starts sharing on
+    /// the phone once and keeps looking for about ten seconds. Returns nil when nothing answers. `allowPrompt`: see
+    /// `USBDebugging`.
+    public static func find(allowPrompt: (() -> Void)?, startSharing: Bool, known: @escaping (Data) -> Bool,
                             log: @escaping (String) -> Void) async throws -> Found? {
         let adb = try await FastUSB.background { try USBDebugging.shared.connection(allowPrompt: allowPrompt) }
         let model = adb.model
@@ -43,6 +44,7 @@ public enum FastUSB {
                 if unknown == nil { unknown = found } else { tunnel.stop() }
             }
             if let unknown { return unknown }
+            guard startSharing else { return nil }
             if let launchedAt {
                 if Date().timeIntervalSince(launchedAt) > 12 { return nil }
             } else {
