@@ -1082,7 +1082,8 @@ final class BrowserModel: ObservableObject {
         guard autoSendTexts, connected, client is BridgeClient else { return }
         pasteboardSeen = NSPasteboard.general.changeCount
         clipboardTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.clipboardChanged() }
+            guard let self else { return }
+            Task { @MainActor in self.clipboardChanged() }
         }
     }
 
