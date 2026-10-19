@@ -56,7 +56,7 @@ Each app asks GitHub once per launch for the latest OpenBridge release (`api.git
 
 The Windows app is a client like the Mac app and keeps the same rules for Wi‑Fi: it accepts only literal RFC1918 IPv4 addresses, pairs with OBP2 numeric comparison, pins the phone's certificate before sending the secret, and saves phones as described above. Downloads use the same `.<name>.<size>.openbridge-part` files and never replace an existing file. Phones are listed with DNS-SD (multicast DNS on the local network).
 
-- **USB** on Windows is handled by Windows itself: OpenBridge only checks whether a portable device is present and opens File Explorer. The MTP notes above apply to Windows' own File transfer too.
+- **USB** on Windows goes through Windows Portable Devices, the MTP driver Windows already has: OpenBridge browses and copies with it in-process, with no driver of its own and nothing listening. The MTP notes above apply, as they do to File Explorer. USB drives, which Windows also lists as portable devices, are left out.
 - **Screen mirroring** runs the bundled official scrcpy for Windows (with its own `adb.exe`), pinned by SHA-256 (see `third_party/scrcpy`). The same USB debugging warnings apply. Its adb key lives in `%USERPROFILE%\.android\adbkey`, managed by adb, and adb may leave a small background server running on `127.0.0.1:5037` until you sign out or end it.
 - The app is not code-signed yet, so Windows SmartScreen may warn the first time. Check the zip against `SHA256SUMS.txt` from the release.
 
