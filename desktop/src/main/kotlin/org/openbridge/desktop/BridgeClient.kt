@@ -42,7 +42,7 @@ data class FolderSize(val bytes: Long, val files: Long, val complete: Boolean)
  */
 class BridgeClient internal constructor(
     val host: String, val port: Int, val fingerprint: ByteArray, internal val secret: ByteArray,
-) {
+) : PhoneSource {
     companion object {
         private const val TIMEOUT = 30_000
 
@@ -171,7 +171,7 @@ class BridgeClient internal constructor(
             catch (e: IOException) { throw BridgeException(S.dropped, lost = true) }
         }
 
-    fun list(id: String = ""): List<Entry> = request(1, id) { input, _ ->
+    override fun list(id: String): List<Entry> = request(1, id) { input, _ ->
         status(input)
         val count = input.readInt()
         if (count !in 0..Wire.MAX_ENTRIES) throw BridgeException("Folder has too many entries.")
@@ -188,7 +188,7 @@ class BridgeClient internal constructor(
     }
 
     /** Downloads `entry`, continuing an earlier interrupted download to the same place when there is one. */
-    fun download(entry: Entry, destination: File, cancelled: () -> Boolean = { false }, progress: (Long, Long) -> Unit) {
+    override fun download(entry: Entry, destination: File, cancelled: () -> Boolean, progress: (Long, Long) -> Unit) {
         if (destination.exists()) throw BridgeException("${destination.name} already exists. Choose a new name; OpenBridge never replaces files.")
         val partial = Partial.location(destination, entry.size)
         var offset = if (partial.exists() && partial.length() in 1 until entry.size) partial.length() else 0L
@@ -235,7 +235,7 @@ class BridgeClient internal constructor(
      * Uploads `source`. If an earlier upload of the same file to the same folder was cut off, the phone kept what
      * arrived and this continues from there (phones before 0.12.0 start over).
      */
-    fun upload(source: File, directoryId: String, cancelled: () -> Boolean = { false }, progress: (Long, Long) -> Unit) {
+    override fun upload(source: File, directoryId: String, cancelled: () -> Boolean, progress: (Long, Long) -> Unit) {
         val name = source.name
         Wire.validateName(name)
         if (!source.isFile) throw BridgeException("Choose a regular file.")
@@ -320,7 +320,7 @@ class BridgeClient internal constructor(
         request(15, entry.id) { input, _ -> status(input) }
     }
 
-    fun makeFolder(name: String, directoryId: String): Entry {
+    override fun makeFolder(name: String, directoryId: String): Entry {
         Wire.validateName(name)
         return request(4, directoryId, { Wire.writeString(it, name) }) { input, _ ->
             status(input)
@@ -328,17 +328,17 @@ class BridgeClient internal constructor(
         }
     }
 
-    fun thumbnail(entry: Entry, size: Int = 256): ByteArray = request(5, entry.id, { it.writeInt(size.coerceIn(32, 1024)) }) { input, _ ->
+    override fun thumbnail(entry: Entry, size: Int): ByteArray = request(5, entry.id, { it.writeInt(size.coerceIn(32, 1024)) }) { input, _ ->
         status(input)
         val length = input.readInt()
         if (length !in 1..Wire.MAX_THUMBNAIL) throw BridgeException("Invalid preview.")
         ByteArray(length).also(input::readFully)
     }
 
-    fun delete(entry: Entry) = request(9, entry.id) { input, _ -> status(input) }
+    override fun delete(entry: Entry) = request(9, entry.id) { input, _ -> status(input) }
 
     /** Renames in place and returns the item afterwards (its ID may change). */
-    fun rename(entry: Entry, name: String): Entry {
+    override fun rename(entry: Entry, name: String): Entry {
         Wire.validateName(name)
         return request(10, entry.id, { Wire.writeString(it, name) }) { input, _ ->
             status(input)
@@ -346,7 +346,7 @@ class BridgeClient internal constructor(
         }
     }
 
-    fun measure(folder: Entry): FolderSize = request(11, folder.id) { input, _ ->
+    override fun measure(folder: Entry): FolderSize = request(11, folder.id) { input, _ ->
         status(input)
         val bytes = input.readLong(); val files = input.readLong()
         val complete = when (input.readUnsignedByte()) { 0 -> false; 1 -> true; else -> throw BridgeException("The phone sent an invalid reply.") }
@@ -355,7 +355,7 @@ class BridgeClient internal constructor(
     }
 
     /** Files and folders whose names contain `query`, anywhere below `folderId`, searched on the phone. */
-    fun search(folderId: String, query: String): SearchResult {
+    override fun search(folderId: String, query: String): SearchResult {
         val text = query.trim()
         if (text.isEmpty() || text.toByteArray().size > 255) throw BridgeException(S.typeToSearch)
         return request(16, folderId, { Wire.writeString(it, text) }) { input, _ ->
