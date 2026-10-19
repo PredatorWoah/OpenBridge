@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// The sun's motion around the arch. The sun chases a moving target on a spring, so the lag, overshoot
-/// and wobble come from the physics. The same values drive the Android app's sun.
+/// and wobble come from the physics. The same values drive the Android app's sun (shared/…/Sun.kt).
+/// Aurora's comet and Tide's droplet ride the same engine.
 final class SunEngine {
     enum State { case idle, scan, spin, done }
     private(set) var state: State
@@ -12,7 +13,14 @@ final class SunEngine {
     private(set) var trail: [Double] = []
     private var jellyVelocity = 0.0, previousVelocity = 0.0
     private var clock = 0.0, start = 0.0, from = 0.0, to = 0.0, windup = false, settledAt = 0.0
+    /// Idle but still gliding back to the top.
+    private var homing = false
+    /// Reduce Motion: no orbiting while scanning.
+    private var still = false
     private var lastFrame: Date?
+
+    /// Seconds since the engine started, for looks that keep moving.
+    var time: Double { clock }
 
     /// Seconds since the previous frame, capped so a paused window doesn't jump.
     func elapsed(until now: Date) -> Double {
@@ -22,19 +30,23 @@ final class SunEngine {
 
     init(state: State = .idle) { self.state = state }
 
+    /// Settled at the top with this warmth, for still pictures (small marks, look previews).
+    init(restingWarmth: Double) { state = .done; warmth = restingWarmth; clock = 7; settledAt = 0 }
+
     struct Frame { var glow = 0.0, bloom = 0.0, pulse = 0.0 }
 
     /// `active`: sharing, or looking for a phone. `connected`: a phone or Mac is paired or plugged in.
     func step(_ dt: Double, active: Bool, connected: Bool, reduceMotion: Bool) -> Frame {
         clock += dt
-        if !active { if state != .idle { normalize(); state = .idle } }
+        still = reduceMotion
+        if !active { if state != .idle { goHome() } }
         else if state == .idle { spin(windup: true) }
         else if state == .scan && connected { spin(windup: false) }
         else if state == .done && !connected { scan() }
         if reduceMotion && state == .spin { finish(connected) }
 
         var frame = Frame()
-        if state == .spin || state == .scan {
+        if state == .spin || state == .scan || homing {
             let t = clock - start, steps = 8, h = dt / Double(steps)
             for _ in 0..<steps {
                 let acceleration = 210 * (target(t) - angle) - 14.5 * velocity
@@ -48,6 +60,7 @@ final class SunEngine {
             if trail.count > length { trail.removeFirst(trail.count - length) }
             frame.glow = min(abs(velocity) / 700, 1) * (state == .scan ? 0.4 : 1)
             if state == .spin && t > (windup ? 0.2 : 0) + 1.1 && abs(velocity) < 6 && abs(to - angle) < 0.6 { finish(connected) }
+            if homing && abs(velocity) < 4 && abs(to - angle) < 0.4 { homing = false; angle = 0; velocity = 0 }
         } else {
             if !trail.isEmpty { trail.removeFirst() }
             jellyVelocity += (-320 * jelly - 16 * jellyVelocity) * dt; jelly += jellyVelocity * dt
@@ -67,72 +80,55 @@ final class SunEngine {
     }
 
     private func target(_ t: Double) -> Double {
-        if state == .scan { return from + 70 * t }
+        if state == .scan { return still ? from : from + 70 * t }
+        if state == .idle { return to }
         let w = windup ? 0.2 : 0, f = from - (windup ? 14 : 0)
         if t < w { return from - 14 * sin(t / w * .pi / 2) }
-        if t < w + 1.05 { return f + (to - f) * ease((t - w) / 1.05) }
+        if t < w + 1.05 { return f + (to - f) * easeInOut((t - w) / 1.05) }
         return to
     }
-    private func ease(_ t: Double) -> Double { t < 0.5 ? 4 * t * t * t : 1 - pow(-2 * t + 2, 3) / 2 }
     private func normalize() { angle = (angle.truncatingRemainder(dividingBy: 360) + 360).truncatingRemainder(dividingBy: 360) }
     private func spin(windup: Bool) {
-        normalize(); self.windup = windup; from = angle
+        normalize(); homing = false; self.windup = windup; from = angle
         to = ((angle + (windup ? 1 : 200)) / 360).rounded(.up) * 360
         state = .spin; start = clock; trail = []
     }
-    private func scan() { normalize(); state = .scan; start = clock; from = angle }
+    /// Stopped: the sun glides on to the top and rests there.
+    private func goHome() {
+        normalize(); state = .idle
+        to = angle < 0.5 ? angle : 360
+        homing = angle != to
+    }
+    private func scan() { normalize(); homing = false; state = .scan; start = clock; from = angle }
     private func finish(_ connected: Bool) {
         if connected { state = .done; settledAt = clock; angle = 0; velocity = 0 } else { angle = to; scan() }
     }
 }
 
-/// The OpenBridge arch, drawn live: a glass ring, the horizon bar, and the sun moving on `SunEngine`.
-struct SunArch: View {
-    var active: Bool
-    var connected: Bool
-    /// Where the ring's centre sits, as a fraction of the view's height.
-    var centerY: Double = 0.3
-    var radius: Double = 62
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var engine: SunEngine
+func easeInOut(_ t: Double) -> Double { t < 0.5 ? 4 * t * t * t : 1 - pow(-2 * t + 2, 3) / 2 }
 
-    init(active: Bool, connected: Bool, centerY: Double = 0.3, radius: Double = 62, startScanning: Bool = false) {
-        self.active = active; self.connected = connected; self.centerY = centerY; self.radius = radius
-        _engine = State(initialValue: SunEngine(state: startScanning ? .scan : .idle))
-    }
-
-    var body: some View {
-        TimelineView(.animation) { timeline in
-            Canvas { context, size in
-                let dt = engine.elapsed(until: timeline.date)
-                let frame = engine.step(dt, active: active, connected: connected, reduceMotion: reduceMotion)
-                draw(&context, size: size, frame: frame)
-            }
-        }
-        .accessibilityHidden(true)
-    }
-
-    private func draw(_ context: inout GraphicsContext, size: CGSize, frame: SunEngine.Frame) {
-        let c = CGPoint(x: size.width / 2, y: size.height * centerY)
-        let r = radius, ring = r * 0.29, sunR = r * 0.24, bar = r * 2.6
+extension LookArt {
+    /// Dusk's hero: a glass ring, the horizon bar, and the sun moving on `SunEngine`.
+    static func sunArch(_ context: inout GraphicsContext, _ colors: LookColors, engine: SunEngine, frame: SunEngine.Frame,
+                        center c: CGPoint, radius r: Double, reach: Double) {
+        let ring = r * 0.29, sunR = r * 0.24, bar = r * 2.6
         func point(_ a: Double) -> CGPoint {
             let t = (a - 90) * .pi / 180
             return CGPoint(x: c.x + r * cos(t), y: c.y + r * sin(t))
         }
-        let sun = Palette.sun(warmth: engine.warmth)
+        let sun = Palette.sun(warmth: engine.warmth, colors: colors)
+        let pink = colors.pink.color(), amber = colors.amber.color(), cream = colors.cream.color()
 
         if frame.pulse > 0 {
             let halo = Gradient(stops: [.init(color: .clear, location: 0),
-                                        .init(color: Palette.pink.opacity(0.16 * frame.pulse), location: 0.45),
+                                        .init(color: pink.opacity(0.16 * frame.pulse), location: 0.45),
                                         .init(color: .clear, location: 1)])
-            context.fill(Path(CGRect(origin: .zero, size: size)),
-                         with: .radialGradient(halo, center: c, startRadius: r * 0.5, endRadius: r * 2.1))
+            context.fill(circle(c, r * 2.1), with: .radialGradient(halo, center: c, startRadius: r * 0.5, endRadius: r * 2.1))
         }
         // Ring, with a glow that follows speed, connection and the breath.
-        let circle = Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r))
         var glow = context
-        glow.addFilter(.shadow(color: Palette.pink.opacity(0.3 + frame.glow * 0.5), radius: 5 + frame.glow * 13))
-        glow.stroke(circle, with: .conicGradient(Palette.ring, center: c, angle: .degrees(-90)), lineWidth: ring)
+        glow.addFilter(.shadow(color: pink.opacity(0.3 + frame.glow * 0.5), radius: 5 + frame.glow * 13))
+        glow.stroke(circle(c, r), with: .conicGradient(colors.ring, center: c, angle: .degrees(-90)), lineWidth: ring)
         var highlight = Path()   // the glassy shine along the upper ring
         for i in 0...32 {
             let t = Double.pi * (1.08 + 0.84 * Double(i) / 32), hr = r + ring * 0.22
@@ -148,11 +144,9 @@ struct SunArch: View {
             var tail = context
             tail.blendMode = .plusLighter
             for i in 0..<56 {
-                let k = Double(i) / 56, a = first + (engine.angle - first) * k, p = point(a)
+                let k = Double(i) / 56, a = first + (engine.angle - first) * k
                 let below = cos(a * .pi / 180) < 0 ? 0.55 : 1
-                let size = sunR * (0.35 + 0.6 * k)
-                tail.fill(Path(ellipseIn: CGRect(x: p.x - size, y: p.y - size, width: 2 * size, height: 2 * size)),
-                          with: .color(sun.edge.opacity(0.035 + 0.16 * k * k * below)))
+                tail.fill(circle(point(a), sunR * (0.35 + 0.6 * k)), with: .color(sun.edge.opacity(0.035 + 0.16 * k * k * below)))
             }
         }
         // Connect ripples: they spread across the window and fade well before its edges.
@@ -163,17 +157,16 @@ struct SunArch: View {
             for (delay, weight) in [(0.0, 1.0), (0.16, 0.65), (0.32, 0.4)] {
                 let b = max(0, min(1, (frame.bloom - delay) / (1 - delay)))
                 guard b > 0 && b < 1 else { continue }
-                let fade = pow(1 - b, 2), radius = sunR + (b < 0.5 ? 4 * b * b * b : 1 - pow(-2 * b + 2, 3) / 2) * 300
-                ripple.stroke(Path(ellipseIn: CGRect(x: top.x - radius, y: top.y - radius, width: 2 * radius, height: 2 * radius)),
-                              with: .color(Palette.amber.opacity(fade * 0.75 * weight)), lineWidth: 6 * (1 - b) + 1)
+                let fade = pow(1 - b, 2)
+                ripple.stroke(circle(top, sunR + easeInOut(b) * reach), with: .color(amber.opacity(fade * 0.75 * weight)), lineWidth: 6 * (1 - b) + 1)
             }
         }
         // Horizon bar.
         var horizon = context
-        horizon.addFilter(.shadow(color: Palette.cream.opacity(0.45 + frame.glow * 0.5), radius: 4 + frame.glow * 8))
+        horizon.addFilter(.shadow(color: cream.opacity(0.45 + frame.glow * 0.5), radius: 4 + frame.glow * 8))
         let height = max(5, ring * 0.28)
         horizon.fill(Path(roundedRect: CGRect(x: c.x - bar / 2, y: c.y - height / 2, width: bar, height: height), cornerRadius: height / 2),
-                     with: .color(Palette.cream))
+                     with: .color(cream))
 
         // Sun: a liquid drop stretched along its path by speed, with a jelly squash on stops.
         let p = point(engine.angle), speed = min(abs(engine.velocity) / 520, 1.15)
@@ -196,51 +189,61 @@ struct SunArch: View {
     }
 }
 
-/// A small still arch for lists and buttons.
+/// The current look's hero, drawn live: Dusk's sun arch, Aurora's halo with its comet, or Tide's glass pool.
+struct Hero: View {
+    var active: Bool
+    var connected: Bool
+    /// Where the ring's centre sits, as a fraction of the view's height.
+    var centerY: Double = 0.3
+    var radius: Double = 62
+    /// What VoiceOver reads for it; without one it's decoration and hidden.
+    var label: String?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var engine: SunEngine
+
+    init(active: Bool, connected: Bool, centerY: Double = 0.3, radius: Double = 62, startScanning: Bool = false, label: String? = nil) {
+        self.active = active; self.connected = connected; self.centerY = centerY; self.radius = radius; self.label = label
+        _engine = State(initialValue: SunEngine(state: startScanning ? .scan : .idle))
+    }
+
+    var body: some View {
+        let look = Palette.look
+        // Dusk's sun keeps the display's frame rate; the drafts' richer pictures are capped at about 30 frames a second.
+        TimelineView(.animation(minimumInterval: look == .dusk ? nil : 1.0 / 30)) { timeline in
+            Canvas { context, size in
+                let dt = engine.elapsed(until: timeline.date)
+                var frame = engine.step(dt, active: active, connected: connected, reduceMotion: reduceMotion)
+                if reduceMotion { frame.bloom = 0; frame.pulse = 0 }
+                LookArt.hero(look, &context, engine: engine, frame: frame,
+                             center: CGPoint(x: size.width / 2, y: size.height * centerY), radius: radius, reach: 300,
+                             time: reduceMotion ? 7 : engine.time)
+            }
+        }
+        .accessibilityElement()
+        .accessibilityLabel(label ?? "")
+        .accessibilityHidden(label == nil)
+    }
+}
+
+/// A small still hero for lists and buttons, in the current look.
 struct ArchMark: View {
     var size: CGFloat = 26
     var body: some View {
         Canvas { context, canvas in
-            let s = canvas.width / 120, c = CGPoint(x: 60 * s, y: 62 * s)
-            context.stroke(Path(ellipseIn: CGRect(x: c.x - 40 * s, y: c.y - 40 * s, width: 80 * s, height: 80 * s)),
-                           with: .conicGradient(Palette.ring, center: c, angle: .degrees(-90)), lineWidth: 14 * s)
-            context.fill(Path(roundedRect: CGRect(x: 10 * s, y: 59 * s, width: 100 * s, height: 7 * s), cornerRadius: 3.5 * s), with: .color(Palette.cream))
-            context.fill(Path(ellipseIn: CGRect(x: 47 * s, y: 9 * s, width: 26 * s, height: 26 * s)), with: .color(Palette.sunGold))
+            let look = Palette.look
+            if look == .dusk {
+                let colors = look.colors
+                let s = canvas.width / 120, c = CGPoint(x: 60 * s, y: 62 * s)
+                context.stroke(circle(c, 40 * s), with: .conicGradient(colors.ring, center: c, angle: .degrees(-90)), lineWidth: 14 * s)
+                context.fill(Path(roundedRect: CGRect(x: 10 * s, y: 59 * s, width: 100 * s, height: 7 * s), cornerRadius: 3.5 * s),
+                             with: .color(colors.cream.color()))
+                context.fill(circle(CGPoint(x: 60 * s, y: 22 * s), 13 * s), with: .color(colors.sun.color()))
+            } else {
+                LookArt.hero(look, &context, engine: SunEngine(restingWarmth: 1), frame: SunEngine.Frame(),
+                             center: CGPoint(x: canvas.width / 2, y: canvas.height / 2), radius: canvas.width * 0.36, reach: 0, time: 7)
+            }
         }
         .frame(width: size, height: size)
         .accessibilityHidden(true)
-    }
-}
-
-enum Palette {
-    static let night = Color(red: 13 / 255, green: 11 / 255, blue: 38 / 255)
-    static let dusk = Color(red: 29 / 255, green: 21 / 255, blue: 70 / 255)
-    static let plum = Color(red: 58 / 255, green: 36 / 255, blue: 112 / 255)
-    static let violet = Color(red: 109 / 255, green: 93 / 255, blue: 252 / 255)
-    static let pink = Color(red: 1, green: 92 / 255, blue: 138 / 255)
-    static let amber = Color(red: 1, green: 179 / 255, blue: 71 / 255)
-    static let sunGold = Color(red: 1, green: 209 / 255, blue: 102 / 255)
-    static let cream = Color(red: 1, green: 246 / 255, blue: 224 / 255)
-    static let ok = Color(red: 61 / 255, green: 220 / 255, blue: 151 / 255)
-    static let muted = Color(red: 180 / 255, green: 171 / 255, blue: 214 / 255)
-    static let ring = Gradient(stops: [.init(color: sunGold, location: 0), .init(color: pink, location: 0.3), .init(color: violet, location: 0.55),
-                                       .init(color: pink, location: 0.8), .init(color: sunGold, location: 1)])
-    /// Buttons and the transfer bar: the sunset from violet to gold.
-    static let sunset = LinearGradient(stops: [.init(color: violet, location: 0), .init(color: pink, location: 0.55), .init(color: amber, location: 1)],
-                                       startPoint: .leading, endPoint: .trailing)
-    static let bar = LinearGradient(stops: [.init(color: violet, location: 0), .init(color: pink, location: 0.55), .init(color: amber, location: 0.85),
-                                            .init(color: sunGold, location: 1)], startPoint: .leading, endPoint: .trailing)
-    static let background = RadialGradient(stops: [.init(color: plum, location: 0), .init(color: dusk, location: 0.5), .init(color: night, location: 1)],
-                                           center: UnitPoint(x: 0.65, y: -0.1), startRadius: 0, endRadius: 900)
-
-    struct Sun { let core: Color, middle: Color, edge: Color, glow: Color }
-    /// Grey glass when nothing is connected, gold when connected.
-    static func sun(warmth k: Double) -> Sun {
-        func mix(_ a: (Double, Double, Double), _ b: (Double, Double, Double)) -> Color {
-            Color(red: (a.0 + (b.0 - a.0) * k) / 255, green: (a.1 + (b.1 - a.1) * k) / 255, blue: (a.2 + (b.2 - a.2) * k) / 255)
-        }
-        // Grey is moonlight: bright silver-lavender glass with a soft white glow, never a dark rim.
-        return Sun(core: mix((255, 255, 255), (255, 253, 240)), middle: mix((230, 227, 242), (255, 224, 138)),
-                   edge: mix((180, 176, 204), (255, 179, 71)), glow: mix((240, 238, 255), (255, 200, 90)).opacity(0.3 + 0.65 * k))
     }
 }

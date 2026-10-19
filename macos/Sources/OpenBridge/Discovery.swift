@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import BridgeCore
 
 /// Lists phones sharing with OpenBridge on this Wi‑Fi (DNS-SD `_openbridge._tcp`), so nobody types an address.
 /// The phone announces itself only while sharing; pairing still needs the 6-digit code.
@@ -33,6 +34,37 @@ final class PhoneDiscovery: ObservableObject {
 
     func stop() {
         browser?.cancel(); browser = nil; phones = []
+    }
+}
+
+/// The network this Mac is on.
+enum LocalNetwork {
+    /// The default gateway, when it's a private IPv4 address. On a phone's hotspot the phone is the gateway, and
+    /// OpenBridge listens there (port 41987), so it's one more address to try for a saved phone.
+    static func gateway() async -> String? {
+        await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in
+            DispatchQueue.global(qos: .utility).async {
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/sbin/route")
+                process.arguments = ["-n", "get", "default"]
+                let output = Pipe()
+                process.standardOutput = output
+                process.standardError = FileHandle.nullDevice
+                do { try process.run() } catch { continuation.resume(returning: nil); return }
+                let text = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+                process.waitUntilExit()
+                continuation.resume(returning: LocalNetwork.parseGateway(text))
+            }
+        }
+    }
+
+    /// "    gateway: 192.168.43.1" from `route -n get default`.
+    static func parseGateway(_ output: String) -> String? {
+        for line in output.split(separator: "\n") {
+            let parts = line.split(separator: ":", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+            if parts.count == 2, parts[0] == "gateway", Wire.privateIPv4(parts[1]) { return parts[1] }
+        }
+        return nil
     }
 }
 

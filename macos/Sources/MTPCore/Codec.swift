@@ -235,12 +235,16 @@ public struct MTPObjectInfo: Equatable {
     public var parent: UInt32
     public var associationType: UInt16
     public var filename: String
+    /// Like "20240315T101500", or empty: many phones send no dates at all.
+    public var modified: String
 
+    /// Phones mark folders by format; some leave the association type at 0, so it isn't consulted.
     public var isFolder: Bool { format == MTPCode.associationFormat }
 
-    init(storageID: UInt32, format: UInt16, compressedSize: UInt32, parent: UInt32, associationType: UInt16 = 0, filename: String) {
+    init(storageID: UInt32, format: UInt16, compressedSize: UInt32, parent: UInt32, associationType: UInt16 = 0, filename: String,
+         modified: String = "") {
         self.storageID = storageID; self.format = format; self.compressedSize = compressedSize
-        self.parent = parent; self.associationType = associationType; self.filename = filename
+        self.parent = parent; self.associationType = associationType; self.filename = filename; self.modified = modified
     }
 
     init(parsing data: Data) throws {
@@ -256,6 +260,9 @@ public struct MTPObjectInfo: Equatable {
         _ = try reader.u32()              // association description
         _ = try reader.u32()              // sequence number
         filename = try reader.string()
+        // Dates and keywords follow. Some phones send them empty or cut the dataset short: neither is an error.
+        _ = try? reader.string()          // date created
+        modified = (try? reader.string()) ?? ""
     }
 
     func encoded() throws -> Data {
@@ -264,8 +271,8 @@ public struct MTPObjectInfo: Equatable {
         writer.u16(0); for _ in 0..<6 { writer.u32(0) }
         writer.u32(parent); writer.u16(associationType); writer.u32(0); writer.u32(0)
         try writer.string(filename)
-        try writer.string("")             // date created
-        try writer.string("")             // date modified
+        try writer.string(modified)       // date created
+        try writer.string(modified)       // date modified
         try writer.string("")             // keywords
         return writer.data
     }

@@ -228,6 +228,46 @@ final class MTPClientTests: XCTestCase {
     }
 
     @MainActor
+    func testQuirkyPhoneOverUSB() async throws {
+        let phone = FakePhone.quirky()
+        let client = client(phone)
+        let storages = try await client.list(id: "")
+        XCTAssertEqual(storages.map(\.name), ["Internal shared storage", "SD card"])
+        let top = try await client.list(id: storages[0].id)
+        let chat = try XCTUnwrap(top.first { $0.name == "微信" })
+        XCTAssertTrue(chat.directory)
+        let inside = try await client.list(id: chat.id)
+        let long = String(repeating: "长", count: 250) + ".txt"
+        XCTAssertEqual(inside.map(\.name), ["录音", "empty.txt", "旅行照片 🏖️.jpg", long],
+                       "listed once each, the 754-byte name included")
+        XCTAssertEqual(inside.first { $0.name == "empty.txt" }?.size, 0)
+
+        // A name without a property-list entry is still searched, and its folder searched inside.
+        let hits = try await client.search(in: chat.id, for: "会议")
+        XCTAssertEqual(hits.found.map(\.entry.name), ["会议.m4a"])
+        XCTAssertEqual(hits.found.first?.location, "录音")
+        let everywhere = try await client.search(in: "s:65537", for: "长长长")
+        XCTAssertEqual(everywhere.found.count, 1)
+
+        // The SD card claims more free space than its capacity: count its files instead of showing nonsense.
+        let card = try await client.measure(storages[1])
+        XCTAssertEqual(card, FolderSize(bytes: 1500, files: 1, complete: true))
+        let chatSize = try await client.measure(chat)
+        XCTAssertEqual(chatSize, FolderSize(bytes: 700 + 4 + 900, files: 4, complete: true))
+
+        // Empty files and names longer than the Mac allows download (the partial file's name is shortened).
+        let directory = try temporaryDirectory()
+        let empty = try XCTUnwrap(inside.first { $0.name == "empty.txt" })
+        try await client.download(empty, to: directory.appendingPathComponent("empty.txt")) { _, _ in }
+        XCTAssertEqual(try Data(contentsOf: directory.appendingPathComponent("empty.txt")), Data())
+        let longEntry = try XCTUnwrap(inside.first { $0.name == long })
+        let target = directory.appendingPathComponent(Wire.fitted(long))
+        try await client.download(longEntry, to: target) { _, _ in }
+        XCTAssertEqual(try Data(contentsOf: target), Data("long".utf8))
+        XCTAssertEqual(phone.violations, [])
+    }
+
+    @MainActor
     func testRefusesToContinueOnADifferentPhone() async throws {
         let original = FakePhone(), other = FakePhone()
         other.serialNumber = "SOMEONE-ELSE"

@@ -79,7 +79,9 @@ public final class MTPSession {
 
     public func children(storage: UInt32, parent: UInt32) throws -> [(handle: UInt32, info: MTPObjectInfo)] {
         var reader = MTPReader(try dataIn(MTPCode.getObjectHandles, [storage, 0, parent]))
-        return try reader.u32Array().map { handle in
+        // Some phones list an object twice, or a folder inside itself: each object once, never the folder.
+        var seen: Set<UInt32> = [parent]
+        return try reader.u32Array().filter { seen.insert($0).inserted }.map { handle in
             (handle, try MTPObjectInfo(parsing: try dataIn(MTPCode.getObjectInfo, [handle])))
         }
     }
@@ -101,14 +103,21 @@ public final class MTPSession {
                 let sizes = try propertyList(parent, MTPCode.objectSizeProperty)
                 let named = names ? try propertyList(parent, MTPCode.objectFileNameProperty) : [:]
                 // Android lists the folder itself along with what's in it: leave it out, or it would contain itself.
-                return formats.keys.filter { $0 != parent }.sorted().map { handle in
-                    let size: UInt64
-                    if case .number(let value)? = sizes[handle] { size = value } else { size = 0 }
-                    var name = ""
-                    if case .text(let value)? = named[handle] { name = value }
-                    var folder = false
-                    if case .number(let value)? = formats[handle] { folder = value == UInt64(MTPCode.associationFormat) }
-                    return Child(handle: handle, folder: folder, size: size, name: name)
+                let handles = Set(formats.keys).union(sizes.keys).union(named.keys).subtracting([parent]).sorted()
+                return try handles.compactMap { handle -> Child? in
+                    var format: UInt16?, size: UInt64?, name: String?
+                    if case .number(let value)? = formats[handle] { format = UInt16(truncatingIfNeeded: value) }
+                    if case .number(let value)? = sizes[handle] { size = value }
+                    if case .text(let value)? = named[handle], !value.isEmpty { name = value }
+                    if let format, format == MTPCode.associationFormat || size != nil, !names || name != nil {
+                        let folder = format == MTPCode.associationFormat
+                        return Child(handle: handle, folder: folder, size: folder ? 0 : size ?? 0, name: name ?? "")
+                    }
+                    // The lists left something out for this object (some phones skip names): ask about it alone.
+                    let info: MTPObjectInfo
+                    do { info = try self.info(handle) } catch MTPError.response { return nil }   // gone meanwhile
+                    return Child(handle: handle, folder: info.isFolder,
+                                 size: info.isFolder ? 0 : try self.size(of: handle, info: info), name: info.filename)
                 }
             } catch MTPError.response {
                 // Not supported here: ask object by object below.

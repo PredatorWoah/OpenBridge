@@ -7,8 +7,14 @@ import Foundation
 public final class FakePhone: MTPTransport {
     public struct Object {
         public var storage: UInt32, parent: UInt32, name: String, folder: Bool, data: Data, bigSize: UInt64?
-        public init(storage: UInt32, parent: UInt32, name: String, folder: Bool, data: Data, bigSize: UInt64?) {
+        /// The modification date in object info, like "20240315T101500"; many phones send none.
+        public var modified: String
+        /// A folder reported only by its format (0x3001), with association type 0, as some phones do.
+        public var bare: Bool
+        public init(storage: UInt32, parent: UInt32, name: String, folder: Bool, data: Data, bigSize: UInt64?,
+                    modified: String = "", bare: Bool = false) {
             self.storage = storage; self.parent = parent; self.name = name; self.folder = folder; self.data = data; self.bigSize = bigSize
+            self.modified = modified; self.bare = bare
         }
     }
 
@@ -19,6 +25,13 @@ public final class FakePhone: MTPTransport {
     public var closed = false
     public var failNextWith: UInt16?
     public var freeSpace: UInt64 = 64 << 30
+    public var capacity: UInt64 = 128 << 30
+    /// A second storage (0x20001, "SD card") with its own capacity and free space, which phones sometimes get wrong.
+    public var sdCard: (capacity: UInt64, free: UInt64)?
+    /// Objects GetObjectHandles lists twice, as some phones do.
+    public var listedTwice: Set<UInt32> = []
+    /// Objects whose name GetObjectPropList leaves out; GetObjectInfo still has it.
+    public var namelessInLists: Set<UInt32> = []
     /// Reported in device info; a different value simulates a different phone.
     public var serialNumber = "SERIAL"
     /// Whether the phone implements Android's GetPartialObject64 (for resuming downloads).
@@ -47,6 +60,29 @@ public final class FakePhone: MTPTransport {
         objects[2] = Object(storage: 0x10001, parent: 1, name: "photo.jpg", folder: false, data: Data((0..<3000).map { UInt8($0 % 251) }), bigSize: nil)
         objects[3] = Object(storage: 0x10001, parent: MTPSession.root, name: "Download", folder: true, data: Data(), bigSize: nil)
         objects[4] = Object(storage: 0x10001, parent: MTPSession.root, name: "huge.mkv", folder: false, data: Data(), bigSize: 5 << 30)
+    }
+
+    /// A phone with what Samsung, Xiaomi and vivo phones really send: no dates or real ones, empty files, Chinese and
+    /// emoji names, a name of 254 UTF-16 units, an object listed twice, a folder with no association type, a name
+    /// missing from property lists, and an SD card whose free space is more than its capacity.
+    public static func quirky(maxPacketSize: Int = 512) -> FakePhone {
+        let phone = FakePhone(maxPacketSize: maxPacketSize)
+        let root = MTPSession.root
+        phone.objects[2]?.modified = "20240315T101500"
+        phone.objects[10] = Object(storage: 0x10001, parent: root, name: "微信", folder: true, data: Data(), bigSize: nil, bare: true)
+        phone.objects[11] = Object(storage: 0x10001, parent: 10, name: "旅行照片 🏖️.jpg", folder: false,
+                                   data: Data((0..<700).map { UInt8($0 % 13) }), bigSize: nil, modified: "20231201T080000.0+0800")
+        phone.objects[12] = Object(storage: 0x10001, parent: 10, name: "empty.txt", folder: false, data: Data(), bigSize: nil)
+        phone.objects[13] = Object(storage: 0x10001, parent: 10, name: String(repeating: "长", count: 250) + ".txt", folder: false,
+                                   data: Data("long".utf8), bigSize: nil)
+        phone.objects[14] = Object(storage: 0x10001, parent: 10, name: "录音", folder: true, data: Data(), bigSize: nil)
+        phone.objects[15] = Object(storage: 0x10001, parent: 14, name: "会议.m4a", folder: false, data: Data(repeating: 7, count: 900), bigSize: nil)
+        phone.listedTwice = [11]
+        phone.namelessInLists = [14]
+        phone.sdCard = (capacity: 32 << 30, free: 40 << 30)
+        phone.objects[20] = Object(storage: 0x20001, parent: root, name: "Music", folder: true, data: Data(), bigSize: nil)
+        phone.objects[21] = Object(storage: 0x20001, parent: 20, name: "song.mp3", folder: false, data: Data(repeating: 1, count: 1500), bigSize: nil)
+        return phone
     }
 
     public var aborted = false
@@ -176,16 +212,23 @@ public final class FakePhone: MTPTransport {
         case MTPCode.closeSession:
             sessionOpen = false; respond(MTPCode.ok, t)
         case MTPCode.getStorageIDs:
-            var w = MTPWriter(); w.u32(1); w.u32(0x10001)
+            var w = MTPWriter(); w.u32(sdCard == nil ? 1 : 2); w.u32(0x10001)
+            if sdCard != nil { w.u32(0x20001) }
             dataThenOK(header.code, t, w.data)
         case MTPCode.getStorageInfo:
+            let storage = try reader.u32()
+            let space: (capacity: UInt64, free: UInt64)
+            if storage == 0x10001 { space = (capacity, freeSpace) }
+            else if storage == 0x20001, let card = sdCard { space = card }
+            else { respond(0x2013, t); return }                 // invalid storage ID
             var w = MTPWriter()
-            w.u16(3); w.u16(2); w.u16(0); w.u64(128 << 30); w.u64(freeSpace); w.u32(0xFFFF_FFFF)
-            try w.string("Internal shared storage"); try w.string("")
+            w.u16(3); w.u16(2); w.u16(0); w.u64(space.capacity); w.u64(space.free); w.u32(0xFFFF_FFFF)
+            try w.string(storage == 0x10001 ? "Internal shared storage" : ""); try w.string(storage == 0x10001 ? "" : "SD card")
             dataThenOK(header.code, t, w.data)
         case MTPCode.getObjectHandles:
             let storage = try reader.u32(); _ = try reader.u32(); let parent = try reader.u32()
             let handles = objects.filter { $0.value.storage == storage && $0.value.parent == parent }.keys.sorted()
+                .flatMap { listedTwice.contains($0) ? [$0, $0] : [$0] }
             var w = MTPWriter(); w.u32(UInt32(handles.count)); handles.forEach { w.u32($0) }
             dataThenOK(header.code, t, w.data)
         case MTPCode.getObjectInfo:
@@ -193,7 +236,9 @@ public final class FakePhone: MTPTransport {
             guard let object = objects[handle] else { respond(0x2009, t); return }
             let size: UInt32 = object.bigSize != nil ? 0xFFFF_FFFF : UInt32(object.data.count)
             let info = MTPObjectInfo(storageID: object.storage, format: object.folder ? MTPCode.associationFormat : MTPCode.undefinedFormat,
-                                     compressedSize: size, parent: object.parent, associationType: object.folder ? MTPCode.genericFolder : 0, filename: object.name)
+                                     compressedSize: size, parent: object.parent,
+                                     associationType: object.folder && !object.bare ? MTPCode.genericFolder : 0,
+                                     filename: object.name, modified: object.modified)
             dataThenOK(header.code, t, try info.encoded())
         case MTPCode.getObjectPropValue:
             let handle = try reader.u32()
@@ -232,6 +277,7 @@ public final class FakePhone: MTPTransport {
             let parent = try reader.u32(); _ = try reader.u32(); let property = try reader.u32()
             // Like Android: the folder itself comes first, then what's in it.
             let children = objects.filter { $0.value.parent == parent || $0.key == parent }.sorted { $0.key < $1.key }
+                .filter { UInt16(property) != MTPCode.objectFileNameProperty || !namelessInLists.contains($0.key) }
             var w = MTPWriter(); w.u32(UInt32(children.count))
             for (handle, object) in children {
                 w.u32(handle); w.u16(UInt16(property))

@@ -43,6 +43,11 @@ extension BridgeClient {
         return try await pair(address: host, port: number, show: show)
     }
 
+    /// Pairs with a phone reached by Fast USB, through an `ADBTunnel` on `port`: the same code comparison as on Wi‑Fi.
+    public static func pair(tunnel port: UInt16, show: @MainActor (String) -> Void) async throws -> BridgeClient {
+        try await pair(address: loopback, port: port, show: show)
+    }
+
     /// This Mac's name, shown on the phone when pairing and in its list of trusted computers.
     public static var computerName: String { Host.current().localizedName ?? "Mac" }
 

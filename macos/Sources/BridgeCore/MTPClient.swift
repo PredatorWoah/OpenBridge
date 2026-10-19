@@ -83,7 +83,7 @@ public final class MTPClient: FileSource, @unchecked Sendable {
             }
             return try session.children(storage: storage, parent: location.handle).compactMap { item -> Entry? in
                 // Skip names that cannot be saved safely on the Mac rather than failing the whole folder.
-                guard (try? Wire.validateName(item.info.filename)) != nil else { return nil }
+                guard MTPClient.usable(item.info.filename) else { return nil }
                 let size = item.info.isFolder ? 0 : Int64(clamping: try session.size(of: item.handle, info: item.info))
                 return Entry(id: "o:\(storage):\(item.handle)", name: item.info.filename, directory: item.info.isFolder, size: size)
             }.sorted { ($0.directory ? 0 : 1, $0.name.lowercased()) < ($1.directory ? 0 : 1, $1.name.lowercased()) }
@@ -201,9 +201,12 @@ public final class MTPClient: FileSource, @unchecked Sendable {
         let location = try Location(folder.id)
         guard let storage = location.storage else { throw BridgeError.message("Choose a folder.") }
         if location.handle == MTPSession.root {
-            // A whole storage: its used space, straight from the phone.
-            let used = try await run { session in try session.storages().first { $0.id == storage }.map { $0.capacity &- $0.freeSpace } }
-            return FolderSize(bytes: Int64(clamping: used ?? 0), files: 0, complete: true)
+            // A whole storage: its used space, straight from the phone, unless the phone reports nonsense (no capacity,
+            // or more free space than capacity, as some SD cards do); then it's counted like a folder.
+            let space = try await run { session in try session.storages().first { $0.id == storage } }
+            if let space, space.capacity > 0, space.freeSpace <= space.capacity {
+                return FolderSize(bytes: Int64(clamping: space.capacity - space.freeSpace), files: 0, complete: true)
+            }
         }
         let deadline = Date().addingTimeInterval(8)
         var bytes: Int64 = 0, files: Int64 = 0, seen = 0
@@ -241,7 +244,7 @@ public final class MTPClient: FileSource, @unchecked Sendable {
             try Task.checkCancellation()
             let children = try await run { try $0.contents(storage: folder.storage, parent: folder.handle, names: true) }
             seen += children.count
-            for child in children where (try? Wire.validateName(child.name)) != nil && visited.insert("\(folder.storage):\(child.handle)").inserted {
+            for child in children where MTPClient.usable(child.name) && visited.insert("\(folder.storage):\(child.handle)").inserted {
                 if child.name.lowercased().contains(needle) {
                     found.append(Found(entry: Entry(id: "o:\(folder.storage):\(child.handle)", name: child.name, directory: child.folder,
                                                     size: Int64(clamping: child.size)), location: folder.location))
@@ -324,6 +327,13 @@ public final class MTPClient: FileSource, @unchecked Sendable {
             }
         }
         static let invalid = BridgeError.message("Unknown item; refresh the folder.")
+    }
+
+    /// Names shown over USB. Android allows 254 UTF-16 units, so a long Chinese name can be over OB01's 255 UTF-8 bytes;
+    /// it's still listed (downloads shorten it to fit the Mac), only names no Mac folder can hold are skipped.
+    static func usable(_ name: String) -> Bool {
+        !name.isEmpty && name != "." && name != ".." && !name.contains("/")
+            && !name.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) }
     }
 
     private static func keepsSession(_ error: Error) -> Bool {

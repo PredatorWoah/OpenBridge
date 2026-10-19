@@ -55,7 +55,6 @@ struct BrowserScreen: View {
             }
             .animation(.spring(response: 0.5, dampingFraction: 0.75), value: model.transfer != nil)
         }
-        .overlay(alignment: .bottom) { Toast(text: model.toast) }
         .quickLookPreview($model.previewURL)
         .background { Shortcuts(model: model, searching: searching) }
         .confirmationDialog(deleteTitle, isPresented: Binding(get: { !model.pendingDelete.isEmpty }, set: { if !$0 { model.pendingDelete = [] } })) {
@@ -74,14 +73,18 @@ struct BrowserScreen: View {
     }
 
     private var list: some View {
-        ScrollView {
-            LazyVStack(spacing: 2) {
-                ForEach(model.sorted) { entry in
-                    FileRow(entry: entry, selected: model.selection.contains(entry.id), thumbnail: model.thumbnails[entry.id], folderSize: model.sizes[entry.id])
-                        .modifier(Item(model: model, entry: entry))
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 2) {
+                    ForEach(model.sorted) { entry in
+                        FileRow(entry: entry, selected: model.selection.contains(entry.id), thumbnail: model.thumbnails[entry.id],
+                                folderSize: model.sizes[entry.id], focused: model.cursor == entry.id)
+                            .modifier(Item(model: model, entry: entry))
+                    }
                 }
+                .padding(10)
             }
-            .padding(10)
+            .onChange(of: model.cursor) { id in if let id { proxy.scrollTo(id) } }
         }
         // Each folder fades in as a whole, quickly; rows never wait on their own timers.
         .id(model.path.last?.id ?? "")
@@ -90,19 +93,31 @@ struct BrowserScreen: View {
     }
 
     private var grid: some View {
-        ScrollView {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 128), spacing: 10)], spacing: 10) {
-                ForEach(model.sorted) { entry in
-                    FileTile(entry: entry, selected: model.selection.contains(entry.id), thumbnail: model.thumbnails[entry.id], folderSize: model.sizes[entry.id])
-                        .modifier(Item(model: model, entry: entry))
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 128), spacing: 10)], spacing: 10) {
+                    ForEach(model.sorted) { entry in
+                        FileTile(entry: entry, selected: model.selection.contains(entry.id), thumbnail: model.thumbnails[entry.id],
+                                 folderSize: model.sizes[entry.id], focused: model.cursor == entry.id)
+                            .modifier(Item(model: model, entry: entry))
+                    }
                 }
+                .padding(12)
             }
-            .padding(12)
+            .onChange(of: model.cursor) { id in if let id { proxy.scrollTo(id) } }
+            // How many tiles fit in a row (as the adaptive grid lays them out), so ↑ and ↓ move by a row.
+            .background(GeometryReader { geometry in
+                Color.clear
+                    .onAppear { model.gridColumns = BrowserScreen.columns(geometry.size.width) }
+                    .onChange(of: geometry.size.width) { model.gridColumns = BrowserScreen.columns($0) }
+            })
         }
         .id("grid-" + (model.path.last?.id ?? ""))
         .transition(.opacity)
         .animation(.easeOut(duration: 0.15), value: model.path.last?.id)
     }
+
+    static func columns(_ width: CGFloat) -> Int { max(1, Int((width - 24 + 10) / (128 + 10))) }
 
     /// Files dropped from Finder upload into the open folder.
     private func drop(_ providers: [NSItemProvider]) -> Bool {
@@ -160,7 +175,9 @@ private struct ResultsList: View {
                 } else {
                     LazyVStack(spacing: 2) {
                         ForEach(hits) { hit in
-                            row(hit).modifier(Hit(model: model, hit: hit))
+                            row(hit)
+                                .background { if model.cursor == hit.id { RoundedRectangle(cornerRadius: 8, style: .continuous).fill(selectionFill) } }
+                                .modifier(Hit(model: model, hit: hit))
                         }
                     }
                     .padding(10)
@@ -209,6 +226,9 @@ private struct Hit: ViewModifier {
         content
             .onTapGesture(count: 2) { model.openFound(hit) }
             .onAppear { if !hit.entry.directory { model.loadThumbnail(hit.entry) } }
+            .accessibilityElement(children: .combine)
+            .accessibilityAction { model.openFound(hit) }
+            .accessibilityAction(named: "Show in Folder") { model.reveal(hit) }
             .contextMenu {
                 Button(hit.entry.directory ? "Open" : "Download…") { model.openFound(hit) }
                 Button("Show in Folder") { model.reveal(hit) }
@@ -226,6 +246,13 @@ private struct Item: ViewModifier {
             .onTapGesture { model.click(entry) }
             .onAppear { if entry.directory { model.loadSize(entry) } else { model.loadThumbnail(entry) } }
             .onDrag { model.dragItem(entry) }
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(model.selection.contains(entry.id) ? AccessibilityTraits.isSelected : AccessibilityTraits())
+            .accessibilityHint(entry.directory ? "Opens the folder" : "Downloads the file")
+            .accessibilityAction { model.open(entry) }
+            .accessibilityAction(named: "Select") { model.click(entry) }
+            .accessibilityAction(named: "Rename") { model.renaming = entry }
+            .accessibilityAction(named: "Delete") { model.confirmDelete([entry]) }
             .contextMenu {
                 Button(entry.directory ? "Open" : "Download…") { model.open(entry) }
                 if !entry.directory {
@@ -254,7 +281,7 @@ private struct Sidebar: View {
                 ArchMark(size: 26)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(model.deviceName).font(.system(size: 13.5, weight: .semibold)).lineLimit(1)
-                    Text(model.overUSB ? "USB · File transfer" : "Wi‑Fi").font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.75))
+                    Text(model.fastUSB ? "Fast USB" : model.overUSB ? "USB · File transfer" : "Wi‑Fi").font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.75))
                 }
             }
             .padding(10).frame(maxWidth: .infinity, alignment: .leading)
@@ -262,7 +289,12 @@ private struct Sidebar: View {
                         in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             Button { model.showBrowser = false } label: { Label("Devices", systemImage: "chevron.left") }
                 .buttonStyle(.plain).foregroundStyle(Palette.muted).font(.system(size: 12.5)).padding(10)
-            if model.overUSB {
+            if model.clipboardAvailable {
+                Button { model.showTexts = true } label: { Label("Texts", systemImage: "text.bubble") }
+                    .buttonStyle(.plain).font(.system(size: 13, weight: .semibold)).padding(10)
+                    .help("Send texts to the phone, and see what it sent")
+            }
+            if model.overUSB || model.fastUSB {
                 Button(action: mirror) { Label("Mirror screen", systemImage: "rectangle.on.rectangle") }
                     .buttonStyle(.plain).font(.system(size: 13, weight: .semibold)).padding(10)
                     .help("Show and control the phone's screen on your Mac (needs USB debugging)")
@@ -306,7 +338,8 @@ private struct Toolbar: View {
     private func navigation(compact: Bool) -> some View {
         HStack(spacing: 8) {
             Button(action: model.up) { Image(systemName: "chevron.left") }
-                .buttonStyle(GhostButton()).disabled(model.path.count < 2 || model.busy).help("Up one folder")
+                .buttonStyle(GhostButton()).disabled(model.path.count < 2 || model.busy).help("Up one folder (⌘↑)")
+                .accessibilityLabel("Up one folder")
             if model.canReturnToResults {
                 Button(action: model.returnToResults) { Label("Results", systemImage: "magnifyingglass") }
                     .buttonStyle(GhostButton()).fixedSize().help("Back to the search results")
@@ -324,11 +357,12 @@ private struct Toolbar: View {
     private var controls: some View {
         HStack(spacing: 8) {
             HStack(spacing: 5) {
-                Image(systemName: "magnifyingglass").foregroundStyle(Palette.muted)
+                Image(systemName: "magnifyingglass").foregroundStyle(Palette.muted).accessibilityHidden(true)
                 TextField("Search", text: $model.query).textFieldStyle(.plain).focused(searching)
                     .onSubmit { model.searchEverywhere() }
                 if !model.query.isEmpty {
                     Button { model.query = "" } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain).foregroundStyle(Palette.muted)
+                        .help("Clear the search (Esc)").accessibilityLabel("Clear search")
                 }
             }
             .font(.system(size: 13)).padding(.horizontal, 9).padding(.vertical, 5).frame(width: 180).glass(8)
@@ -336,10 +370,13 @@ private struct Toolbar: View {
             Button { model.mediaOnly.toggle() } label: { Image(systemName: model.mediaOnly ? "photo.fill.on.rectangle.fill" : "photo.on.rectangle") }
                 .buttonStyle(.plain).foregroundStyle(model.mediaOnly ? Palette.amber : .white).frame(width: 28)
                 .help(model.mediaOnly ? "Showing only photos and videos" : "Show only photos and videos")
-            Picker("", selection: $model.grid) {
-                Image(systemName: "list.bullet").tag(false)
-                Image(systemName: "square.grid.2x2").tag(true)
+                .accessibilityLabel("Only photos and videos")
+                .accessibilityValue(model.mediaOnly ? "On" : "Off")
+            Picker("View", selection: $model.grid) {
+                Image(systemName: "list.bullet").accessibilityLabel("List").tag(false)
+                Image(systemName: "square.grid.2x2").accessibilityLabel("Grid").tag(true)
             }
+            .labelsHidden()
             .pickerStyle(.segmented).frame(width: 76).help("List or grid")
             Menu {
                 Picker("Sort by", selection: $model.sortKey) {
@@ -352,6 +389,7 @@ private struct Toolbar: View {
                 }
             } label: { Image(systemName: "arrow.up.arrow.down") }
                 .menuStyle(.borderlessButton).frame(width: 34).help("Sort by \(model.sortKey.rawValue.lowercased())")
+                .accessibilityLabel("Sort, by \(model.sortKey.rawValue.lowercased())")
             Menu {
                 Button("New Folder…", action: model.newFolder)
                 Button("Upload…", action: model.chooseUploads)
@@ -363,15 +401,17 @@ private struct Toolbar: View {
                 Button("Rename…") { model.renaming = model.selected.first }.disabled(model.selection.count != 1)
                 Button("Delete…") { model.confirmDelete(model.selected) }.disabled(model.selection.isEmpty)
                 Divider()
+                Button("Texts…") { model.showTexts = true }.disabled(!model.clipboardAvailable)
                 Button("Send Mac clipboard to phone", action: model.sendClipboard).disabled(!model.clipboardAvailable)
                 Button("Copy phone clipboard to Mac", action: model.fetchClipboard).disabled(!model.clipboardAvailable)
                 if !model.clipboardAvailable {
-                    Text("Clipboard sharing works over Wi‑Fi, or while mirroring the screen.")
+                    Text("Texts and the clipboard work over Wi‑Fi and Fast USB, or while mirroring the screen.")
                 }
                 Divider()
                 Button("Refresh", action: model.refresh)
             } label: { Image(systemName: "ellipsis.circle") }
                 .menuStyle(.borderlessButton).frame(width: 34).disabled(model.busy)
+                .help("More actions").accessibilityLabel("More actions")
         }
     }
 }
@@ -394,6 +434,7 @@ private struct PathBar: View {
                         ForEach(hidden, id: \.offset) { hiddenIndex, folder in Button(folder.name) { model.go(to: hiddenIndex) } }
                     } label: { Text("…").font(.system(size: 14, weight: .medium)).foregroundStyle(Palette.muted) }
                         .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("Folders in between")
+                        .accessibilityLabel("Folders in between")
                     chevron
                 }
                 crumbButton(index, crumb.name, last: index == path.count - 1)
@@ -402,7 +443,7 @@ private struct PathBar: View {
     }
 
     private var chevron: some View {
-        Image(systemName: "chevron.right").font(.system(size: 10, weight: .bold)).foregroundStyle(Palette.muted)
+        Image(systemName: "chevron.right").font(.system(size: 10, weight: .bold)).foregroundStyle(Palette.muted).accessibilityHidden(true)
     }
 
     @ViewBuilder private func crumbButton(_ index: Int, _ name: String, last: Bool) -> some View {
@@ -415,20 +456,31 @@ private struct PathBar: View {
     }
 }
 
-/// Keyboard shortcuts: Space for Quick Look, ⌘A to select all, ⌘↓ or Return to open, ⌘⇧N for a new folder,
-/// ⌘⌫ to delete. While typing in search, Space, Return and ⌘A belong to the field.
+/// Keyboard shortcuts, as in Finder: arrows move the selection (Shift extends it), ⌘↓ or ⌘O opens, ⌘↑ goes up,
+/// Return renames, Space is Quick Look, ⌘A selects all, ⌘⌫ or Delete deletes (after asking), ⌘⇧N makes a folder,
+/// Esc clears the search, then the selection. While typing in search, the field keeps its keys (but Esc clears it).
 private struct Shortcuts: View {
     @ObservedObject var model: BrowserModel
     var searching: Bool
     var body: some View {
+        let row = model.grid && model.results == nil ? model.gridColumns : 1
         ZStack {
+            Button("") { model.moveCursor(-row) }.keyboardShortcut(.upArrow, modifiers: []).disabled(searching)
+            Button("") { model.moveCursor(row) }.keyboardShortcut(.downArrow, modifiers: []).disabled(searching)
+            Button("") { model.moveCursor(-row, extending: true) }.keyboardShortcut(.upArrow, modifiers: .shift).disabled(searching)
+            Button("") { model.moveCursor(row, extending: true) }.keyboardShortcut(.downArrow, modifiers: .shift).disabled(searching)
+            Button("") { model.moveCursor(-1) }.keyboardShortcut(.leftArrow, modifiers: []).disabled(searching || row == 1)
+            Button("") { model.moveCursor(1) }.keyboardShortcut(.rightArrow, modifiers: []).disabled(searching || row == 1)
             Button("") { model.preview() }.keyboardShortcut(.space, modifiers: []).disabled(searching)
             Button("") { model.selectAll() }.keyboardShortcut("a", modifiers: .command).disabled(searching)
-            Button("") { if let first = model.selected.first { model.open(first) } }.keyboardShortcut(.downArrow, modifiers: .command)
-            Button("") { if let first = model.selected.first { model.open(first) } }.keyboardShortcut(.return, modifiers: []).disabled(searching)
+            Button("") { model.openCursor() }.keyboardShortcut(.downArrow, modifiers: .command)
+            Button("") { model.openCursor() }.keyboardShortcut("o", modifiers: .command)
+            Button("") { model.renameSelected() }.keyboardShortcut(.return, modifiers: []).disabled(searching)
             Button("") { model.confirmDelete(model.selected) }.keyboardShortcut(.delete, modifiers: .command).disabled(searching)
+            Button("") { model.confirmDelete(model.selected) }.keyboardShortcut(.deleteForward, modifiers: []).disabled(searching)
             Button("") { model.up() }.keyboardShortcut(.upArrow, modifiers: .command)
             Button("") { model.newFolder() }.keyboardShortcut("n", modifiers: [.command, .shift])
+            Button("") { model.escape() }.keyboardShortcut(.escape, modifiers: [])
         }
         .opacity(0).allowsHitTesting(false).accessibilityHidden(true)
     }
@@ -447,7 +499,9 @@ private func symbol(for kind: FileKind) -> (String, Color) {
     }
 }
 
-private let selectionFill = LinearGradient(colors: [Palette.violet.opacity(0.55), Palette.pink.opacity(0.35)], startPoint: .leading, endPoint: .trailing)
+private var selectionFill: LinearGradient {
+    LinearGradient(colors: [Palette.violet.opacity(0.55), Palette.pink.opacity(0.35)], startPoint: .leading, endPoint: .trailing)
+}
 
 /// "2.3 GB", "≥ 41 GB" when the phone stopped counting early, or "—" before it's measured.
 private func folderText(_ size: FolderSize?) -> String {
@@ -455,11 +509,17 @@ private func folderText(_ size: FolderSize?) -> String {
     return (size.complete ? "" : "≥ ") + ByteCountFormatter.string(fromByteCount: size.bytes, countStyle: .file)
 }
 
+/// Where the keyboard is: a ring that shows even on a selected item.
+private func focusRing(_ radius: CGFloat, _ on: Bool) -> some View {
+    RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(Palette.amber.opacity(on ? 0.9 : 0), lineWidth: 1.5)
+}
+
 struct FileRow: View {
     var entry: Entry
     var selected: Bool
     var thumbnail: NSImage?
     var folderSize: FolderSize? = nil
+    var focused = false
 
     var body: some View {
         let (name, color) = symbol(for: FileKind(entry))
@@ -473,6 +533,7 @@ struct FileRow: View {
                 }
             }
             .frame(width: 26, height: 26)
+            .accessibilityHidden(true)
             Text(entry.name).lineLimit(1).truncationMode(.middle)
             Spacer()
             Text(entry.directory ? folderText(folderSize) : ByteCountFormatter.string(fromByteCount: entry.size, countStyle: .file))
@@ -482,6 +543,7 @@ struct FileRow: View {
         .font(.system(size: 13.5))
         .padding(.horizontal, 12).padding(.vertical, 6)
         .background { if selected { RoundedRectangle(cornerRadius: 8, style: .continuous).fill(selectionFill) } }
+        .overlay(focusRing(8, focused))
         .contentShape(Rectangle())
     }
 }
@@ -491,6 +553,7 @@ struct FileTile: View {
     var selected: Bool
     var thumbnail: NSImage?
     var folderSize: FolderSize? = nil
+    var focused = false
 
     var body: some View {
         let (name, color) = symbol(for: FileKind(entry))
@@ -513,6 +576,7 @@ struct FileTile: View {
         .padding(8)
         .frame(width: 128)
         .background { if selected { RoundedRectangle(cornerRadius: 14, style: .continuous).fill(selectionFill) } }
+        .overlay(focusRing(14, focused))
         .contentShape(Rectangle())
     }
 }
@@ -552,10 +616,12 @@ struct TransferBar: View {
                             Text(transfer.upload ? "Uploaded to the phone" : "Done").foregroundStyle(Palette.ok).bold()
                         }
                         Button { model.transfer = nil } label: { Image(systemName: "xmark") }.buttonStyle(.plain).foregroundStyle(Palette.muted)
+                            .help("Close").accessibilityLabel("Close")
                     } else if !model.busy {
                         // Stopped by an error: continue where it left off.
                         Button("Resume", action: model.resume).buttonStyle(SunsetButton()).disabled(transfer.remaining.isEmpty)
                         Button { model.transfer = nil } label: { Image(systemName: "xmark") }.buttonStyle(.plain).foregroundStyle(Palette.muted)
+                            .help("Forget what's left").accessibilityLabel("Forget what's left")
                     } else {
                         Text("\(Int(transfer.fraction * 100))%").monospacedDigit().foregroundStyle(Palette.muted)
                         Button("Cancel", action: model.cancel).buttonStyle(GhostButton())

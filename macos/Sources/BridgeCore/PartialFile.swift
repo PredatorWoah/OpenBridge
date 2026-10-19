@@ -9,7 +9,10 @@ struct PartialFile {
     let offset: Int64
 
     static func location(for destination: URL, size: Int64) -> URL {
-        destination.deletingLastPathComponent().appendingPathComponent(".\(destination.lastPathComponent).\(size).openbridge-part")
+        // A name near the Mac's 255-byte limit is shortened here, so its partial file can exist too.
+        let suffix = ".\(size).openbridge-part"
+        let name = Wire.fitted(destination.lastPathComponent, limit: 254 - suffix.utf8.count)
+        return destination.deletingLastPathComponent().appendingPathComponent("." + name + suffix)
     }
 
     /// Whether an earlier, interrupted download of this size can be continued at `destination`.
