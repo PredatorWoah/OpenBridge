@@ -127,7 +127,7 @@ struct TextsPanel: View {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 6) {
-                        ForEach(history.items) { item in TextRow(item: item) }
+                        ForEach(history.items) { item in TextRow(item: item, copy: model.copyText) }
                     }
                 }
                 .frame(minHeight: 120, maxHeight: 280)
@@ -143,6 +143,7 @@ struct TextsPanel: View {
 
 private struct TextRow: View {
     let item: TextItem
+    let copy: (String) -> Void
     @State private var copied = false
 
     var body: some View {
@@ -158,8 +159,7 @@ private struct TextRow: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             Button {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(item.text, forType: .string)
+                copy(item.text)
                 copied = true
             } label: { Image(systemName: copied ? "checkmark" : "doc.on.doc") }
                 .buttonStyle(.plain).foregroundStyle(copied ? Palette.ok : Palette.muted)

@@ -1083,6 +1083,16 @@ final class BrowserModel: ObservableObject {
         }
     }
 
+    /// Copies a text from the Texts history. It's already been between the phone and this Mac, so automatic sending
+    /// leaves it alone.
+    func copyText(_ text: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        pasteboardSeen = pasteboard.changeCount
+        lastShared = text
+    }
+
     /// While connected over Wi‑Fi or Fast USB with automatic sending on, looks at the clipboard every second.
     private func watchClipboard() {
         clipboardTimer?.invalidate(); clipboardTimer = nil
