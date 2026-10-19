@@ -262,16 +262,24 @@ enum LookArt {
         for (i, (color, base, phase)) in ribbons.enumerated() {
             let amplitude = h * 0.035 + unit * 0.02
             func edge(_ x: Double) -> Double {
-                let u = x / w
-                return h * base + amplitude * sin(u * tau * 0.8 + t * 0.22 * speed + phase)
-                    + amplitude * 0.45 * sin(u * tau * 2.3 - t * 0.37 * speed + phase * 1.7)
+                let u: Double = x / w
+                let slow: Double = sin(u * tau * 0.8 + t * 0.22 * speed + phase)
+                let quick: Double = sin(u * tau * 2.3 - t * 0.37 * speed + phase * 1.7)
+                let lift: Double = amplitude * slow + amplitude * 0.45 * quick
+                return h * base + lift
             }
-            func height(_ x: Double) -> Double { h * (0.13 + 0.06 * sin(x / w * tau * 1.4 + t * 0.3 + phase)) * (0.8 + 0.2 * energy) }
+            func height(_ x: Double) -> Double {
+                let wave: Double = sin(x / w * tau * 1.4 + t * 0.3 + phase)
+                let scale: Double = 0.8 + 0.2 * energy
+                return h * (0.13 + 0.06 * wave) * scale
+            }
             // Rays side by side, each fading upwards on its own, so the curtain has no hard top.
             let rays = 96
             for s in 0..<rays {
                 let x = w * (Double(s) + 0.5) / Double(rays)
-                let fold = 0.35 + 0.65 * (0.5 + 0.5 * sin(x / w * tau * 4.5 + t * 0.55 * speed + phase + Double(i)))
+                let angle: Double = x / w * tau * 4.5 + t * 0.55 * speed + phase + Double(i)
+                let wave: Double = 0.5 + 0.5 * sin(angle)
+                let fold: Double = 0.35 + 0.65 * wave
                 let y = edge(x), top = y - height(x) * (0.55 + 0.45 * fold)
                 var ray = Path()
                 ray.move(to: CGPoint(x: x, y: top)); ray.addLine(to: CGPoint(x: x, y: y))
@@ -321,9 +329,11 @@ enum LookArt {
             let steps = 160
             for s in 0...steps {
                 let theta = Double(s) / Double(steps) * tau
-                let wobble = r * 0.03 * (0.3 + f.glow + 0.4 * k) * sin(5 * theta + t * (1.1 + 0.35 * n) + n * 2.1)
-                    + r * 0.012 * sin(9 * theta - t * 1.7 + n)
-                let radius = r + wobble + (n - 1) * r * 0.03
+                let strength: Double = r * 0.03 * (0.3 + f.glow + 0.4 * k)
+                let big: Double = sin(5 * theta + t * (1.1 + 0.35 * n) + n * 2.1)
+                let small: Double = sin(9 * theta - t * 1.7 + n)
+                let wobble: Double = strength * big + r * 0.012 * small
+                let radius: Double = r + wobble + (n - 1) * r * 0.03
                 let q = CGPoint(x: c.x + radius * cos(theta), y: c.y + radius * sin(theta))
                 if s == 0 { ring.move(to: q) } else { ring.addLine(to: q) }
             }
@@ -381,11 +391,13 @@ enum LookArt {
         light.blendMode = .plusLighter
         for i in 0..<4 {
             let n = Double(i)
-            let x0 = w * (0.12 + 0.26 * n) + sin(t * 0.17 + n * 1.3) * w * 0.05
+            let sway: Double = sin(t * 0.17 + n * 1.3) * w * 0.05
+            let x0: Double = w * (0.12 + 0.26 * n) + sway
             let spread = w * 0.09
             var beam = Path()
             beam.move(to: CGPoint(x: x0 - spread * 0.25, y: 0)); beam.addLine(to: CGPoint(x: x0 + spread * 0.25, y: 0))
-            beam.addLine(to: CGPoint(x: x0 + spread + w * 0.08, y: h * 0.75)); beam.addLine(to: CGPoint(x: x0 - spread * 0.4 + w * 0.08, y: h * 0.75))
+            let right: Double = x0 + spread + w * 0.08, left: Double = x0 - spread * 0.4 + w * 0.08
+            beam.addLine(to: CGPoint(x: right, y: h * 0.75)); beam.addLine(to: CGPoint(x: left, y: h * 0.75))
             beam.closeSubpath()
             let shimmer = 0.6 + 0.4 * sin(t * 0.45 + n * 2)
             light.fill(beam, with: vertical([.init(color: .white.opacity(0.07 * shimmer), location: 0), .init(color: .clear, location: 1)], from: 0, to: h * 0.75))
@@ -406,9 +418,10 @@ enum LookArt {
             let amplitude = 5 + 3.5 * n + 4 * energy
             let base = surface + n * h * 0.05
             func y(_ x: Double) -> Double {
-                let u = x / w
-                return base + amplitude * sin(u * tau * (1.05 + 0.35 * n) + t * (0.65 + 0.22 * n) * speed + n * 1.7)
-                    + amplitude * 0.35 * sin(u * tau * (3.1 + n) - t * 1.05 * speed + n)
+                let u: Double = x / w
+                let long: Double = sin(u * tau * (1.05 + 0.35 * n) + t * (0.65 + 0.22 * n) * speed + n * 1.7)
+                let short: Double = sin(u * tau * (3.1 + n) - t * 1.05 * speed + n)
+                return base + amplitude * long + amplitude * 0.35 * short
             }
             var wave = Path(), crest = Path()
             let steps = 60
@@ -460,10 +473,10 @@ enum LookArt {
             let steps = 48
             for s in 0...steps {
                 let u = Double(s) / Double(steps)
-                let q = CGPoint(x: c.x - inner + 2 * inner * u,
-                                y: surface + l * inner * 0.07 + tilt * (u * 2 - 1)
-                                    + amplitude * sin(u * tau * 1.2 + t * (1.7 + 0.6 * l) + l * 2.2)
-                                    + amplitude * 0.4 * sin(u * tau * 2.7 - t * 2.3))
+                let swell: Double = sin(u * tau * 1.2 + t * (1.7 + 0.6 * l) + l * 2.2)
+                let ripple: Double = sin(u * tau * 2.7 - t * 2.3)
+                let level: Double = surface + l * inner * 0.07 + tilt * (u * 2 - 1)
+                let q = CGPoint(x: c.x - inner + 2 * inner * u, y: level + amplitude * swell + amplitude * 0.4 * ripple)
                 if s == 0 { wave.move(to: q) } else { wave.addLine(to: q) }
             }
             wave.addLine(to: CGPoint(x: c.x + inner, y: c.y + inner)); wave.addLine(to: CGPoint(x: c.x - inner, y: c.y + inner)); wave.closeSubpath()
@@ -476,7 +489,8 @@ enum LookArt {
         for i in 0..<7 {
             let p = (t * (0.12 + hash(i + 9) * 0.1) + hash(i + 19)).truncatingRemainder(dividingBy: 1)
             let y = c.y + inner - p * (c.y + inner - surface)
-            let x = c.x - inner * 0.7 + hash(i + 29) * inner * 1.4 + sin(t * 2 + Double(i)) * inner * 0.03
+            let drift: Double = sin(t * 2 + Double(i)) * inner * 0.03
+            let x: Double = c.x - inner * 0.7 + hash(i + 29) * inner * 1.4 + drift
             water.stroke(circle(CGPoint(x: x, y: y), inner * (0.02 + hash(i + 39) * 0.025)), with: .color(.white.opacity(0.45 * (1 - p))), lineWidth: 1)
         }
         // The glass rim and its shine.
