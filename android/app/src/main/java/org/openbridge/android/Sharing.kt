@@ -87,6 +87,7 @@ object Sharing {
         Palette.look = Look.of(preferences.getString("look", null))
         Trusted.attach(app)
         PhoneOutbox.attach(app)
+        Texts.attach(app)
         Hotspot.attach(app)
         PhoneOutbox.onCollected = { _ -> main.post {
             if (PhoneOutbox.waiting.isEmpty()) android.widget.Toast.makeText(app, S.sentTo(computer), android.widget.Toast.LENGTH_SHORT).show()
@@ -161,6 +162,14 @@ object Sharing {
     fun waitingNote(text: String) { note = text; lastWaitingNote = text }
 
     fun dismissNote() { note = null }
+
+    /** Queues [text] for the computer's clipboard and keeps it in Texts. False when it's empty or too long. */
+    fun sendText(text: String): Boolean {
+        if (!PhoneOutbox.addText(text)) return false
+        Texts.sent(text)
+        Log.add("Queued a text")
+        return true
+    }
 
     fun keepInBackground(enabled: Boolean) {
         inBackground = enabled

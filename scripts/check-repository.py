@@ -25,8 +25,11 @@ assert all(p.attrib.get(ns + "usesPermissionFlags") == "neverForLocation" for p 
            if p.attrib[ns + "name"].endswith("NEARBY_WIFI_DEVICES")), "Nearby devices must be neverForLocation"
 assert not any("LOCATION" in p for p in permissions), "no location permissions"
 services = manifest.find("application").findall("service")
-assert [(s.attrib[ns + "name"], s.attrib[ns + "exported"], s.attrib[ns + "foregroundServiceType"]) for s in services] == \
-    [(".ShareService", "false", "dataSync")], "only the private background-sharing service"
+assert [(s.attrib[ns + "name"], s.attrib[ns + "exported"], s.attrib.get(ns + "foregroundServiceType"), s.attrib.get(ns + "permission"))
+        for s in services] == \
+    [(".ShareService", "false", "dataSync", None),
+     (".ClipboardTile", "true", None, "android.permission.BIND_QUICK_SETTINGS_TILE")], \
+    "only the private background-sharing service, and the Send clipboard tile that only the system can bind"
 # The legacy storage permissions are only for Android 9 and 10.
 assert all(p.attrib.get(ns + "maxSdkVersion") == "29" for p in manifest.findall("uses-permission")
            if p.attrib[ns + "name"].split(".")[-1] in ("READ_EXTERNAL_STORAGE", "WRITE_EXTERNAL_STORAGE")), "storage permissions must stop at API 29"

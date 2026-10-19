@@ -80,6 +80,25 @@ object S {
     val clear get() = t("Clear", "清除")
     fun sentTo(computer: String?) = if (computer == null) t("Sent to your computer", "已发送到电脑") else t("Sent to $computer", "已发送到 $computer")
 
+    // Texts
+    val sendClipboard get() = t("Send clipboard", "发送剪贴板")
+    val clipboardEmpty get() = t("The clipboard has no text to send.", "剪贴板里没有可发送的文字。")
+    val textTooLong get() = t("That text is too long to send (256 KB at most).", "文字太长，无法发送（最多 256 KB）。")
+    val waitingForComputer get() = t("Waiting for a computer", "正在等待电脑")
+    val openToSend get() = t("Waiting for a computer: open OpenBridge and start sharing.", "正在等待电脑：请打开 OpenBridge 并开始共享。")
+    val startToSend get() = t("Start sharing to send what's waiting to your computer.", "开始共享，即可把等待中的内容发送到电脑。")
+    fun textCopied(computer: String?) = if (computer == null) t("Text from your computer copied", "已复制来自电脑的文字")
+        else t("Text from $computer copied", "已复制来自 $computer 的文字")
+    val channelTexts get() = t("Texts from computers", "来自电脑的文字")
+
+    // Shared controls
+    val expand get() = t("Expand", "展开")
+    val collapse get() = t("Collapse", "收起")
+    val expanded get() = t("Expanded", "已展开")
+    val collapsed get() = t("Collapsed", "已收起")
+    val dismiss get() = t("Dismiss", "关闭提示")
+    val close get() = t("Close", "关闭")
+
     // Updates
     fun update(version: String) = t("Update available: $version", "有新版本：$version")
 

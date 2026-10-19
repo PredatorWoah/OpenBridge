@@ -7,47 +7,40 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.openbridge.ui.Palette
 
 /**
- * "Share › OpenBridge" from the gallery or any app: copies the files into the outbox, where a paired computer
- * collects them. Starts sharing when it can (whole phone, permission granted); otherwise opens the app to tap the sun.
+ * "Share › OpenBridge" from the gallery or any app: puts the files (or the text) in the outbox, where a paired computer
+ * collects them. Starts sharing when it can (whole phone, permission granted); otherwise opens the app to start it.
  */
 class ShareReceiver : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Sharing.attach(this)
         val uris = sharedUris(intent)
+        val text = if (uris.isEmpty() && intent.action == Intent.ACTION_SEND) intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString() else null
+        if (text != null) { sendText(text); return }
         if (uris.isEmpty()) {
             Toast.makeText(this, S.shareFilesOnly, Toast.LENGTH_LONG).show()
             finish(); return
         }
         var done by mutableIntStateOf(0)
         setContent {
-            Box(Modifier.fillMaxSize().padding(20.dp), contentAlignment = Alignment.BottomCenter) {
-                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
-                    .background(Brush.verticalGradient(listOf(Color(0xF23C2878), Color(0xF7140E32))))
-                    .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(24.dp)).padding(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Box(Modifier.fillMaxSize().systemBarsPadding().padding(20.dp), contentAlignment = Alignment.BottomCenter) {
+                Column(Modifier.fillMaxWidth().glass(sheetShape, solid = true).padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(S.sendingToComputer, color = Palette.fg, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                     Text(S.ofCount(minOf(done + 1, uris.size), uris.size), color = Palette.muted, fontSize = 13.sp)
                     LinearProgressIndicator(progress = { done.toFloat() / uris.size }, Modifier.fillMaxWidth(),
-                        color = Palette.amber, trackColor = Color.White.copy(alpha = 0.12f))
+                        color = Palette.amber, trackColor = Palette.fg.copy(alpha = 0.12f))
                 }
             }
         }
@@ -60,28 +53,28 @@ class ShareReceiver : ComponentActivity() {
 
     private fun handOver(added: Int) {
         if (added == 0) { Toast.makeText(this, S.couldNotRead, Toast.LENGTH_LONG).show(); finish(); return }
-        when {
-            Sharing.server != null -> Toast.makeText(this, S.queued(added, Sharing.computer), Toast.LENGTH_SHORT).show()
-            Sharing.wholePhone && AllFiles.granted(this) -> {
-                Sharing.start()
-                Toast.makeText(this, S.queued(added, null), Toast.LENGTH_SHORT).show()
-                // Stay on screen until sharing is up: Android only lets a visible app start the background service
-                // that keeps it going after this closes.
-                val main = android.os.Handler(mainLooper)
-                val started = System.currentTimeMillis()
-                main.post(object : Runnable {
-                    override fun run() {
-                        if (Sharing.busy && System.currentTimeMillis() - started < 8_000) main.postDelayed(this, 100) else finish()
-                    }
-                })
-                return
-            }
-            else -> {
+        Sharing.handOver { sharing ->
+            if (sharing) Toast.makeText(this, S.queued(added, if (Sharing.paired) Sharing.computer else null), Toast.LENGTH_SHORT).show()
+            else {
                 Sharing.waitingNote(S.tapToSend(added))
                 startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             }
+            finish()
         }
-        finish()
+    }
+
+    /** Text shared to OpenBridge goes to the computer's clipboard (the subject, if any, is left out). */
+    private fun sendText(text: String) {
+        if (!Sharing.sendText(text)) {
+            Toast.makeText(this, if (text.isBlank()) S.shareFilesOnly else S.textTooLong, Toast.LENGTH_LONG).show()
+            finish(); return
+        }
+        Sharing.handOver { sharing ->
+            if (!sharing) Sharing.waitingNote(S.startToSend)
+            Toast.makeText(this, if (sharing && Sharing.paired) S.sentTo(Sharing.computer) else if (sharing) S.waitingForComputer else S.openToSend,
+                Toast.LENGTH_SHORT).show()
+            finish()
+        }
     }
 
     private fun sharedUris(intent: Intent): List<Uri> = when (intent.action) {

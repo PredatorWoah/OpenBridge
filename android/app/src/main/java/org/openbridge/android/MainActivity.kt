@@ -319,13 +319,6 @@ private fun BoxScope.TrustedSheet(visible: Boolean, onClose: () -> Unit) {
     }
 }
 
-private val glassShape = RoundedCornerShape(22.dp)
-
-private fun Modifier.glass(shape: Shape = glassShape, border: Color = Color.White.copy(alpha = 0.16f)) =
-    clip(shape)
-        .background(Brush.linearGradient(listOf(Color.White.copy(alpha = 0.14f), Color.White.copy(alpha = 0.04f))))
-        .border(1.dp, border, shape)
-
 @Composable
 private fun StatusPill(model: Sharing) {
     val on = model.paired || model.cable == Cable.FILE_TRANSFER
@@ -379,13 +372,6 @@ private fun UsbHint() {
     }
 }
 
-@Composable
-private fun GhostButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    Box(modifier.clip(CircleShape).background(Color.White.copy(alpha = 0.08f)).border(1.dp, Color.White.copy(alpha = 0.16f), CircleShape)
-        .clickable(onClick = onClick, role = Role.Button).padding(vertical = 14.dp), contentAlignment = Alignment.Center) {
-        Text(text, color = Palette.fg, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-    }
-}
 
 @Composable
 private fun SunsetButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {

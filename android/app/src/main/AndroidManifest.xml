@@ -37,6 +37,16 @@
                 <data android:mimeType="*/*" />
             </intent-filter>
         </activity>
+        <!-- Send clipboard (tile and notification): Android lets only the focused app read the clipboard, so this
+             invisible screen opens for a moment to read it. -->
+        <activity android:name=".SendClipboard" android:exported="false" android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" android:excludeFromRecents="true" android:taskAffinity="" />
         <service android:name=".ShareService" android:exported="false" android:foregroundServiceType="dataSync" />
+        <service android:name=".ClipboardTile" android:exported="true" android:label="@string/send_clipboard"
+            android:icon="@drawable/ic_tile_clipboard" android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
     </application>
 </manifest>
