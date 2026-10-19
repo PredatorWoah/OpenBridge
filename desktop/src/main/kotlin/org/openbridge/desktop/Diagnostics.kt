@@ -25,7 +25,6 @@ object Log {
 
     fun recent(): List<String> = synchronized(lines) { lines.toList() }
 }
-/*DIAG
 /** The text "Copy diagnostics" puts on the clipboard, for a bug report the user writes themselves. */
 fun diagnostics(state: AppState): String = buildString {
     appendLine("OpenBridge ${AppVersion.current} for ${if (Platform.windows) "Windows" else "Linux"}")
@@ -45,4 +44,3 @@ fun diagnostics(state: AppState): String = buildString {
     appendLine("Recent events:")
     Log.recent().forEach { appendLine(it) }
 }
-*/
