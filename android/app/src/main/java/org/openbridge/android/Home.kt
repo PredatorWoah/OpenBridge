@@ -40,6 +40,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -95,7 +97,7 @@ fun Home(actions: Actions) {
             .padding(horizontal = 20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Header(status, still) { settings = true }
             UpdatePill(actions)
-            Hero(active, connected, sharing || model.busy, status, still, actions::toggleSharing)
+            Hero(active, connected, sharing || model.busy, status, still, covered = settings, actions::toggleSharing)
             Where(model)
             Spacer(Modifier.height(12.dp))
             Column(Modifier.fillMaxWidth().then(if (still) Modifier else Modifier.animateContentSize(fluid())),
@@ -142,9 +144,12 @@ private fun Header(status: String, still: Boolean, onSettings: () -> Unit) {
     }
 }
 
-/** The big button: the current look's hero, driven by the shared engine. Tapping starts or stops sharing. */
+/**
+ * The big button: the current look's hero, driven by the shared engine. Tapping starts or stops sharing. It only
+ * animates while it can be seen: not when [covered] by Settings or scrolled out of view.
+ */
 @Composable
-private fun Hero(active: Boolean, connected: Boolean, sharing: Boolean, status: String, still: Boolean, onTap: () -> Unit) {
+private fun Hero(active: Boolean, connected: Boolean, sharing: Boolean, status: String, still: Boolean, covered: Boolean, onTap: () -> Unit) {
     val engine = remember { SunEngine() }
     val view = LocalView.current
     engine.onConnect = { view.performHapticFeedback(if (Build.VERSION.SDK_INT >= 30) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.VIRTUAL_KEY) }
@@ -152,12 +157,13 @@ private fun Hero(active: Boolean, connected: Boolean, sharing: Boolean, status: 
     val connectedNow by rememberUpdatedState(connected)
     var tick by remember { mutableLongStateOf(0L) }
     var frame by remember { mutableStateOf(SunEngine.Frame()) }
+    var inView by remember { mutableStateOf(true) }
     if (still) LaunchedEffect(active, connected) {
         // A still picture of where things stand: no orbit, no breathing, no ripples.
         repeat(90) { frame = engine.step(if (engine.state == SunEngine.State.SCAN) 0.0 else 1.0 / 60, active, connected, true) }
         frame = SunEngine.Frame(glow = if (connected) 0.5f else 0f)
         tick++
-    } else LaunchedEffect(engine) {
+    } else if (inView && !covered) LaunchedEffect(engine) {
         var last = 0L
         while (true) withFrameNanos { now ->
             val dt = if (last == 0L) 0.0 else ((now - last) / 1e9).coerceAtMost(1.0 / 30)
@@ -169,7 +175,8 @@ private fun Hero(active: Boolean, connected: Boolean, sharing: Boolean, status: 
     val press = remember { MutableInteractionSource() }
     val pressed by press.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed && !still) 0.95f else 1f, spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessMedium), label = "press")
-    BoxWithConstraints(Modifier.fillMaxWidth().padding(vertical = 6.dp), contentAlignment = Alignment.Center) {
+    BoxWithConstraints(Modifier.fillMaxWidth().padding(vertical = 6.dp).onGloballyPositioned { inView = it.boundsInWindow().height > 0f },
+        contentAlignment = Alignment.Center) {
         val side = min(maxWidth * 0.8f, 290.dp)
         Box(Modifier.size(side).graphicsLayer { scaleX = scale; scaleY = scale }) {
             // Drawn without clipping, so glows and ripples spread past the button.

@@ -33,8 +33,14 @@ class ShareService : Service() {
         private const val PAIR = "org.openbridge.android.PAIR"
         private const val DECLINE = "org.openbridge.android.DECLINE"
 
-        fun start(context: Context) = ContextCompat.startForegroundService(context, Intent(context, ShareService::class.java))
-        fun stop(context: Context) { context.stopService(Intent(context, ShareService::class.java)) }
+        /**
+         * A start that hasn't reached [onStartCommand] yet. Android ends the app when such a service is stopped before
+         * it entered the foreground, so it's left to stop itself there instead. Main thread only.
+         */
+        private var pending = false
+
+        fun start(context: Context) { ContextCompat.startForegroundService(context, Intent(context, ShareService::class.java)); pending = true }
+        fun stop(context: Context) { if (!pending) context.stopService(Intent(context, ShareService::class.java)) }
 
         /** Updates the ongoing notification, for example once a computer has paired. */
         fun refresh(context: Context) {
@@ -134,7 +140,9 @@ class ShareService : Service() {
         // Always enter the foreground first: Android requires it after startForegroundService.
         val type = if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0
         ServiceCompat.startForeground(this, SHARING_ID, sharing(this), type)
-        if (Sharing.server == null && !Sharing.busy) { stopSelf(); return START_NOT_STICKY }
+        pending = false
+        // Sharing stopped, or background sharing was turned off, while the service was starting.
+        if ((Sharing.server == null && !Sharing.busy) || !Sharing.inBackground) { stopSelf(); return START_NOT_STICKY }
         // Transfers continue with the screen off: keep the CPU and Wi-Fi awake while sharing.
         if (wakeLock == null) wakeLock = getSystemService(PowerManager::class.java)
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "OpenBridge:sharing").apply { setReferenceCounted(false); acquire(6 * 60 * 60 * 1000L) }
