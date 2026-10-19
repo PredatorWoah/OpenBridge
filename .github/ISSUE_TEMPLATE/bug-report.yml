@@ -1,0 +1,35 @@
+name: Bug report
+description: Something doesn't work as it should.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead. Screenshots welcome.
+    validations:
+      required: true
+  - type: input
+    id: devices
+    attributes:
+      label: Phone and computer
+      placeholder: Pixel 8 (Android 15) + Windows 11, OpenBridge 1.0.0
+    validations:
+      required: true
+  - type: dropdown
+    id: connection
+    attributes:
+      label: Connection
+      options:
+        - Wi‑Fi
+        - USB cable (File transfer)
+        - Fast USB (USB debugging)
+        - Phone hotspot
+        - USB tethering
+        - Not connected yet
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Paste from Settings › Copy diagnostics (phone and computer). It contains no secrets or file contents.
+      render: text

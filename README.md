@@ -6,204 +6,164 @@
 
 [![Latest release](https://img.shields.io/github/v/release/PredatorWoah/OpenBridge?sort=semver)](https://github.com/PredatorWoah/OpenBridge/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![Platforms](https://img.shields.io/badge/platforms-Android%208%2B%20%7C%20macOS%2013%2B%20%7C%20Windows%2010%2B-lightgrey)
+![Platforms](https://img.shields.io/badge/platforms-Android%208%2B%20%7C%20macOS%2013%2B%20%7C%20Windows%2010%2B%20%7C%20Linux-lightgrey)
 
 ![OpenBridge on an Android phone and a Mac: the phone's sunset arch glows gold while the Mac browses the phone's Camera folder and downloads a photo](docs/images/screens.png)
 
-**OpenBridge is a free, open-source way to move files between an Android phone and a Mac or Windows PC.** Plug in a cable and your Mac opens your phone, like on Windows. Or tap the sun on your phone and pair over encrypted Wi‑Fi with a 6‑digit code. Everything stays between your two devices: no accounts, no cloud, no tracking.
+**OpenBridge moves files and text between your Android phone and your Mac, Windows PC or Linux computer.** Free, open source, and private: no account, no cloud, no tracking. Everything goes straight from one device to the other, over your Wi‑Fi or a cable.
 
-- 🔌 **Plug in and it opens.** Choose File transfer on the phone and the Mac app finds it by itself, with shortcuts straight to Camera, Download, Screenshots, WhatsApp or Documents. No driver, no kernel extension, no macFUSE.
-- ☀️ **Tap the sun to share over Wi‑Fi.** The arch from the icon is the button. It turns gold when your Mac connects, by Wi‑Fi or by cable.
-- 🔒 **Encrypted, with 6-digit pairing, once.** Every Wi‑Fi request uses TLS. Pair once by checking that both screens show the same 6-digit code, like Bluetooth; after that your computer reconnects by itself whenever the phone is sharing. Forget a computer anytime on the phone.
-- 📁 **One folder or the whole phone**, your choice. Sharing can keep running in the background, with a notification to stop it.
-- 📶 **No addresses to type.** Phones sharing on your Wi‑Fi show up by themselves, and a phone you paired before connects on its own.
-- 🗂️ **A real file browser.** Thumbnails and a grid view, Quick Look with the space bar, folder sizes, search, a photos-and-videos filter, sorting, multi-select, whole folders both ways, drag and drop, new folders, and rename and delete (with a confirmation).
-- 📤 **Send from the phone.** In the gallery or any app, tap Share › OpenBridge: the files land in Downloads/OpenBridge on your computer.
+- 🔌 **Plug in and it opens.** Choose File transfer on the phone and OpenBridge opens it in its own window on the Mac and on Windows, with shortcuts to Camera, Download, Screenshots, WhatsApp and Documents. No drivers, no kernel extensions, no macFUSE.
+- ⚡ **Fast USB.** Turn on USB debugging once and the cable gets everything Wi‑Fi has: instant search, real folder sizes, and copies that continue after an interruption.
+- ☀️ **Tap to share over Wi‑Fi.** Tap the big button on the phone. Your computer finds it by itself; pair once by checking that both screens show the same 6 digits, and from then on it reconnects without asking.
+- 🔒 **Encrypted and pinned.** Every Wi‑Fi request uses TLS with the phone's certificate pinned, and each computer has its own secret you can revoke on the phone.
+- 🗂️ **A real file browser.** Thumbnails and a grid, Quick Look (Mac), sorting, multi-select, whole folders both ways, drag and drop, new folders, rename and delete, folder sizes, and search across the whole phone. Photos and videos turn up instantly.
+- 📤 **Send from the phone.** Share › OpenBridge in any app sends photos and files to your computer's *Downloads/OpenBridge*. Big videos go straight from where they are, without a copy eating your storage.
+- 💬 **Texts and clipboard.** Share text to OpenBridge, tap the **Send clipboard** tile, or type on the computer and send it to the phone. It lands on the other clipboard, with a history of what went where. Optionally, text you copy on the computer goes to the phone by itself.
 - 📸 **Import new photos.** One click copies only the camera photos and videos you haven't imported yet.
-- 📋 **Shared clipboard.** Send text from computer to phone and back.
-- 📺 **Screen mirroring (beta).** See and control your phone in a window on your computer, powered by [scrcpy](https://github.com/Genymobile/scrcpy). Start on the cable, then **go wireless** and unplug.
-- 🐘 **Big files are fine.** Files of 4 GB and more work both ways. Interrupted downloads and uploads carry on from where they stopped. A 7.83 GB file has been copied from a real phone.
-- 🪟 **Now on Windows too (beta).** A Phone Link alternative that works with any Android phone, Xiaomi, OPPO, vivo, OnePlus and Honor included, with no Microsoft account. In English and 简体中文.
-- 🔔 **Tells you about updates.** Each app checks GitHub once per launch and shows a link when a new version is out.
-- 🛡️ **Never overwrites.** Existing files are never replaced on either side; copies get a new name like "photo 2.jpg".
+- 📺 **Screen mirroring.** See and control your phone in a window, powered by [scrcpy](https://github.com/Genymobile/scrcpy). Start on the cable, then go wireless and unplug.
+- 📶 **Works on awkward Wi‑Fi.** Hotel, campus and guest networks often keep devices apart. OpenBridge notices and offers the way round: the phone's own hotspot, or the cable.
+- 🎨 **Three looks.** Dusk (the original sunset), plus Aurora and Tide, two fluid animated looks in preview, on the phone and the computer.
+- 🐘 **Big files are fine.** 4 GB and more both ways; an interrupted download or upload continues where it stopped.
+- 🛡️ **Never overwrites.** Existing files are never replaced on either side.
+- 🔔 **Updates itself.** When a new version is out, one click downloads it, checks it against the release's checksums and installs it.
+- 🌏 **English and 简体中文** on the phone and on Windows and Linux. Works with any Android phone, Xiaomi, OPPO, vivo, OnePlus and Honor included, with or without Google services.
 
-**Download:** get the Android APK, the Mac app (`.dmg`) and the Windows installer (`-Windows-Setup.exe`, or the portable `-Windows.zip`) from the [latest release](https://github.com/PredatorWoah/OpenBridge/releases/latest). See the [changelog](CHANGELOG.md) for what's new.
+## Download
 
-> **Status: preview, tested on real hardware.** Verified on a vivo X300 Pro and a MacBook Air M1, including a 7.83 GB USB download, plus a full automated test suite with a simulated phone and real Java/Swift TLS interoperability. USB File transfer stays **beta** until more phone brands are tested. See [verification status](docs/verification.md).
+Get everything from the [latest release](https://github.com/PredatorWoah/OpenBridge/releases/latest). See the [changelog](CHANGELOG.md) for what's new.
 
-## How it works
+| Device | File | How to install |
+| --- | --- | --- |
+| Android 8 or later | `OpenBridge-<version>.apk` | Open it on the phone and allow installing from your browser or file manager when asked. |
+| Mac, macOS 13 or later (Apple Silicon and Intel) | `OpenBridge-<version>-macOS.dmg` | Open it and drag OpenBridge to Applications. It isn't notarized, so the first time right-click the app › **Open** › **Open**. If macOS says it's damaged, run `xattr -dr com.apple.quarantine /Applications/OpenBridge.app`. |
+| Windows 10 or 11 (64-bit) | `OpenBridge-<version>-Windows-Setup.exe` | Run it; it installs for your account, no administrator needed. It isn't code-signed yet, so if SmartScreen warns, click **More info › Run anyway**. Prefer no installer? Unzip `-Windows.zip` and run `OpenBridge.exe`. |
+| Linux (x86-64) | `OpenBridge-<version>-Linux-amd64.deb` or `-Linux-x86_64.tar.gz` | `sudo apt install ./OpenBridge-<version>-Linux-amd64.deb` on Debian and Ubuntu, or unpack the tar.gz anywhere and run `OpenBridge/bin/OpenBridge`. |
 
-![The phone's sun is grey until a Mac connects, then gold; on the Mac a card for the plugged-in phone offers Open phone and folder shortcuts](docs/images/connect.png)
+Every release lists its files' SHA-256 in `SHA256SUMS.txt`, and the APK is signed with the OpenBridge key whose fingerprint is in [SECURITY.md](SECURITY.md#verifying-downloads).
 
-![How OpenBridge works: pick what to share, tap the sun, pair on the Mac, then browse and transfer](docs/images/how-it-works.svg)
+## Getting started
+
+![The three looks, Dusk, Aurora and Tide, each showing the phone's share button lit up](docs/images/looks.png)
+
+1. **On the phone,** open OpenBridge and tap the big button. The first time, allow *All files access* (or choose one folder to share instead).
+2. **On the computer,** open OpenBridge. Your phone shows up under **Phones nearby**; click it.
+3. **Compare the 6 digits** on both screens and tap **Pair** on the phone if they match. That's it: browse, drag files in and out, and next time it connects by itself.
+
+Prefer a cable? Plug in, unlock the phone and choose **File transfer**. The Mac and Windows apps open it straight away, no pairing needed.
+
+## Ways to connect
+
+| | Wi‑Fi | USB cable (File transfer) | Fast USB | Phone hotspot |
+| --- | --- | --- | --- | --- |
+| Set up | Pair once with a 6-digit code | Nothing: choose File transfer | Turn on USB debugging once | Turn on in the phone app (Android 13+) |
+| Needs the phone app | Yes | No | Yes | Yes |
+| Speed | Your Wi‑Fi's | Cable | Cable | Phone's Wi‑Fi |
+| Search and folder sizes | Instant | Counted over the cable | Instant | Instant |
+| Texts, send from phone, resuming | Yes | Mac: resuming downloads | Yes | Yes |
+| Encrypted | TLS | No (like any USB File transfer) | TLS | TLS |
+| Computers | Mac, Windows, Linux | Mac, Windows | Mac, Windows, Linux | Mac, Windows, Linux |
+
+**Fast USB** runs the same encrypted connection as Wi‑Fi through the cable, using Android's USB debugging. Turn it on once (Settings › About phone › tap **Build number** seven times, then Developer options › **USB debugging**), plug in, and tap **Allow** on the phone. OpenBridge starts sharing on the phone by itself and switches to Fast USB. Wi‑Fi isn't needed.
+
+**Phone hotspot** is for networks that keep devices apart (common in hotels, offices, campuses and guest Wi‑Fi). On the phone, open **Settings › Phone hotspot**, join the network it shows from your computer, and it connects. On Android 12 and earlier the button opens the system hotspot settings instead.
+
+**USB tethering** also works: turn it on on the phone and tap the button; OpenBridge prefers the cable. macOS doesn't support the RNDIS tethering some phones use, so on a Mac use File transfer or Fast USB instead.
+
+## What you can do
+
+### Browse and transfer
+
+Double-click folders to open them, switch between list and grid, sort by name, size or kind, and filter to photos and videos. Folder sizes fill in as the phone counts them. Select with ⌘ or Ctrl and ⇧ or Shift, then **Download**; several items go into a folder you choose, keeping their structure. Drop files or folders onto the window to upload. Rename and delete from the right-click or **⋯** menu (OpenBridge asks first, because the phone has no bin). The keyboard works too: arrows, Enter to open, Backspace to go up, Delete, F2 to rename, and Ctrl/⌘+A.
+
+**Search** looks through the whole folder you're in, every subfolder included: type and press Return. Photos, videos and music come back instantly from the phone's own index; other files within a few seconds.
+
+If a transfer is interrupted, **Resume** continues it from where it stopped, and reconnecting picks it up by itself.
+
+### Send from the phone
+
+In the gallery, Files or any app, select photos or files and tap **Share › OpenBridge**. They arrive in **Downloads/OpenBridge** on your computer as soon as it's connected, or the next time it is. If sharing is off, OpenBridge starts it. Large videos are sent from where they are, so sharing a 4 GB video doesn't need 4 GB of free space.
+
+### Texts and clipboard
+
+- **Phone to computer:** share text to OpenBridge from any app, tap the **Send clipboard** quick-settings tile (or the button in the app, or in the sharing notification). It's on your computer's clipboard a moment later.
+- **Computer to phone:** open **Texts**, type or paste, and **Send**; or **Send clipboard**. Turn on **Send copied text to the phone automatically** to skip the button.
+- Both sides keep a short history of texts with a Copy button. Nothing leaves your two devices.
+
+### Import new photos
+
+**Import new photos** (on the phone's card or in **⋯**) copies the camera's photos and videos you haven't imported from that phone yet into a folder you pick once, and remembers them.
+
+### Screen mirroring
+
+See your phone's screen in a window and use it with the mouse and keyboard, with the open-source [scrcpy](https://github.com/Genymobile/scrcpy) built in. Turn on USB debugging (as for Fast USB), plug in and click **Mirror screen**. Then **Go wireless** (Mac) or **Mirror over Wi‑Fi** (Windows, Linux) and unplug. Text you copy on either side is copied to the other. USB debugging gives a trusted computer broad control of the phone; see [SECURITY.md](SECURITY.md#screen-mirroring-usb-debugging) and turn it off when you don't need it.
+
+### Looks
+
+Pick **Dusk**, **Aurora** or **Tide** in Settings on each device. Aurora's ribbons drift across a starry sky and its halo shimmers; in Tide the waves roll and the glass pool fills with water when your computer connects. Aurora and Tide are in preview: tell us what you think. With your system's reduce-motion setting on, the backgrounds hold still.
+
+### Updates and help
+
+Each app checks GitHub once per launch. When there's a new version, click **Update**: it's downloaded, checked against the release's `SHA256SUMS.txt`, and installed (on Android, the system asks you to confirm). Something not working? **Settings › Copy diagnostics** copies a short report, with no secrets or file contents, to paste into an [issue](https://github.com/PredatorWoah/OpenBridge/issues/new/choose).
 
 ## Why OpenBridge
 
-Apple and Android don't talk to each other out of the box, so most Mac users end up with a paid app, a cloud service, or Google's old Android File Transfer, which Google has discontinued. Here is where OpenBridge stands.
+Apple and Android don't talk to each other out of the box, and Microsoft's Phone Link needs an account and works best with a few brands. Most people end up with a paid app, a cloud service, or Google's old Android File Transfer, which Google has discontinued.
 
-**Better than most paid options at:**
-
-| | OpenBridge | Typical paid apps |
+| | OpenBridge | Typical alternatives |
 | --- | --- | --- |
-| Price | Free forever, MIT licensed | Subscription or a paid licence, often with a limited free tier |
+| Price | Free forever, MIT licensed | Subscription or paid licence, often with a limited free tier |
 | Your data | Stays on your devices. No account, no cloud relay, no analytics | Many need an account or route files through their servers |
+| Phones | Any Android 8+ phone, with or without Google services | Often best with one brand, or need Google services |
+| Computers | Mac, Windows and Linux | Usually one |
 | Cable and Wi‑Fi | Both, in one app | Usually one or the other |
 | Wi‑Fi security | TLS with a pinned certificate and Bluetooth-style code pairing | Often a plain web page or an account login |
 | System changes | None: no drivers, kernel extensions or macFUSE | Some mounters need extra system components |
-| Safety | Never overwrites a file; partial uploads are removed | Varies; overwrite prompts are easy to click through |
+| Safety | Never overwrites a file; partial uploads are cleaned up | Overwrite prompts are easy to click through |
 | Trust | Every line is public and reviewable | Closed source |
-| Extras | Clipboard sharing and screen mirroring included | Often separate apps or paid add-ons |
-| Size | A few MB, native on Apple Silicon and Intel | Often much larger |
 
-**What it lacks compared with paid apps (stated plainly):**
+What it doesn't do, plainly:
 
-- **No Finder drive.** Your phone opens in OpenBridge's own window, not as a disk in Finder's sidebar. That needs Apple's File Provider system and a paid Apple developer account; it is on the list after 1.0.
-- **No sync or backup.** It moves files you choose; it doesn't mirror folders or back up the phone.
-- **No notifications or SMS on the Mac.** Clipboard and mirroring are in; messages are deliberately out.
-- **Mirroring needs USB debugging** turned on in the phone's Developer options, and starts on the cable (it can then continue over Wi‑Fi).
-- **Not notarized and not on Google Play (yet).** macOS asks you to confirm the first launch, and Android asks you to allow installing the APK.
-- **Dragging files out to Finder** downloads them first, so large files take a moment before they appear.
-- **Young.** Tested on one phone and one Mac so far. Reports from other phones are very welcome.
+- **No Finder or Explorer drive.** The phone opens in OpenBridge's own window, not as a disk in the sidebar.
+- **No sync or backup.** It moves what you choose; it doesn't mirror folders or back up the phone.
+- **No notifications, calls or SMS.** Files, text and the screen; messages are deliberately out.
+- **Not notarized or code-signed, and not on Google Play.** macOS and Windows ask you to confirm the first launch, and Android asks you to allow installing the APK.
 
-## On Windows (beta)
+## Privacy and security
 
-Microsoft's Phone Link needs a Microsoft account, works best with Samsung and Honor, and often can't connect to phones from Chinese brands or without Google services. OpenBridge for Windows needs none of that: it talks straight to the OpenBridge app on your phone over your own Wi‑Fi.
+OpenBridge has no servers. Files and text go only between your phone and computers you paired, over TLS on Wi‑Fi or over your cable. Each app makes one anonymous request to GitHub per launch to check for updates. The phone shares only while you've turned sharing on, with a notification while it runs in the background, and you can forget a computer on the phone at any time. The details, including what USB File transfer and USB debugging allow, are in [SECURITY.md](SECURITY.md); the wire protocol is in [docs/protocol.md](docs/protocol.md).
 
-1. Download `OpenBridge-<version>-Windows-Setup.exe` and run it. It installs for your account only (no administrator prompt) and adds OpenBridge to the Start menu and desktop. Prefer no installer? Unzip `OpenBridge-<version>-Windows.zip` anywhere and run `OpenBridge.exe`. The app isn't code-signed yet, so if SmartScreen says *Windows protected your PC*, click **More info › Run anyway**. Allow it on private networks if the firewall asks.
-2. Tap the sun on the phone. It appears under **Phones nearby** (if it doesn't, set your Wi‑Fi to *Private* in Windows settings, or type the address the phone shows); click it, check that both screens show the same 6 digits, and tap **Pair** on the phone.
-3. Browse with thumbnails, sort, select with Ctrl and Shift, download files or whole folders, drop files onto the window to upload, and use **⋯** for new folders and the clipboard. Interrupted downloads continue where they stopped.
+## Help test it
 
-**By cable:** choose File transfer on the phone and OpenBridge offers **Open in File Explorer**, where Windows shows the phone like a USB drive. **Mirror screen** shows and controls the phone in a window with the built-in scrcpy, after you turn on USB debugging (see [Screen mirroring](#screen-mirroring-beta)).
-
-The Windows app follows Windows' display language: English or Simplified Chinese. It needs 64-bit Windows 10 or 11 and includes its own Java runtime.
-
-## Requirements
-
-- Android 8.0/API 26 or later, private IPv4 Wi-Fi or USB tethering (see below), and a writable folder in internal storage or an SD card.
-- A Mac (Apple Silicon or Intel) with macOS 13 or later, or a 64-bit Windows 10 or 11 PC. Both devices must be reachable on the same local network; guest Wi-Fi/client isolation can prevent connections.
-- Development: JDK **17**, Gradle **8.13**, Android SDK platform **35**, and Android Studio or the command-line SDK. Mac builds need Xcode command-line tools/Swift 5.9 or later. These tools and dependency downloads are build-time requirements only.
-
-## Install a release
-
-1. **Android:** download `OpenBridge-<version>.apk` from the release onto your phone and open it. Allow installing from your browser or file manager when asked.
-2. **Mac:** download `OpenBridge-<version>-macOS.dmg`, open it, and drag OpenBridge onto the Applications folder. The app is not notarized, so the first time, right-click it and choose **Open**, then **Open** again. If macOS says the app is damaged, run `xattr -dr com.apple.quarantine /Applications/OpenBridge.app` in Terminal.
+OpenBridge is tested on real hardware (so far a vivo X300 Pro and a MacBook Air M1) and by automated tests on every change. Every phone brand bends USB a little, so reports from other phones are the most useful thing you can give. The [20-minute checklist](docs/verification.md#test-it-on-your-phone) walks through everything; then file a [device report](https://github.com/PredatorWoah/OpenBridge/issues/new?template=device-report.yml).
 
 ## Build from source
+
+You need JDK 17 and Gradle 8.13 or later (no Gradle wrapper binary is checked in), the Android SDK with platform 35 (set `ANDROID_HOME` or `sdk.dir` in `local.properties`), and for the Mac app, Xcode's command-line tools with Swift 5.9 or later.
 
 ```sh
 git clone https://github.com/PredatorWoah/OpenBridge.git
 cd OpenBridge
-# Install Gradle 8.13 using your package/version manager, or its official distribution.
-# No unverified Gradle wrapper binary is checked into this repository.
-# Set ANDROID_HOME to your SDK, or set sdk.dir in local.properties.
-gradle :android:app:assembleDebug
+gradle :android:app:assembleDebug                    # the phone app
 adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+gradle -PdesktopOnly :desktop:run                    # the Windows and Linux app, on the computer you're on
+bash scripts/build-macos.sh && open macos/build/OpenBridge.app   # the Mac app, on a Mac
 ```
 
-Alternatively, open the repository root in Android Studio and select Gradle 8.13 as the local Gradle installation. Use JDK 17 for Gradle. Install SDK 35 when prompted; run the `android.app` application configuration on a phone. Android Studio may offer to generate its own wrapper.
+The Mac script makes an app with a local ad-hoc signature. `-PdesktopOnly` leaves the Android app out of the build for machines without the Android SDK.
 
-On a Mac:
-
-```sh
-bash scripts/build-macos.sh
-open macos/build/OpenBridge.app
-```
-
-The script makes an application bundle with a **local ad-hoc signature**. It does not notarize or publish a binary. You can also open `macos/Package.swift` in Xcode and run the OpenBridge executable. Allow local network access if macOS prompts. CI produces a debug APK and an ad-hoc signed Mac app artifact on successful builds; neither is a production release.
-
-## Transfer files
-
-1. Put both devices on the same trusted LAN. Open Android OpenBridge and pick what to share:
-   - **Whole phone** (the default): allow *All files access* for OpenBridge when Android asks (Settings → Apps → Special app access → All files access). The Mac then sees all of internal storage and any SD card. Android keeps `Android/data` and `Android/obb` private to each app.
-   - **One folder**: select a folder under internal storage or the SD card in the system picker. Android disallows some roots; use a subfolder such as `Documents/OpenBridge`. Cloud providers are rejected.
-2. **Tap the sun.** It circles the arch while sharing starts, then the phone shows its address and port. With **Keep sharing in the background** on (the default), you can leave the app: a notification shows that sharing is on and has a Stop button.
-3. On the Mac, click **Pair over Wi‑Fi**. Your phone appears under **Phones nearby**; click it (or type the address and port) and press **Pair**. Both screens show a 6-digit code: tap **Pair** on the phone **only if they match**. If they differ, tap Cancel; another device may be trying to connect. When pairing succeeds the sun lights up gold on both devices.
-4. Click **Open phone** to browse:
-   - Double-click a folder to open it; click the path to go back. Switch between list and grid, sort by name, size or kind, search the folder, or show only photos and videos. Folders show their total size over Wi‑Fi.
-   - Select files (⌘-click and ⇧-click work like Finder, ⌘A selects all) and press **Download**. Several files or folders go into a folder you choose, keeping the folder structure.
-   - Drop files or folders from Finder onto the window to upload them, or use **⋯ › Upload…**. Drag a file out to Finder to copy it.
-   - Press the space bar to Quick Look a photo, video or document.
-   - Right-click to **Rename…** or **Delete…**, or press ⌘⌫ to delete. OpenBridge asks first: the phone has no bin.
-   - **⋯ › New Folder…**, and **⋯ › Send Mac clipboard to phone / Copy phone clipboard to Mac** (over Wi‑Fi; reading the phone's clipboard needs OpenBridge on screen on the phone).
-   - Progress shows in the bar at the bottom. If a transfer is interrupted, **Resume** continues it, picking up a download where it stopped. If the phone was unplugged or disconnected, reconnecting it continues the transfer by itself.
-5. Press **Stop sharing** on Android (in the app or the notification) when finished. Losing or changing Wi-Fi, or unplugging a USB tethering cable, also stops sharing. Your computer stays paired: next time you tap the sun, it reconnects by itself. To stop a computer from reconnecting, tap **Trusted computers** on the phone and **Forget** it.
-
-Existing filenames are rejected on both sides, before any data is transferred. On Android, names are compared ignoring case (`Photo.JPG` collides with `photo.jpg`), and the characters `" * : < > ? |` are not allowed. Choose another name (rename the source before upload). Downloads use temporary sibling files; uploads use temporary SAF documents and publish only after the declared body is received. On a normal disconnection/cancellation, partial files are removed. After a process kill or power loss, remove any leftover `.openbridge-part-*` Android documents (hidden from the Mac's file list) or `.openbridge-*.part` Mac files manually. A cancellation exactly at upload completion can mean the phone committed the file before the Mac received its acknowledgement; refresh before retrying.
-
-### Over a USB cable (File transfer, like on Windows) · beta
-
-No app or pairing is needed on the phone for this. **Beta:** it has passed automated tests against a simulated phone but not yet on real phones. Please report your phone model if it is not found or a transfer fails.
-
-1. Plug the phone into the Mac and unlock it.
-2. Pull down the notification shade, tap the **USB** notification (often "Charging this device via USB"), and choose **File transfer**.
-3. Open the Mac app. It notices the phone by itself: the sun whips around, lights up, and a card for your phone appears. Click **Open phone**, or a shortcut such as **Camera** or **Download**. Tick **Open automatically when I plug in** to skip the card next time.
-
-Good to know:
-
-- If Photos, Image Capture, Android File Transfer, OpenMTP or a similar app is using the phone, the Mac app cannot open it. OpenBridge releases it from macOS's background photo import service automatically; quit any other such app.
-- Files are never replaced. Names are compared ignoring case, like the phone's storage does.
-- Large files work both ways, including files of 4 GiB and more. Uploads check the phone's free space first.
-- Keep the phone unlocked. Some phones close the connection when the screen locks.
-
-### Send from the phone
-
-In the gallery, Files or any app, select photos or files and tap **Share › OpenBridge**. If your computer is connected (or connects later), they land in **Downloads/OpenBridge**, and the phone drops its copy once they've arrived. If sharing is off, OpenBridge starts it (whole phone mode) or asks you to tap the sun. Files waiting to send are listed on the phone's main screen.
-
-### Import new photos
-
-Click **Import new photos** on the phone's card (Mac) or in the **⋯** menu. The first time, pick a folder. OpenBridge copies the camera's photos and videos (DCIM/Camera) that it hasn't imported from that phone before, and remembers them, so next time only the new ones come over. It works over Wi‑Fi, and on the Mac over USB too.
-
-### Screen mirroring (beta)
-
-See your phone's screen in a window on the Mac and use it with the mouse, trackpad and keyboard. It runs the open-source [scrcpy](https://github.com/Genymobile/scrcpy) server on the phone, built into OpenBridge, so there is nothing else to install.
-
-1. Once: turn on USB debugging. On the phone, open Settings › About phone and tap **Build number** seven times, then Settings › System › Developer options › **USB debugging**.
-2. Plug in the phone, open it in OpenBridge, and click **Mirror screen** in the sidebar.
-3. The first time, the phone asks **Allow USB debugging?** Tick *Always allow from this computer* and tap **Allow**.
-4. Want it without the cable? Click **Go wireless** under the screen: the phone switches to Wi‑Fi and you can unplug. Closing the window switches the phone back to cable-only debugging. Use it on a network you trust (see [SECURITY.md](SECURITY.md#screen-mirroring-usb-debugging)).
-
-Click to tap, drag to swipe, scroll to scroll, and type with the keyboard. If the picture ever stalls, it recovers on its own within a second. Right click is Back, and the buttons below the screen are Back, Home, Recent apps, volume, power and rotate. Text you copy on either side is copied to the other. USB debugging gives a trusted computer broad control of the phone; see [SECURITY.md](SECURITY.md#screen-mirroring-usb-debugging) and turn it off when you don't need mirroring.
-
-### Wi-Fi vs USB File transfer
-
-| | Wi-Fi (and USB tethering) | USB File transfer |
-| --- | --- | --- |
-| Needs the Android app | Yes | No |
-| What the Mac can see | The folder you picked, or the whole phone if you chose **Whole phone** | Everything Android shares in File transfer mode (usually all of internal storage and the SD card) |
-| Protection | TLS, paired by matching a 6-digit code | The cable and your choice of File transfer on an unlocked phone; no encryption, as with any USB file transfer |
-| Stops when | You press Stop sharing (or leave the app, if background sharing is off), or the network drops | You unplug, lock the phone (on some phones), or choose another USB mode |
-
-Choose File transfer only on a Mac you trust, and switch the phone back to *No data transfer* when you are done.
-
-### Over a USB cable with tethering (alternative)
-
-This uses the OpenBridge Android app and the same encrypted protocol as Wi-Fi, over the cable.
-
-1. Plug the phone into the Mac and switch on *USB tethering* (usually under Settings → Network → Hotspot & tethering). Return to OpenBridge.
-2. Tap the sun. When tethering is on, OpenBridge prefers the cable over Wi-Fi.
-3. Pair on the Mac exactly as above, using the IP and port on the phone. Wi-Fi is not needed.
-
-Limitations, stated plainly:
-
-- **Android does not let apps turn on tethering**, so you switch it on yourself each time you plug in.
-- **macOS supports NCM tethering** (used by most Android 11+ phones, including Pixels) but **not RNDIS**, which many older phones and some Samsung models still use. If the Mac never shows a new network interface (System Settings → Network) after tethering is on, your phone uses RNDIS and USB mode will not work on a Mac. Use Wi-Fi.
-- Some carriers block tethering entirely.
-- Tethering also shares the phone's internet, and macOS may route its traffic through it, **using mobile data**. Put Wi-Fi above the phone in System Settings → Network → ⋯ → Set Service Order, or turn off mobile data while transferring.
-
-If a connection fails, check that sharing is still on, copy the current port/credentials, allow local network access on Mac, and disable Wi-Fi client isolation. Public IPs, hostnames, IPv6, cellular-only connections, and VPN interfaces are intentionally unsupported. Do not forward the port or tunnel the server to the internet.
-
-## Development and checks
+### Checks
 
 ```sh
-bash scripts/test-protocol.sh             # JDK 17+, no external test dependencies
-python3 scripts/test-tls.py               # real Java TLS server + stdlib Python client
-python3 scripts/check-repository.py       # XML/plist, source and repository checks
+bash scripts/test-protocol.sh             # protocol tests and fuzzing (JDK 17+, no other dependencies)
+python3 scripts/test-tls.py               # a real Java TLS server against a Python client
+python3 scripts/check-repository.py       # manifest, plist, versions, changelog and repository checks
+bash scripts/test-mtp.sh                  # USB (MTP) tests against a simulated phone, with any Swift 5.9+ (Linux too)
 gradle :protocol:check :android:app:assembleDebug :android:app:lintDebug
-swift test --package-path macos           # on macOS; interop test requires fixture below
-gradle -PdesktopOnly :windows:test :windows:run   # the Windows app (also runs on Linux and macOS for development)
+gradle -PdesktopOnly :desktop:test        # the desktop client against the real Java server
+swift test --package-path macos           # on a Mac
 ```
 
-To run the actual Java-server/Swift-client TLS interoperability test on a Mac:
+To run the Java server against the Swift client on a Mac:
 
 ```sh
 bash scripts/test-protocol.sh
@@ -215,15 +175,16 @@ FIXTURE_KEYSTORE=/tmp/openbridge-fixture.p12 swift test --package-path macos
 rm /tmp/openbridge-fixture.p12
 ```
 
-The integration test is explicitly skipped when fixture variables are missing. CI supplies them. CI builds and lints Android on Linux and builds/tests the SwiftUI app on macOS. See [protocol](docs/protocol.md), [security](SECURITY.md), and the [device checklist](docs/verification.md).
+### Layout
 
-## Structure and scope
+- `protocol/`: the OB01 server and storage interface in plain Java, with its tests and fuzzer. No Android dependencies.
+- `android/app/`: the phone app (Kotlin, Jetpack Compose).
+- `desktop/`: the Windows and Linux app (Kotlin, Compose for Desktop), including USB browsing through Windows Portable Devices.
+- `shared/compose/`: the looks, the animated share button and the update check, shared by the phone and desktop apps.
+- `macos/`: the Mac app (SwiftUI), its pinned TLS client, a native USB File transfer (MTP) and ADB stack, and tests with a simulated phone.
+- `third_party/scrcpy/`: the licence and pinned checksums of the bundled scrcpy.
+- `docs/`: the [protocol](docs/protocol.md), [testing](docs/verification.md) and [releasing](docs/releasing.md).
 
-- `protocol/`: small Java streaming handler and storage interface, executable tests, CI-only TLS fixture. No Android dependencies.
-- `android/app/`: Kotlin/Compose UI, local Wi-Fi/USB-tethering listener, AndroidKeyStore TLS identity, SAF-backed storage.
-- `macos/`: SwiftUI app, independent Swift wire codec, pinned TLS channel, streaming transfers, USB File transfer (MTP) and a native ADB client for mirroring, with tests.
-- `third_party/scrcpy/`: license and pinned checksum of the scrcpy server bundled for mirroring.
-- `windows/`: Kotlin Compose for Desktop app for Windows (Wi‑Fi client, discovery, scrcpy for mirroring), sharing the sun animation in `shared/compose` with Android.
-- `docs/`: protocol contract, limitations, and manual verification.
+## License
 
-The `Store` interface separates document access from wire handling; `BridgeCore` separates networking from the Mac UI. Remote deletion, notifications and folder sync are deliberately not implemented.
+[MIT](LICENSE). Screen mirroring bundles the unmodified [scrcpy](https://github.com/Genymobile/scrcpy) server and Windows/Linux builds (Apache-2.0); see `third_party/scrcpy`.
