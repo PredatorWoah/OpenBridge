@@ -943,7 +943,7 @@ class AppState {
             var id = ""
             var entries = listing("", emptyList())
             names.forEachIndexed { depth, name ->
-                val next = entries.firstOrNull { it.directory && it.name == name } ?: throw BridgeException("“${names.joinToString(" › ")}” is no longer on the phone.")
+                val next = entries.firstOrNull { it.directory && it.name == name } ?: throw BridgeException(S.goneFromPhone(names.joinToString(" › ")))
                 id = next.id
                 entries = listing(id, names.take(depth + 1))
             }
@@ -952,7 +952,7 @@ class AppState {
         return when (job) {
             is Job.Download -> {
                 val file = folder(job.at).second.firstOrNull { !it.directory && it.name == job.entry.name }
-                    ?: throw BridgeException("“${job.entry.name}” is no longer on the phone.")
+                    ?: throw BridgeException(S.goneFromPhone(job.entry.name))
                 Job.Download(file, job.target, job.at)
             }
             is Job.Upload -> Job.Upload(job.file, folder(job.at).first, job.at, job.name)
