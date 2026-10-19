@@ -407,6 +407,8 @@ private struct MirrorScreen: NSViewRepresentable {
 /// The phone's screen, mirrored and controllable over USB.
 struct MirrorView: View {
     @StateObject private var session = MirrorSession()
+    /// Redraws in a newly chosen look (without restarting mirroring, as rebuilding the view would).
+    @ObservedObject private var looks = LookStore.shared
 
     var body: some View {
         ZStack {
@@ -470,7 +472,7 @@ struct MirrorView: View {
 
     private func status(title: String, text: String, spinner: Bool) -> some View {
         VStack(spacing: 12) {
-            SunArch(active: spinner, connected: false, centerY: 0.5, radius: 42, startScanning: spinner)
+            Hero(active: spinner, connected: false, centerY: 0.5, radius: 42, startScanning: spinner)
                 .frame(width: 160, height: 140)
             Text(title).font(.system(size: 18, weight: .bold, design: .rounded))
             Text(text).font(.system(size: 13)).foregroundStyle(Palette.muted).multilineTextAlignment(.center).frame(maxWidth: 300)

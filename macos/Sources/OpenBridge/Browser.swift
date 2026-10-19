@@ -447,7 +447,9 @@ private func symbol(for kind: FileKind) -> (String, Color) {
     }
 }
 
-private let selectionFill = LinearGradient(colors: [Palette.violet.opacity(0.55), Palette.pink.opacity(0.35)], startPoint: .leading, endPoint: .trailing)
+private var selectionFill: LinearGradient {
+    LinearGradient(colors: [Palette.violet.opacity(0.55), Palette.pink.opacity(0.35)], startPoint: .leading, endPoint: .trailing)
+}
 
 /// "2.3 GB", "≥ 41 GB" when the phone stopped counting early, or "—" before it's measured.
 private func folderText(_ size: FolderSize?) -> String {

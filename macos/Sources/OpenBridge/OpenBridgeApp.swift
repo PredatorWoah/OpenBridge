@@ -65,7 +65,7 @@ struct Breathing: ViewModifier {
 // MARK: - Screens
 
 struct RootView: View {
-    @StateObject private var model = BrowserModel()
+    @ObservedObject var model: BrowserModel
     @State private var wifi = false
     @AppStorage("openAutomatically") private var openAutomatically = false
     @Environment(\.openWindow) private var openWindow
@@ -74,7 +74,8 @@ struct RootView: View {
 
     var body: some View {
         ZStack {
-            Palette.background.ignoresSafeArea()
+            Backdrop(energy: model.connected ? 1 : 0, level: model.transfer.map { $0.done ? 0 : $0.fraction } ?? 0)
+                .ignoresSafeArea()
             if browsing {
                 BrowserScreen(model: model, mirror: { openWindow(id: "mirror") })
                     .transition(.asymmetric(insertion: .scale(scale: 1.04).combined(with: .opacity), removal: .opacity))
@@ -126,7 +127,7 @@ struct ConnectScreen: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .top) {
-                SunArch(active: true, connected: model.connected, centerY: 0.27, radius: 62, startScanning: true)
+                Hero(active: true, connected: model.connected, centerY: 0.27, radius: 62, startScanning: true, label: title)
                     .allowsHitTesting(false)
                     .ignoresSafeArea()
                 VStack(spacing: 6) {
@@ -413,13 +414,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct OpenBridgeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    /// One model for the app, so every window and Settings see the same connection.
+    @StateObject private var model = BrowserModel()
+    @StateObject private var looks = LookStore.shared
 
     var body: some Scene {
-        WindowGroup { RootView() }
+        // A new look rebuilds the window, so every colour and picture follows it.
+        WindowGroup { RootView(model: model).id(looks.look) }
             .windowStyle(.hiddenTitleBar)
             .defaultSize(width: 980, height: 660)
         Window("Phone Screen", id: "mirror") { MirrorView() }
             .windowStyle(.hiddenTitleBar)
             .defaultSize(width: 380, height: 780)
+        Settings { SettingsView(model: model) }
     }
 }
