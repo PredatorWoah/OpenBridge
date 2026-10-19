@@ -96,6 +96,8 @@ class AppState {
     private var current: SavedPhone? = null
     /** The cable a Fast USB connection runs through. */
     private var usbSerial: String? = null
+    /** A cable whose Fast USB didn't work when switching to it from Wi‑Fi: not tried again until it's plugged in anew. */
+    private var noSwitch: String? = null
     /** Who the open phone is, for imports and to continue transfers: its fingerprint ID, or its USB device. */
     private var openKey: String? = null
     /** Off after Disconnect, so the phone doesn't reconnect straight away; on again with the next connection. */
@@ -316,7 +318,12 @@ class AppState {
 
     /** Moves the open phone to another connection to the same phone (Wi‑Fi ⇄ Fast USB), staying in the same folder. */
     private fun switchTo(phone: BridgeClient, via: Transport, serial: String?) = run {
-        val (listed, trail) = follow(phone, path.drop(1).map { it.second })
+        // A switch that fails keeps the connection that works, and isn't tried again until the cable is plugged in anew.
+        val (listed, trail) = try { follow(phone, path.drop(1).map { it.second }) } catch (e: Exception) {
+            Log.add("Staying on ${transport.english}: ${e.message ?: e.javaClass.simpleName}")
+            ui { noSwitch = serial }
+            return@run
+        }
         connection++   // IDs may differ between the phone's listeners: a later Resume finds its files by name
         Log.add("Switched to ${via.english}")
         ui {
@@ -592,11 +599,12 @@ class AppState {
         usbLinks = links
         val open = source
         if (open != null && transport == Transport.FAST_USB && links.none { it.serial == usbSerial && it.ready }) { cableOut(); return }
+        if (links.none { it.serial == noSwitch }) noSwitch = null
         if (busy || !autoConnect) return
         val known = links.firstOrNull { it.ready && it.phone != null } ?: return
         when {
             open == null -> connectUsb(known)
-            transport == Transport.WIFI && current != null -> links.firstOrNull { it.ready && it.phone == current }?.let { link ->
+            transport == Transport.WIFI && current != null -> links.firstOrNull { it.ready && it.phone == current && it.serial != noSwitch }?.let { link ->
                 switchTo(link.phone!!.overUsb(link.port), Transport.FAST_USB, link.serial)
             }
         }
