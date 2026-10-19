@@ -76,6 +76,20 @@ public enum Wire {
         return bytes[0] == 10 || (bytes[0] == 172 && (16...31).contains(bytes[1])) ||
             (bytes[0] == 192 && bytes[1] == 168)
     }
+    /// `name` shortened to at most `limit` UTF-8 bytes (Mac file names hold 255), cut at a character and keeping the
+    /// extension: "很长的名字….txt". Phones allow longer names than the Mac over USB.
+    public static func fitted(_ name: String, limit: Int = 255) -> String {
+        guard name.utf8.count > limit else { return name }
+        let ext = (name as NSString).pathExtension
+        let suffix = ext.isEmpty || ext.utf8.count > limit / 4 ? "" : "." + ext
+        var base = ""
+        for character in suffix.isEmpty ? name : (name as NSString).deletingPathExtension {
+            if base.utf8.count + String(character).utf8.count + suffix.utf8.count > limit { break }
+            base.append(character)
+        }
+        return base + suffix
+    }
+
     public static func validateName(_ name: String) throws {
         guard !name.isEmpty, name != ".", name != "..", name.utf8.count <= 255,
               !name.contains("/"), !name.contains("\\"),
