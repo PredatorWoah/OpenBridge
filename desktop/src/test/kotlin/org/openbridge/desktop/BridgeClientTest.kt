@@ -32,6 +32,7 @@ class BridgeClientTest {
     private lateinit var phone: File
     private lateinit var server: SSLServerSocket
     private lateinit var fingerprint: ByteArray
+    private lateinit var tls: SSLContext
     private val secret = ByteArray(32) { 0x5a }
     private var clip = "phone clipboard"
     private val sent = linkedMapOf("1" to ByteArray(70_000) { (it % 13).toByte() })
@@ -52,7 +53,7 @@ class BridgeClientTest {
         val keys = KeyStore.getInstance("PKCS12").apply { keystore.inputStream().use { load(it, "test-only".toCharArray()) } }
         fingerprint = MessageDigest.getInstance("SHA-256").digest(keys.getCertificate("fixture").encoded)
         val managers = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm()).apply { init(keys, "test-only".toCharArray()) }
-        val tls = SSLContext.getInstance("TLS").apply { init(managers.keyManagers, null, null) }
+        tls = SSLContext.getInstance("TLS").apply { init(managers.keyManagers, null, null) }
         val store = FileStore(listOf(FileStore.Root("Internal storage", phone))) { file, size -> "jpeg:${file.name}:$size".toByteArray() }
         val clipboard = object : Clipboard {
             override fun read() = clip
@@ -224,6 +225,36 @@ class BridgeClientTest {
         client.collected(text.entry)
         assertTrue(texts.isEmpty())
         assertEquals(PhoneInfo("0.13.0", 18, "vivo X300 Pro"), client.info())
+    }
+
+    @Test
+    fun aPingCountsAnyAnswer() {
+        client().ping()
+        // Nothing listens there any more: lost.
+        val stopped = java.net.ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")).use { it.localPort }
+        assertTrue(assertFailsWith<BridgeException> { BridgeClient("127.0.0.1", stopped, fingerprint, secret, Transport.FAST_USB).ping(1_000) }.lost)
+        // The phone no longer knows this computer: forgotten, not just gone.
+        assertTrue(assertFailsWith<BridgeException> { BridgeClient("127.0.0.1", server.localPort, fingerprint, ByteArray(32), Transport.FAST_USB).ping() }.forgotten)
+    }
+
+    @Test
+    fun closingCutsARequestThatHangs() {
+        // A phone that finished the handshake and then went quiet, as when it left the Wi‑Fi mid-request.
+        val quiet = tls.serverSocketFactory.createServerSocket(0, 4, InetAddress.getByName("127.0.0.1")) as SSLServerSocket
+        val held = java.util.concurrent.CopyOnWriteArrayList<java.net.Socket>()
+        thread(isDaemon = true) {
+            while (!quiet.isClosed) runCatching { (quiet.accept() as SSLSocket).also { held += it }.startHandshake() }
+        }
+        try {
+            val client = BridgeClient("127.0.0.1", quiet.localPort, fingerprint, secret, Transport.FAST_USB)
+            thread(isDaemon = true) { Thread.sleep(400); client.close() }
+            val started = System.nanoTime()
+            assertTrue(assertFailsWith<BridgeException> { client.list() }.lost)
+            assertTrue((System.nanoTime() - started) / 1_000_000 < 5_000, "closing ends the request at once")
+            // Done with: nothing more goes out.
+            assertTrue(assertFailsWith<BridgeException> { client.list() }.lost)
+            assertTrue(assertFailsWith<BridgeException> { client.ping() }.lost)
+        } finally { quiet.close(); held.forEach { runCatching { it.close() } } }
     }
 
     @Test

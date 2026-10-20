@@ -422,14 +422,15 @@ fun DownloadButton(state: AppState) = SunsetButton(if (state.selection.size > 1)
 
 /**
  * The ⋯ menu: everything else the browser can do. `compact` also holds what a narrow toolbar had no room for
- * (sort, list or grid, photos only, upload and new folder).
+ * (sort, list or grid, photos only, upload and new folder). It opens while work runs, so Disconnect always works;
+ * what would start more work waits until then.
  */
 @Composable
 fun MoreButton(state: AppState, compact: Boolean = false, withUpload: Boolean = true) {
     var open by remember { mutableStateOf(false) }
     val bridge = state.bridge != null
     Box {
-        IconButton(Icons.Filled.MoreHoriz, S.more, enabled = !state.busy) { open = true }
+        IconButton(Icons.Filled.MoreHoriz, S.more) { open = true }
         DropdownMenu(open, { open = false }) {
             val close = { open = false }
             if (compact) {
@@ -439,20 +440,22 @@ fun MoreButton(state: AppState, compact: Boolean = false, withUpload: Boolean = 
                     Text((if (state.show == Show.MEDIA) "✓ " else "") + S.showMedia)
                 }
             }
+            val idle = !state.busy
             if (withUpload || compact) {
-                DropdownMenuItem({ close(); promptNewFolder(state) }) { Text(S.newFolder) }
-                DropdownMenuItem({ close(); state.upload(Dialogs.chooseUploads()) }) { Text(S.upload) }
+                DropdownMenuItem({ close(); promptNewFolder(state) }, enabled = idle) { Text(S.newFolder) }
+                DropdownMenuItem({ close(); state.upload(Dialogs.chooseUploads()) }, enabled = idle) { Text(S.upload) }
             }
-            DropdownMenuItem({ close(); promptRename(state) }, enabled = state.selection.size == 1) { Text(S.rename) }
-            DropdownMenuItem({ close(); confirmDelete(state) }, enabled = state.selection.isNotEmpty()) { Text(S.delete, color = if (state.selection.isNotEmpty()) Palette.pink else Palette.muted) }
-            DropdownMenuItem({ close(); state.importNewPhotos() }) { Text(S.importNew) }
-            DropdownMenuItem({ close(); state.importNewPhotos(chooseFolder = true) }) { Text(S.importTo) }
+            DropdownMenuItem({ close(); promptRename(state) }, enabled = idle && state.selection.size == 1) { Text(S.rename) }
+            val deletable = idle && state.selection.isNotEmpty()
+            DropdownMenuItem({ close(); confirmDelete(state) }, enabled = deletable) { Text(S.delete, color = if (deletable) Palette.pink else Palette.muted) }
+            DropdownMenuItem({ close(); state.importNewPhotos() }, enabled = idle) { Text(S.importNew) }
+            DropdownMenuItem({ close(); state.importNewPhotos(chooseFolder = true) }, enabled = idle) { Text(S.importTo) }
             if (bridge) {
                 DropdownMenuItem({ close(); state.openReceived() }) { Text(S.openReceived) }
                 DropdownMenuItem({ close(); state.sendClipboard() }) { Text(S.sendClipboard) }
                 DropdownMenuItem({ close(); state.fetchClipboard() }) { Text(S.getClipboard) }
             }
-            DropdownMenuItem({ close(); state.refresh() }) { Text(S.refresh) }
+            DropdownMenuItem({ close(); state.refresh() }, enabled = idle) { Text(S.refresh) }
             if (state.transport == Transport.USB && Platform.windows) DropdownMenuItem({ close(); Platform.openThisPc() }) { Text(S.openExplorer) }
             if (state.usbLinks.isNotEmpty() || state.wpdPhones.isNotEmpty()) {
                 DropdownMenuItem({ close(); state.mirror() }) { Text(S.mirror) }

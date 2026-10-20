@@ -125,6 +125,7 @@ object S {
         "Couldn't reach the phone at $address. Check that sharing is on and both are on the same Wi‑Fi. If a VPN or proxy is on, allow local network (LAN) traffic or turn it off.",
         "无法连接到手机 $address。请确认手机正在共享，且两者连接同一个 Wi‑Fi。如果开着 VPN 或代理，请允许局域网流量或暂时关闭。")
     val dropped = t("The connection to the phone dropped.", "与手机的连接已断开。")
+    val connectionLost = t("Lost the connection to the phone.", "与手机的连接已中断。")
     val lostHint = t("Tap the sun on the phone and pair again. Unfinished transfers continue by themselves.",
         "请在手机上点一下太阳并重新配对，未完成的传输会自动继续。")
     val usbLostHint = t("Check the cable and that the phone is unlocked. Unfinished transfers continue when it's back.",
