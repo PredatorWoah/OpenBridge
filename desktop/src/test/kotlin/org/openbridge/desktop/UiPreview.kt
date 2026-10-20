@@ -27,9 +27,9 @@ class UiPreview {
 
     private fun render(out: File, name: String, state: AppState, width: Int = 1060, height: Int = 700) {
         val scene = ImageComposeScene(width, height, Density(1f)) { App(state, false, FocusRequester()) }
-        scene.render(0)
-        scene.render(400_000_000)
-        val image = scene.render(1_600_000_000)
+        // Frames a tenth of a second apart for two seconds, so things that arrive with a motion have arrived.
+        for (frame in 0 until 20) scene.render(frame * 100_000_000L)
+        val image = scene.render(2_000_000_000)
         File(out, "$name.png").writeBytes(image.encodeToData(EncodedImageFormat.PNG)!!.bytes)
         scene.close()
     }

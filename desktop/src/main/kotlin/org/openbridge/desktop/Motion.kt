@@ -1,13 +1,12 @@
 package org.openbridge.desktop
 
-import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.graphics.graphicsLayer
-import kotlinx.coroutines.launch
 
 /**
  * Seconds since this first drew, about 30 times a second, for the looks' small motions (twinkling stars, bobbing
@@ -26,10 +25,16 @@ fun animationTime(): Float {
     return time
 }
 
+/** Waits `millis` on the frame clock (so a staggered entrance keeps step with the animations after it). */
+suspend fun pauseFrames(millis: Long) {
+    val start = withFrameNanos { it }
+    while (withFrameNanos { it } - start < millis * 1_000_000L) { /* next frame */ }
+}
+
 /** Aurora's arrival: fades in while drifting up a few pixels, slowly, never bouncing. */
 fun Modifier.driftIn(distance: Float = 8f, millis: Int = 520) = composed {
-    val still = Platform.reduceMotion
-    val shown = remember { Animatable(if (still) 1f else 0f) }
-    LaunchedEffect(Unit) { launch { shown.animateTo(1f, tween(millis, easing = FastOutSlowInEasing)) } }
-    graphicsLayer { alpha = shown.value; translationY = (1f - shown.value) * distance * density }
+    var arrived by remember { mutableStateOf(Platform.reduceMotion) }
+    LaunchedEffect(Unit) { arrived = true }
+    val shown by animateFloatAsState(if (arrived) 1f else 0f, tween(if (Platform.reduceMotion) 0 else millis, easing = FastOutSlowInEasing))
+    graphicsLayer { alpha = shown; translationY = (1f - shown) * distance * density }
 }

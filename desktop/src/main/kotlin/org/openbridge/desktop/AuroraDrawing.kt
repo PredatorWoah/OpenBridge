@@ -46,10 +46,10 @@ fun Modifier.auroraGlow(selected: Boolean, cursor: Boolean, shape: Shape, restin
         }
         if (selected) {
             // The glow: rings growing outwards, each fainter.
-            for (i in 4 downTo 1) {
-                val grow = i * 2.5f * density
-                drawRoundRect(mint.copy(alpha = 0.05f), Offset(-grow, -grow), Size(size.width + 2 * grow, size.height + 2 * grow),
-                    CornerRadius(radius + grow), style = Stroke(2.5f * density))
+            for (i in 5 downTo 1) {
+                val grow = i * 1.6f * density
+                drawRoundRect(mint.copy(alpha = 0.16f / i), Offset(-grow, -grow), Size(size.width + 2 * grow, size.height + 2 * grow),
+                    CornerRadius(radius + grow), style = Stroke(1.8f * density), blendMode = BlendMode.Plus)
             }
             drawRoundRect(mint.copy(alpha = 0.10f), cornerRadius = CornerRadius(radius))
             drawRoundRect(mint.copy(alpha = 0.55f), cornerRadius = CornerRadius(radius), style = Stroke(1.2f * density))

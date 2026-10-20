@@ -102,7 +102,18 @@ private fun PortholeRail(state: AppState, compact: Boolean) {
         horizontalAlignment = Alignment.CenterHorizontally) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            phoneStars(state).forEachIndexed { index, star -> Porthole(state, star, port, time, index) }
+            phoneStars(state).forEachIndexed { index, star ->
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Porthole(state, star, port, time, index)
+                    // How the open phone is connected, under its porthole (and announced when it changes).
+                    if (star.open) {
+                        val announcement = S.connectedOver(state.deviceName, state.transport.label)
+                        Text(state.transport.label, color = Palette.sun, fontSize = if (compact) 9.5.sp else 10.5.sp, fontWeight = FontWeight.SemiBold,
+                            textAlign = TextAlign.Center, maxLines = 2, modifier = Modifier.padding(top = 4.dp)
+                                .semantics { contentDescription = announcement; liveRegion = LiveRegionMode.Polite })
+                    }
+                }
+            }
         }
         Spacer(Modifier.height(12.dp))
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -156,9 +167,8 @@ private fun SurfaceBar(state: AppState, searchFocus: FocusRequester, compact: Bo
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             IconButton(Icons.Filled.ArrowUpward, S.up, enabled = state.path.size > 1 && !state.busy) { state.up() }
             DepthPath(state, if (compact) 3 else 4, Modifier.weight(1f))
-            TransportChip(state)
             if (!compact) {
-                SearchField(state, searchFocus, Modifier.width(230.dp))
+                SearchField(state, searchFocus, Modifier.width(220.dp))
                 SortButton(state)
                 ViewToggle(state)
                 MediaToggle(state)
@@ -293,9 +303,11 @@ private fun TideConnect(state: AppState, compact: Boolean) {
             ConnectNotes(state, Modifier.padding(top = 2.dp).widthIn(max = 720.dp))
         }
         val stars = phoneStars(state)
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(18.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.Bottom) {
-            stars.forEachIndexed { index, star -> Bubble(state, star, if (compact) 96.dp else 112.dp, time, index) }
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(18.dp), verticalAlignment = Alignment.Bottom) {
+                stars.forEachIndexed { index, star -> Bubble(state, star, if (compact) 92.dp else 112.dp, time, index) }
+            }
         }
         AddressStrip(state, Modifier.align(Alignment.CenterHorizontally).padding(start = 24.dp, end = 24.dp, top = 6.dp, bottom = 18.dp).widthIn(max = 640.dp)
             .clip(CircleShape).background(Palette.night.copy(alpha = 0.62f)).border(1.dp, Palette.cream.copy(alpha = 0.16f), CircleShape).padding(horizontal = 10.dp, vertical = 6.dp))
@@ -310,7 +322,7 @@ private fun Bubble(state: AppState, star: PhoneStar, size: Dp, time: Float, seed
     val wpd = (star.reach as? PhoneStar.Reach.Wpd)?.phone
     // Bubbles rise into place from the water, one after another.
     val rise = remember { Animatable(if (Platform.reduceMotion) 0f else 160f) }
-    LaunchedEffect(Unit) { if (!Platform.reduceMotion) kotlinx.coroutines.delay(120L * seed); rise.animateTo(0f, buoyant()) }
+    LaunchedEffect(Unit) { if (!Platform.reduceMotion) pauseFrames(120L * seed); rise.animateTo(0f, buoyant()) }
     val bright = when { star.saved && star.here -> 1f; star.here -> 0.75f; star.saved -> 0.55f; else -> 0.3f }
     val action = starAction(star)
     Box {

@@ -75,7 +75,8 @@ fun Field(value: String, change: (String) -> Unit, placeholder: String, modifier
             if (onEnter != null && event.type == KeyEventType.KeyDown && event.key == Key.Enter && !event.isShiftPressed) { onEnter(); true } else false
         }
         .padding(horizontal = 12.dp, vertical = 10.dp)) {
-        if (value.isEmpty()) Text(placeholder, color = Palette.muted.copy(alpha = 0.7f), fontSize = 13.5.sp)
+        if (value.isEmpty()) Text(placeholder, color = Palette.muted.copy(alpha = 0.7f), fontSize = 13.5.sp, maxLines = if (singleLine) 1 else 6,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         BasicTextField(value, change, singleLine = singleLine, maxLines = if (singleLine) 1 else 6, cursorBrush = SolidColor(Palette.sun),
             textStyle = TextStyle(color = Palette.fg, fontSize = 13.5.sp, fontFamily = if (monospace) FontFamily.Monospace else FontFamily.Default),
             modifier = Modifier.fillMaxWidth().semantics { contentDescription = placeholder }
