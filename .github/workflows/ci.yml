@@ -76,6 +76,14 @@ jobs:
           FIXTURE_CLASSPATH: ${{ github.workspace }}/build/protocol-tests
           FIXTURE_KEYSTORE: ${{ runner.temp }}/fixture.p12
       - run: bash scripts/build-macos.sh
+      - name: Render README screenshots
+        timeout-minutes: 5
+        run: macos/build/OpenBridge.app/Contents/MacOS/OpenBridge --render-screenshots "$RUNNER_TEMP/shots"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-screenshots
+          path: ${{ runner.temp }}/shots
+          if-no-files-found: error
       - run: bash scripts/package-macos.sh macos/build/OpenBridge-macOS.dmg
       - uses: actions/upload-artifact@v4
         with:

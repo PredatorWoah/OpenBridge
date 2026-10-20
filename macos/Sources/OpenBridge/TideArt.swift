@@ -80,11 +80,17 @@ struct WaveLine: View {
 
     var body: some View {
         let paused: Bool = reduceMotion || scenePhase == .background
-        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: paused)) { timeline in
-            Canvas { context, size in
-                let seconds: Double = timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 3600)
-                let t: Double = reduceMotion ? 0 : seconds
-                WaveLine.draw(&context, size: size, time: t)
+        Group {
+            if Screenshots.active {
+                Canvas { context, size in WaveLine.draw(&context, size: size, time: 0) }
+            } else {
+                TimelineView(.animation(minimumInterval: 1.0 / 30, paused: paused)) { timeline in
+                    Canvas { context, size in
+                        let seconds: Double = timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 3600)
+                        let t: Double = reduceMotion ? 0 : seconds
+                        WaveLine.draw(&context, size: size, time: t)
+                    }
+                }
             }
         }
         .allowsHitTesting(false)
@@ -157,9 +163,11 @@ struct RiseIn: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
+        // Screenshots show everything already risen.
+        let up: Bool = risen || Screenshots.active
         content
-            .offset(y: risen ? 0 : depth)
-            .opacity(risen ? 1 : 0)
+            .offset(y: up ? 0 : depth)
+            .opacity(up ? 1 : 0)
             .onAppear {
                 if reduceMotion { risen = true; return }
                 let delay: Double = 0.04 * Double(seed % 8)

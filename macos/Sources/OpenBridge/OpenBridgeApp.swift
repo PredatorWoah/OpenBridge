@@ -9,7 +9,7 @@ struct Glass: ViewModifier {
     var border: Color = .white.opacity(0.14)
     func body(content: Content) -> some View {
         content
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .frosted(RoundedRectangle(cornerRadius: radius, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(border))
     }
 }
@@ -110,7 +110,7 @@ struct RootView: View {
 }
 
 /// One look's whole window: its backdrop, and its connect screen or browser.
-private struct LookScene: View {
+struct LookScene: View {
     @ObservedObject var model: BrowserModel
     let look: Look
     @Binding var wifi: Bool
@@ -492,6 +492,12 @@ struct OpenBridgeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     /// One model for the app, so every window and Settings see the same connection.
     @StateObject private var model = BrowserModel()
+
+    init() {
+        // README screenshots: render them and quit before any window, connection or preference exists.
+        guard let folder = Screenshots.requestedFolder() else { return }
+        MainActor.assumeIsolated { () -> Void in Screenshots.renderAndQuit(to: folder) }
+    }
 
     var body: some Scene {
         WindowGroup { RootView(model: model) }

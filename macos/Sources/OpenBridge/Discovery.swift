@@ -32,6 +32,9 @@ final class PhoneDiscovery: ObservableObject {
         self.browser = browser
     }
 
+    /// Phones to show in the README screenshots (`--render-screenshots`), without browsing the network.
+    func showSample(_ phones: [Phone]) { self.phones = phones }
+
     func stop() {
         browser?.cancel(); browser = nil; phones = []
     }

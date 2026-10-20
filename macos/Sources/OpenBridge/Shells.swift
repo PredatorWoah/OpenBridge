@@ -37,7 +37,11 @@ struct PairOverWiFiLink: View {
     var body: some View {
         HStack(spacing: 6) {
             Text("No cable?").foregroundStyle(Palette.muted)
-            Button("Pair over Wi‑Fi") { wifi = true }.buttonStyle(.link).disabled(model.busy || model.connected)
+            if Screenshots.active {
+                Text("Pair over Wi‑Fi").foregroundStyle(Color.accentColor)
+            } else {
+                Button("Pair over Wi‑Fi") { wifi = true }.buttonStyle(.link).disabled(model.busy || model.connected)
+            }
         }
         .font(.system(size: 13))
     }
@@ -218,6 +222,10 @@ struct SettingsButton<Content: View>: View {
     @ViewBuilder var label: () -> Content
 
     var body: some View {
+        if Screenshots.active { label() } else { link }
+    }
+
+    @ViewBuilder private var link: some View {
         if #available(macOS 14.0, *) {
             SettingsLink(label: label)
         } else {

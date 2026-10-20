@@ -51,6 +51,8 @@ public struct SearchResult: Equatable {
 /// What MEASURE found in a folder. `complete` is false when the phone stopped counting early.
 public struct FolderSize: Equatable {
     public let bytes: Int64, files: Int64, complete: Bool
+
+    public init(bytes: Int64, files: Int64, complete: Bool) { self.bytes = bytes; self.files = files; self.complete = complete }
 }
 
 public struct Entry: Identifiable, Equatable {
@@ -58,6 +60,10 @@ public struct Entry: Identifiable, Equatable {
     public let name: String
     public let directory: Bool
     public let size: Int64
+
+    public init(id: String, name: String, directory: Bool, size: Int64) {
+        self.id = id; self.name = name; self.directory = directory; self.size = size
+    }
 }
 
 public enum Wire {

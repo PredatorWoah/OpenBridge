@@ -350,7 +350,7 @@ private struct FillingCapsule: View {
         GeometryReader { geometry in
             let width: CGFloat = geometry.size.width * CGFloat(min(max(fraction, 0), 1))
             ZStack(alignment: .leading) {
-                Capsule().fill(.ultraThinMaterial)
+                Color.clear.frosted(Capsule())
                 Rectangle().fill(tint).frame(width: width)
             }
             .clipShape(Capsule())
@@ -417,7 +417,7 @@ struct TideConnect: View {
                     Spacer().frame(height: center.y + CGFloat(radius) + 26)
                     Text(ConnectText.title(model)).font(.system(size: 24, weight: .bold, design: .rounded))
                     Text(ConnectText.subtitle(model)).font(.system(size: 13)).foregroundStyle(Palette.muted)
-                        .multilineTextAlignment(.center).textSelection(.enabled)
+                        .multilineTextAlignment(.center).modifier(Selectable())
                     ViewThatFits(in: .vertical) {
                         TideConnectDetails(model: model, discovery: discovery, wifi: $wifi, openAutomatically: $openAutomatically,
                                            forgetting: $forgetting)

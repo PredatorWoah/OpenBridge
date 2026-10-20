@@ -264,7 +264,7 @@ private struct AuroraSheet: View {
             BrowserError(model: model)
         }
         .background(Palette.night.opacity(0.45), in: shape)
-        .background(.ultraThinMaterial, in: shape)
+        .frosted(shape)
         .clipShape(shape)
         .overlay(shape.strokeBorder(LinearGradient(colors: [Palette.amber.opacity(0.45), Palette.amber.opacity(0.08)],
                                                    startPoint: .top, endPoint: .bottom), lineWidth: 1))
@@ -438,7 +438,7 @@ struct AuroraConnect: View {
                     Spacer().frame(height: center.y + ring.height + 34)
                     Text(ConnectText.title(model)).font(.system(size: 24, weight: .light)).tracking(2)
                     Text(ConnectText.subtitle(model)).font(.system(size: 13)).foregroundStyle(Palette.muted)
-                        .multilineTextAlignment(.center).textSelection(.enabled)
+                        .multilineTextAlignment(.center).modifier(Selectable())
                     ViewThatFits(in: .vertical) {
                         AuroraConnectDetails(model: model, wifi: $wifi, openAutomatically: $openAutomatically)
                         ScrollView { AuroraConnectDetails(model: model, wifi: $wifi, openAutomatically: $openAutomatically) }
