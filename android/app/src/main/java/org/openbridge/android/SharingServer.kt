@@ -253,8 +253,9 @@ class SharingServer(private val context: Context, private val store: Store, priv
         val served = doors.firstOrNull { it.via == Via.HOTSPOT && !it.wildcard }
         if (served != null && served.address == address) return
         if (served != null) { shut(served); Log.add("Hotspot address went away") }
-        if (address != null) open(Via.HOTSPOT, address, listOf(PREFERRED_PORT, 0))
-        else if (Hotspot.on && !interfacesLogged) {
+        if (address != null) { unrecognized = 0; open(Via.HOTSPOT, address, listOf(PREFERRED_PORT, 0)) }
+        else if (Hotspot.on && !interfacesLogged && ++unrecognized >= 3) {
+            // Only once it's had a few seconds to get its address, so a hotspot that's still starting isn't reported.
             // For diagnostics: what this phone calls its interfaces, when its hotspot can't be told apart.
             interfacesLogged = true
             val seen = runCatching { java.net.NetworkInterface.getNetworkInterfaces()?.toList().orEmpty() }.getOrDefault(emptyList())
@@ -263,6 +264,7 @@ class SharingServer(private val context: Context, private val store: Store, priv
         }
     }
     private var interfacesLogged = false
+    private var unrecognized = 0
 
     private fun present(door: Door): Boolean = when (door.via) {
         Via.TETHER -> usbTetherAddress() == door.address
@@ -346,7 +348,7 @@ class SharingServer(private val context: Context, private val store: Store, priv
     }, "openbridge-${door.via.name.lowercase()}").start()
 
     private fun publish(): Boolean {
-        val now = doors.filter { it.shown }.sortedBy { it.via.ordinal }.map { it.endpoint }.distinctBy { it.via to it.host }
+        val now = doors.filter { it.shown }.sortedWith(compareBy({ it.via.ordinal }, { it.wildcard })).map { it.endpoint }.distinctBy { it.via to it.host }
         if (now == endpoints) return false
         endpoints = now
         return true
