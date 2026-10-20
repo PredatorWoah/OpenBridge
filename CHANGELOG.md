@@ -8,6 +8,7 @@ All notable changes to OpenBridge are recorded here. Every release has an entry;
 - **Your phone's own hotspot comes first.** Settings › Phone hotspot now points to the phone's regular hotspot (your own name and password, or none, remembered by your computer) with Open hotspot settings. The temporary hotspot with an Android-chosen password is still there as a second option.
 
 ### Fixed
+- **Secure connections failed on some phones (vivo on Android 17 among them).** The phone's identity key couldn't sign the TLS handshake the way Android's TLS asks the keystore to, so every connection over Wi‑Fi, the hotspot or Fast USB failed right after it reached the phone. The phone now uses an ECDSA P-256 identity made for this. It's a new identity: computers that saved the phone pair once more.
 - **Phone hotspot on vivo, for real this time.** vivo reports its hotspot (`ap0`) to apps as a Wi‑Fi network, so OpenBridge either refused it as "a different Wi‑Fi" or turned computers away on it. An access point interface (`ap`, `softap`, `swlan`) now always counts as the phone hotspot, whatever Android calls it.
 
 ## [1.1.1] - 2026-10-20

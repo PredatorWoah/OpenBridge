@@ -79,7 +79,7 @@ class SharingServer(private val context: Context, private val store: Store, priv
          */
         const val HOTSPOT_PORT = 41986
         /** The phone's TLS identity: made once and kept, so paired computers recognize it later. */
-        private const val IDENTITY = "openbridge-identity"
+        private const val IDENTITY = "openbridge-identity-ec"
     }
 
     /** A listening socket on one address, with its own session so requests are told apart by how they came in. */
@@ -146,14 +146,15 @@ class SharingServer(private val context: Context, private val store: Store, priv
 
     init {
         // One identity for as long as the app is installed, so paired computers reconnect without a code. The private
-        // key never leaves the AndroidKeyStore. Earlier versions made a new one on every start; drop that one.
+        // key never leaves the AndroidKeyStore. It's a P-256 key that allows DIGEST_NONE: Android's TLS signs the
+        // handshake through the keystore with a raw "NONEwithECDSA" operation, so a key without it fails every
+        // handshake (as the RSA identity of 1.1.1 and earlier did on some phones). Drop the older identities.
         val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        if (keyStore.containsAlias("openbridge-session")) keyStore.deleteEntry("openbridge-session")
-        if (!keyStore.containsAlias(IDENTITY)) KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_RSA, "AndroidKeyStore").apply {
+        for (old in listOf("openbridge-session", "openbridge-identity")) if (keyStore.containsAlias(old)) keyStore.deleteEntry(old)
+        if (!keyStore.containsAlias(IDENTITY)) KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, "AndroidKeyStore").apply {
             initialize(KeyGenParameterSpec.Builder(IDENTITY, KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY)
-                .setKeySize(2048)
-                .setDigests(KeyProperties.DIGEST_SHA256, KeyProperties.DIGEST_SHA384, KeyProperties.DIGEST_SHA512)
-                .setSignaturePaddings(KeyProperties.SIGNATURE_PADDING_RSA_PKCS1, KeyProperties.SIGNATURE_PADDING_RSA_PSS)
+                .setAlgorithmParameterSpec(java.security.spec.ECGenParameterSpec("secp256r1"))
+                .setDigests(KeyProperties.DIGEST_NONE, KeyProperties.DIGEST_SHA256, KeyProperties.DIGEST_SHA384, KeyProperties.DIGEST_SHA512)
                 .setCertificateSubject(X500Principal("CN=OpenBridge"))
                 .setCertificateNotBefore(Date(System.currentTimeMillis() - 86_400_000))
                 .setCertificateNotAfter(Date(System.currentTimeMillis() + 25L * 365 * 86_400_000))
