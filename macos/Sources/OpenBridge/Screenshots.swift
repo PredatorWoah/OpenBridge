@@ -36,6 +36,8 @@ enum Screenshots {
                 let file = folder.appendingPathComponent("\(look.rawValue)-\(shot.rawValue).png")
                 if !render(shot, look: look, to: file) { failed = true }
             }
+            let panel = folder.appendingPathComponent("\(look.rawValue)-menubar.png")
+            if !renderMenuBar(to: panel) { failed = true }
         }
         exit(failed ? 1 : 0)
     }
@@ -53,7 +55,29 @@ enum Screenshots {
         let renderer = ImageRenderer(content: scene)
         renderer.scale = 2
         renderer.proposedSize = ProposedViewSize(size)
-        guard let image = renderer.cgImage,
+        return write(renderer.cgImage, to: file)
+    }
+
+    /// The menu bar panel while a transfer runs, with a long phone name and a long file name: neither may wrap.
+    /// The status item's icon (connected, with its progress ring) is drawn above the panel, as it sits in the menu bar.
+    @MainActor private static func renderMenuBar(to file: URL) -> Bool {
+        let model = SampleData.menuBarModel()
+        let ring: Double = MenuBarIcon.ring(model) ?? 0
+        let icon: NSImage = MenuBarGlyph.image(connected: true, progress: ring)
+        let shot = VStack(alignment: .trailing, spacing: 4) {
+            Image(nsImage: icon).renderingMode(.template).foregroundStyle(Color.white).padding(.trailing, 24)
+            MenuBarPanel(model: model)
+        }
+        .padding(12)
+        .background(Palette.background)
+        .environment(\.colorScheme, .dark)
+        let renderer = ImageRenderer(content: shot)
+        renderer.scale = 2
+        return write(renderer.cgImage, to: file)
+    }
+
+    @MainActor private static func write(_ image: CGImage?, to file: URL) -> Bool {
+        guard let image,
               let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else {
             FileHandle.standardError.write(Data("Couldn't render \(file.lastPathComponent)\n".utf8))
             return false
@@ -98,6 +122,25 @@ private enum SampleData {
             model.transfer = BrowserModel.Transfer(name: video.name, upload: false, fraction: 0.42, remaining: [job])
             model.busy = true
         }
+        return model
+    }
+
+    /// Connected over the phone's hotspot, a third of the way through a batch of 12, with names too long to fit.
+    static func menuBarModel() -> BrowserModel {
+        let model = BrowserModel()
+        model.showSampleMenuBar(phone: "vivo X300 Pro (the family phone in the kitchen drawer)", speed: 23_400_000)
+        let long = Entry(id: "m1", name: "VID_20261018_220000_birthday_party_in_the_garden_with_everyone_final_edit_v3.mp4",
+                         directory: false, size: 811_597_824)
+        let target = URL(fileURLWithPath: "/tmp/OpenBridge Screenshots/\(long.name)")
+        let job = BrowserModel.Job.download(long, to: target, at: ["DCIM", "Camera"])
+        var transfer = BrowserModel.Transfer(name: long.name, upload: false, index: 4, count: 12, fraction: 0.42,
+                                             remaining: Array(repeating: job, count: 9))
+        transfer.totalBytes = 4_870_000_000
+        transfer.finishedBytes = 1_310_000_000
+        transfer.currentBytes = 340_870_000
+        transfer.currentTotal = long.size
+        model.transfer = transfer
+        model.busy = true
         return model
     }
 

@@ -103,7 +103,7 @@ private struct PhoneTitle: View {
 struct TransportChip: View {
     @ObservedObject var model: BrowserModel
     var body: some View {
-        Label(ConnectText.transport(model), systemImage: model.fastUSB ? "bolt.horizontal" : model.overUSB ? "cable.connector" : "wifi")
+        Label(ConnectText.transport(model), systemImage: model.fastUSB ? "bolt.horizontal" : model.overUSB ? "cable.connector" : model.viaHotspot ? "personalhotspot" : "wifi")
             .font(.system(size: 11, weight: .semibold))
             .padding(.horizontal, 9).padding(.vertical, 3)
             .background(Palette.amber.opacity(0.10), in: Capsule())
@@ -325,6 +325,7 @@ private struct SheetToolbar: View {
 
     var body: some View {
         HStack(spacing: 8) {
+            SelectAllBox(model: model)
             UpButton(model: model)
             ResultsButton(model: model)
             SearchBox(model: model, searching: searching, width: compact ? 150 : 210, radius: 10)
@@ -356,10 +357,13 @@ struct AuroraRow: View {
     var thumbnail: NSImage?
     var folderSize: FolderSize? = nil
     var focused = false
+    /// Its checkbox; none where selecting doesn't apply (search results).
+    var toggle: (() -> Void)? = nil
 
     var body: some View {
         let (name, color) = fileSymbol(FileKind(entry))
         HStack(spacing: 14) {
+            if let toggle { RowCheckbox(name: entry.name, selected: selected, toggle: toggle) }
             FileIcon(symbol: name, color: color, thumbnail: thumbnail, size: 28)
             Text(entry.name).lineLimit(1).truncationMode(.middle)
             Spacer()
@@ -368,7 +372,7 @@ struct AuroraRow: View {
                 .help(folderSize.map { $0.files > 0 ? "\($0.files) files" : "" } ?? "")
         }
         .font(.system(size: 14))
-        .padding(.horizontal, 16).padding(.vertical, 10)
+        .padding(.leading, toggle == nil ? 16 : 10).padding(.trailing, 16).padding(.vertical, 10)
         .modifier(SoftGlow(radius: 12, selected: selected, focused: focused))
         .contentShape(Rectangle())
     }
@@ -381,6 +385,8 @@ struct AuroraTile: View {
     var thumbnail: NSImage?
     var folderSize: FolderSize? = nil
     var focused = false
+    /// Its checkbox; none where selecting doesn't apply (search results).
+    var toggle: (() -> Void)? = nil
 
     var body: some View {
         let (name, color) = fileSymbol(FileKind(entry))
@@ -398,6 +404,9 @@ struct AuroraTile: View {
             .clipShape(shape)
             .modifier(SoftGlow(radius: 14, selected: selected, focused: focused))
             .accessibilityHidden(true)
+            .overlay(alignment: .topLeading) {
+                if let toggle { RowCheckbox(name: entry.name, selected: selected, onPicture: true, toggle: toggle).padding(4) }
+            }
             Text(entry.name).font(.system(size: 12)).lineLimit(2).multilineTextAlignment(.center).truncationMode(.middle)
             Text(entry.directory ? (folderSize == nil ? " " : folderText(folderSize)) : ByteCountFormatter.string(fromByteCount: entry.size, countStyle: .file))
                 .font(.system(size: 10.5)).foregroundStyle(Palette.muted)

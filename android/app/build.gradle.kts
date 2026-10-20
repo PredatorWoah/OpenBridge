@@ -15,7 +15,7 @@ android {
         applicationId = "org.openbridge.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = 25
+        versionCode = 26
         versionName = "1.1.1"
         // Test APKs from the Actions tab (test-apk.yml): the next build number and a fourth version part, so the app
         // never offers the release it was built on as an update. Never published.

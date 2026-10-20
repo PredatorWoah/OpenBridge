@@ -162,14 +162,16 @@ private fun HotspotPanel(actions: Actions) {
                 }, color = Palette.muted, fontSize = 13.sp)
                 GhostButton(S.turnOffHotspot, { actions.hotspot(false) }, Modifier.fillMaxWidth())
             }
-            Hotspot.supported -> {
-                Text(S.hotspotExplain, color = Palette.muted, fontSize = 13.sp)
-                AccentButton(if (Hotspot.starting) S.starting else S.turnOnHotspot, { actions.hotspot(true) }, Modifier.fillMaxWidth(), enabled = !Hotspot.starting)
-            }
             else -> {
-                Text(S.hotspotSystemHint, color = Palette.muted, fontSize = 13.sp)
+                // The phone's own hotspot first: the user picks its name and password once, and the computer remembers it.
+                Text(S.hotspotOwn, color = Palette.muted, fontSize = 13.sp)
                 if (served != null) Text(S.hotspotServing(served.host, served.port), color = Palette.ok, fontSize = 13.sp)
-                GhostButton(S.openHotspotSettings, { actions.hotspot(true) }, Modifier.fillMaxWidth())
+                AccentButton(S.openHotspotSettings, { actions.hotspotSettings() }, Modifier.fillMaxWidth())
+                if (Hotspot.supported) {
+                    Text(S.temporaryHotspotExplain, color = Palette.muted, fontSize = 13.sp)
+                    GhostButton(if (Hotspot.starting) S.starting else S.temporaryHotspot, { actions.hotspot(true) }, Modifier.fillMaxWidth(),
+                        enabled = !Hotspot.starting)
+                }
             }
         }
         Hotspot.problem?.let { Text(it, color = Palette.amber, fontSize = 13.sp) }

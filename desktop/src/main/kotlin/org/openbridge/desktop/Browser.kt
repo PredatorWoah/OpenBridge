@@ -108,6 +108,7 @@ private fun sizeText(state: AppState, entry: Entry): String {
 @OptIn(ExperimentalComposeUiApi::class)
 private fun Modifier.entryInput(state: AppState, entry: Entry, selected: Boolean, description: String) =
     onPointerEvent(PointerEventType.Press) { event ->
+        if (event.changes.any { it.isConsumed }) return@onPointerEvent   // the row's checkbox took it
         val awt = event.nativeEvent as? java.awt.event.MouseEvent
         if ((awt?.clickCount ?: 1) >= 2) state.open(entry)
         else state.click(entry, ctrl = awt?.isControlDown == true, shift = awt?.isShiftDown == true)
@@ -171,7 +172,9 @@ private fun EntryRow(state: AppState, entry: Entry, look: Look, gauge: Float?) {
             .background(if (selected) Brush.horizontalGradient(listOf(Palette.violet.copy(alpha = 0.55f), Palette.pink.copy(alpha = 0.35f))) else SolidColor(Color.Transparent))
             .then(if (cursor) Modifier.border(1.5.dp, Palette.sun.copy(alpha = 0.7f), RoundedCornerShape(8.dp)) else Modifier)
             .entryInput(state, entry, selected, description)
-            .padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            .padding(start = 6.dp, end = 12.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            EntryCheck(state, entry, look, selected)
+            Spacer(Modifier.width(6.dp))
             Thumb(state, entry, 28.dp, 5.dp)
             Spacer(Modifier.width(12.dp))
             Text(entry.name, color = Palette.fg, fontSize = 13.5.sp, maxLines = 1, overflow = TextOverflow.MiddleEllipsis, modifier = Modifier.weight(1f))
@@ -179,7 +182,9 @@ private fun EntryRow(state: AppState, entry: Entry, look: Look, gauge: Float?) {
         }
         Look.AURORA -> Row(Modifier.fillMaxWidth().auroraGlow(selected, cursor, RoundedCornerShape(12.dp))
             .entryInput(state, entry, selected, description)
-            .padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            .padding(start = 10.dp, end = 16.dp, top = 10.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            EntryCheck(state, entry, look, selected)
+            Spacer(Modifier.width(10.dp))
             Thumb(state, entry, 32.dp, 8.dp, 0.7f)
             Spacer(Modifier.width(16.dp))
             Text(entry.name, color = Palette.fg, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.MiddleEllipsis, modifier = Modifier.weight(1f))
@@ -194,7 +199,9 @@ private fun EntryRow(state: AppState, entry: Entry, look: Look, gauge: Float?) {
                 .drawBehind { drawWaterFill(fill, time) }
                 .border(if (cursor) 1.5.dp else 1.dp, if (cursor) Palette.sun.copy(alpha = 0.85f) else Palette.fg.copy(alpha = 0.10f), shape)
                 .entryInput(state, entry, selected, description)
-                .padding(start = 8.dp, end = 20.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                .padding(start = 6.dp, end = 20.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                EntryCheck(state, entry, look, selected)
+                Spacer(Modifier.width(4.dp))
                 Box(Modifier.size(34.dp).clip(CircleShape).background(Palette.fg.copy(alpha = 0.08f)), contentAlignment = Alignment.Center) {
                     Thumb(state, entry, 34.dp, 17.dp, 0.6f)
                 }
@@ -249,6 +256,7 @@ private fun EntryTile(state: AppState, entry: Entry, look: Look) {
             .entryInput(state, entry, selected, description).padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(8.dp)).background(Palette.night.copy(alpha = 0.3f)), contentAlignment = Alignment.Center) {
                 PreviewFill(state, entry)
+                EntryCheck(state, entry, look, selected, Modifier.align(Alignment.TopStart).padding(3.dp), onPhoto = true)
             }
             Spacer(Modifier.height(6.dp))
             caption()
@@ -256,6 +264,7 @@ private fun EntryTile(state: AppState, entry: Entry, look: Look) {
         Look.AURORA -> Column(Modifier.fillMaxWidth().entryInput(state, entry, selected, description), horizontalAlignment = Alignment.CenterHorizontally) {
             Box(Modifier.fillMaxWidth().aspectRatio(1f).auroraGlow(selected, cursor, RoundedCornerShape(16.dp), resting = true), contentAlignment = Alignment.Center) {
                 Box(Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp)), contentAlignment = Alignment.Center) { PreviewFill(state, entry) }
+                EntryCheck(state, entry, look, selected, Modifier.align(Alignment.TopStart).padding(6.dp), onPhoto = true)
             }
             Spacer(Modifier.height(8.dp))
             caption()
@@ -273,6 +282,7 @@ private fun EntryTile(state: AppState, entry: Entry, look: Look) {
                 .entryInput(state, entry, selected, description).padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(18.dp)).background(Palette.fg.copy(alpha = 0.06f)), contentAlignment = Alignment.Center) {
                     PreviewFill(state, entry)
+                    EntryCheck(state, entry, look, selected, Modifier.align(Alignment.TopStart).padding(5.dp), onPhoto = true)
                 }
                 Spacer(Modifier.height(6.dp))
                 caption()
@@ -422,14 +432,15 @@ fun DownloadButton(state: AppState) = SunsetButton(if (state.selection.size > 1)
 
 /**
  * The ⋯ menu: everything else the browser can do. `compact` also holds what a narrow toolbar had no room for
- * (sort, list or grid, photos only, upload and new folder).
+ * (sort, list or grid, photos only, upload and new folder). It opens while work runs, so Disconnect always works;
+ * what would start more work waits until then.
  */
 @Composable
 fun MoreButton(state: AppState, compact: Boolean = false, withUpload: Boolean = true) {
     var open by remember { mutableStateOf(false) }
     val bridge = state.bridge != null
     Box {
-        IconButton(Icons.Filled.MoreHoriz, S.more, enabled = !state.busy) { open = true }
+        IconButton(Icons.Filled.MoreHoriz, S.more) { open = true }
         DropdownMenu(open, { open = false }) {
             val close = { open = false }
             if (compact) {
@@ -439,20 +450,22 @@ fun MoreButton(state: AppState, compact: Boolean = false, withUpload: Boolean = 
                     Text((if (state.show == Show.MEDIA) "✓ " else "") + S.showMedia)
                 }
             }
+            val idle = !state.busy
             if (withUpload || compact) {
-                DropdownMenuItem({ close(); promptNewFolder(state) }) { Text(S.newFolder) }
-                DropdownMenuItem({ close(); state.upload(Dialogs.chooseUploads()) }) { Text(S.upload) }
+                DropdownMenuItem({ close(); promptNewFolder(state) }, enabled = idle) { Text(S.newFolder) }
+                DropdownMenuItem({ close(); state.upload(Dialogs.chooseUploads()) }, enabled = idle) { Text(S.upload) }
             }
-            DropdownMenuItem({ close(); promptRename(state) }, enabled = state.selection.size == 1) { Text(S.rename) }
-            DropdownMenuItem({ close(); confirmDelete(state) }, enabled = state.selection.isNotEmpty()) { Text(S.delete, color = if (state.selection.isNotEmpty()) Palette.pink else Palette.muted) }
-            DropdownMenuItem({ close(); state.importNewPhotos() }) { Text(S.importNew) }
-            DropdownMenuItem({ close(); state.importNewPhotos(chooseFolder = true) }) { Text(S.importTo) }
+            DropdownMenuItem({ close(); promptRename(state) }, enabled = idle && state.selection.size == 1) { Text(S.rename) }
+            val deletable = idle && state.selection.isNotEmpty()
+            DropdownMenuItem({ close(); confirmDelete(state) }, enabled = deletable) { Text(S.delete, color = if (deletable) Palette.pink else Palette.muted) }
+            DropdownMenuItem({ close(); state.importNewPhotos() }, enabled = idle) { Text(S.importNew) }
+            DropdownMenuItem({ close(); state.importNewPhotos(chooseFolder = true) }, enabled = idle) { Text(S.importTo) }
             if (bridge) {
                 DropdownMenuItem({ close(); state.openReceived() }) { Text(S.openReceived) }
                 DropdownMenuItem({ close(); state.sendClipboard() }) { Text(S.sendClipboard) }
                 DropdownMenuItem({ close(); state.fetchClipboard() }) { Text(S.getClipboard) }
             }
-            DropdownMenuItem({ close(); state.refresh() }) { Text(S.refresh) }
+            DropdownMenuItem({ close(); state.refresh() }, enabled = idle) { Text(S.refresh) }
             if (state.transport == Transport.USB && Platform.windows) DropdownMenuItem({ close(); Platform.openThisPc() }) { Text(S.openExplorer) }
             if (state.usbLinks.isNotEmpty() || state.wpdPhones.isNotEmpty()) {
                 DropdownMenuItem({ close(); state.mirror() }) { Text(S.mirror) }

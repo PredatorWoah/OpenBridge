@@ -40,7 +40,7 @@ private struct Sidebar: View {
                 ArchMark(size: 26)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(model.deviceName).font(.system(size: 13.5, weight: .semibold)).lineLimit(1)
-                    Text(model.fastUSB ? "Fast USB" : model.overUSB ? "USB · File transfer" : "Wi‑Fi").font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.75))
+                    Text(ConnectText.transport(model)).font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.75))
                 }
             }
             .padding(10).frame(maxWidth: .infinity, alignment: .leading)
@@ -59,7 +59,7 @@ private struct Sidebar: View {
                     .help("Show and control the phone's screen on your Mac (needs USB debugging)")
             }
             Spacer()
-            Button("Disconnect", action: model.disconnect).buttonStyle(GhostButton()).disabled(model.busy).padding(8)
+            Button("Disconnect", action: model.disconnect).buttonStyle(GhostButton()).padding(8)
         }
         .padding(.top, 44).padding(.horizontal, 10).padding(.bottom, 10)
         .frame(width: 220)
@@ -96,6 +96,7 @@ private struct Toolbar: View {
 
     private func navigation(compact: Bool) -> some View {
         HStack(spacing: 8) {
+            SelectAllBox(model: model)
             UpButton(model: model)
             ResultsButton(model: model)
             PathBar(model: model, compact: compact)

@@ -132,6 +132,8 @@ class MainActivity : ComponentActivity(), Actions {
         }
     }
 
+    override fun hotspotSettings() = Hotspot.openSystemSettings(this)
+
     override fun update() = Updater.update(this)
 
     override fun open(url: String) {

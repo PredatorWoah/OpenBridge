@@ -21,7 +21,8 @@
 - 💬 **Texts and clipboard.** Share text to OpenBridge, tap the **Send clipboard** tile, or type on the computer and send it to the phone. It lands on the other clipboard, with a history of what went where. Optionally, text you copy on the computer goes to the phone by itself.
 - 📸 **Import new photos.** One click copies only the camera photos and videos you haven't imported yet.
 - 📺 **Screen mirroring.** See and control your phone in a window, powered by [scrcpy](https://github.com/Genymobile/scrcpy). Start on the cable, then go wireless and unplug.
-- 📶 **Works on awkward Wi‑Fi.** Hotel, campus and guest networks often keep devices apart. OpenBridge notices and offers the way round: the phone's own hotspot, or the cable.
+- 📶 **No Wi‑Fi needed: use your phone's hotspot.** Turn on your phone's own hotspot, join it from the computer, and the phone shows up by itself, ready to pair. Perfect on the go, and on hotel, campus and guest networks that keep devices apart.
+- 📊 **Status at a glance.** A sun in the Mac menu bar or the Windows and Linux tray shows the connection and a progress ring while files move; click it for speed, time left and quick buttons.
 - 🎨 **Three looks, three layouts.** Dusk (the original sunset), Aurora (an observatory under the northern lights) and Tide (a harbour where the water rises with your transfers), each with its own animated layout on the Mac, Windows and Linux, and on the phone.
 - 🐘 **Big files are fine.** 4 GB and more both ways; an interrupted download or upload continues where it stopped.
 - 🛡️ **Never overwrites.** Existing files are never replaced on either side.
@@ -85,7 +86,7 @@ Pick a look in Settings on each device. Dusk is the classic sunset. **Aurora** i
 
 **Fast USB** runs the same encrypted connection as Wi‑Fi through the cable, using Android's USB debugging. Turn it on once (Settings › About phone › tap **Build number** seven times, then Developer options › **USB debugging**), plug in, and tap **Allow** on the phone. OpenBridge starts sharing on the phone by itself and switches to Fast USB. Wi‑Fi isn't needed.
 
-**Phone hotspot** is for networks that keep devices apart (common in hotels, offices, campuses and guest Wi‑Fi). On the phone, open **Settings › Phone hotspot**, join the network it shows from your computer, and it connects. On Android 12 and earlier the button opens the system hotspot settings instead.
+**Phone hotspot** works anywhere, no router needed, and gets round networks that keep devices apart (common in hotels, offices, campuses and guest Wi‑Fi). Turn on your phone's own hotspot from quick settings (any name and password, or none; your computer remembers it), join it from the computer and start sharing: the phone shows up under Phones nearby by itself. **Settings › Phone hotspot** in OpenBridge opens the phone's hotspot settings, and can also make a temporary hotspot with a name and password Android picks.
 
 **USB tethering** also works: turn it on on the phone and tap the button; OpenBridge prefers the cable. macOS doesn't support the RNDIS tethering some phones use, so on a Mac use File transfer or Fast USB instead.
 
@@ -93,7 +94,7 @@ Pick a look in Settings on each device. Dusk is the classic sunset. **Aurora** i
 
 ### Browse and transfer
 
-Double-click folders to open them, switch between list and grid, sort by name, size or kind, and filter to photos and videos. Folder sizes fill in as the phone counts them. Select with ⌘ or Ctrl and ⇧ or Shift, then **Download**; several items go into a folder you choose, keeping their structure. Drop files or folders onto the window to upload. Rename and delete from the right-click or **⋯** menu (OpenBridge asks first, because the phone has no bin). The keyboard works too: arrows, Enter to open, Backspace to go up, Delete, F2 to rename, and Ctrl/⌘+A.
+Double-click folders to open them, switch between list and grid, sort by name, size or kind, and filter to photos and videos. Folder sizes fill in as the phone counts them. Tick the checkboxes (or select with ⌘ or Ctrl and ⇧ or Shift), then **Download**; several items go into a folder you choose, keeping their structure. Drop files or folders onto the window to upload. Rename and delete from the right-click or **⋯** menu (OpenBridge asks first, because the phone has no bin). The keyboard works too: arrows, Enter to open, Backspace to go up, Delete, F2 to rename, and Ctrl/⌘+A.
 
 **Search** looks through the whole folder you're in, every subfolder included: type and press Return. Photos, videos and music come back instantly from the phone's own index; other files within a few seconds.
 

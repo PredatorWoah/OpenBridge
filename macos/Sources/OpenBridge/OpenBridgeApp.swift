@@ -184,11 +184,11 @@ struct DeviceCard: View {
                     Text(model.deviceName).font(.system(size: 18, weight: .bold, design: .rounded)).lineLimit(1)
                     HStack(spacing: 6) {
                         Circle().fill(Palette.ok).frame(width: 7, height: 7).shadow(color: Palette.ok, radius: 4).accessibilityHidden(true)
-                        Text(model.fastUSB ? "Fast USB" : model.overUSB ? "USB · File transfer" : "Wi‑Fi · \(model.host)").foregroundStyle(Palette.muted)
+                        Text(model.fastUSB || model.overUSB ? ConnectText.transport(model) : "\(ConnectText.transport(model)) · \(model.host)").foregroundStyle(Palette.muted)
                     }.font(.system(size: 12.5))
                 }
                 Spacer()
-                Button("Disconnect", action: model.disconnect).buttonStyle(GhostButton()).disabled(model.busy)
+                Button("Disconnect", action: model.disconnect).buttonStyle(GhostButton())
             }
             // Chips wrap onto another row rather than shortening their names.
             FlowLayout(spacing: 8) {
@@ -500,12 +500,19 @@ struct OpenBridgeApp: App {
     }
 
     var body: some Scene {
-        WindowGroup { RootView(model: model) }
+        WindowGroup(id: MainWindow.id) { RootView(model: model) }
             .windowStyle(.hiddenTitleBar)
             .defaultSize(width: 980, height: 660)
         Window("Phone Screen", id: "mirror") { MirrorView() }
             .windowStyle(.hiddenTitleBar)
             .defaultSize(width: 380, height: 780)
         Settings { SettingsView(model: model) }
+        // Always in the menu bar while OpenBridge runs: the phone, the transfer and the main actions.
+        MenuBarExtra {
+            MenuBarContent(model: model)
+        } label: {
+            MenuBarIcon(model: model)
+        }
+        .menuBarExtraStyle(.window)
     }
 }

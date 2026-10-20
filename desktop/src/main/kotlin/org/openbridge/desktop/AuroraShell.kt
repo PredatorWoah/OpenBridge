@@ -308,6 +308,7 @@ private fun SheetToolbar(state: AppState, searchFocus: FocusRequester, compact: 
     Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         IconButton(Icons.Filled.ArrowUpward, S.up, enabled = state.path.size > 1 && !state.busy) { state.up() }
+        SelectAllBox(state, Look.AURORA)
         SearchField(state, searchFocus, Modifier.weight(1f))
         SearchAllButton(state)
         SortButton(state)

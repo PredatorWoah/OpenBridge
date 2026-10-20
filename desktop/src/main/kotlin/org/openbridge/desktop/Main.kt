@@ -43,8 +43,15 @@ fun main() {
     application {
         val window = rememberWindowState(size = DpSize(1060.dp, 700.dp))
         val searchFocus = remember { FocusRequester() }
+        var main by remember { mutableStateOf<java.awt.Window?>(null) }
+        // The tray's status and menu; "Open OpenBridge" brings this window back to the front.
+        StatusTray(state) {
+            window.isMinimized = false
+            main?.apply { isVisible = true; toFront(); requestFocus() }
+        }
         Window(onCloseRequest = ::exitApplication, title = "OpenBridge", state = window, icon = painterResource("icon.png"),
             onKeyEvent = { shortcut(state, it, searchFocus) }) {   // after the focused field, so typing in search never triggers these
+            SideEffect { main = this.window }
             var dropping by remember { mutableStateOf(false) }
             DisposableEffect(Unit) {
                 // Files dragged from the file manager upload into the open phone folder.

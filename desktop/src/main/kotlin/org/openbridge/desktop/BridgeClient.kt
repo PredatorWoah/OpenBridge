@@ -60,18 +60,19 @@ class BridgeClient internal constructor(
          * A phone that is busy with other requests drops the extra connection during the handshake, before any
          * request is sent, so that is retried a few times.
          */
-        private fun connect(host: String, port: Int, pin: ByteArray?, seen: (ByteArray) -> Unit = {}): SSLSocket {
+        private fun connect(host: String, port: Int, pin: ByteArray?, seen: (ByteArray) -> Unit = {}, stop: () -> Boolean = { false },
+                            created: (SSLSocket) -> Unit = {}): SSLSocket {
             var attempt = 0
             while (true) {
-                try { return open(host, port, pin, 10_000, seen) }
+                try { return open(host, port, pin, 10_000, seen, created) }
                 catch (e: BridgeException) {
-                    if (e.message == S.certificateChanged || ++attempt >= 4) throw e
+                    if (e.message == S.certificateChanged || ++attempt >= 4 || stop()) throw e
                     Thread.sleep(250L * attempt)
                 }
             }
         }
 
-        private fun open(host: String, port: Int, pin: ByteArray?, timeout: Int, seen: (ByteArray) -> Unit): SSLSocket {
+        private fun open(host: String, port: Int, pin: ByteArray?, timeout: Int, seen: (ByteArray) -> Unit, created: (SSLSocket) -> Unit = {}): SSLSocket {
             val trust = object : X509TrustManager {
                 override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) = throw CertificateException()
                 override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {
@@ -83,6 +84,7 @@ class BridgeClient internal constructor(
             }
             val context = SSLContext.getInstance("TLS").apply { init(null, arrayOf(trust), SecureRandom()) }
             val socket = context.socketFactory.createSocket() as SSLSocket
+            created(socket)
             socket.enabledProtocols = socket.supportedProtocols.filter { it == "TLSv1.2" || it == "TLSv1.3" }.toTypedArray()
             // A probe gives up quickly; requests wait as long as the phone may take to answer.
             socket.soTimeout = if (timeout < 10_000) timeout else TIMEOUT
@@ -103,7 +105,7 @@ class BridgeClient internal constructor(
          */
         fun fingerprintAt(host: String, port: Int, timeout: Int = 3_000): ByteArray? {
             var seen: ByteArray? = null
-            return try { open(host, port, null, timeout) { seen = it }.close(); seen } catch (_: Exception) { null }
+            return try { open(host, port, null, timeout, seen = { seen = it }).close(); seen } catch (_: Exception) { null }
         }
 
         /** Whether anything listens at the address, checked quickly, before trying a saved phone for real. */
@@ -138,7 +140,7 @@ class BridgeClient internal constructor(
 
         private fun exchange(host: String, port: Int, opened: (Closeable) -> Unit, name: String?, transport: Transport, show: (String) -> Unit): BridgeClient {
             var fingerprint: ByteArray? = null
-            connect(host, port, null) { fingerprint = it }.also(opened).use { socket ->
+            connect(host, port, null, seen = { fingerprint = it }).also(opened).use { socket ->
                 val f = fingerprint ?: throw BridgeException("The phone sent no certificate.")
                 val input = DataInputStream(socket.inputStream.buffered())
                 val output = DataOutputStream(socket.outputStream.buffered())
@@ -174,20 +176,64 @@ class BridgeClient internal constructor(
     /** Where the secret may go: the phone's private Wi‑Fi address, or the Fast USB tunnel on this computer. */
     private val allowed = if (transport == Transport.FAST_USB) host == "127.0.0.1" else privateIPv4(host)
 
+    /** Connections open now, so [close] can cut them all at once (Disconnect, or the phone found gone). */
+    private val live: MutableSet<java.net.Socket> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+    @Volatile private var closed = false
+
+    /** Ends every request running on this client at once and refuses new ones: it's done with. */
+    fun close() {
+        closed = true
+        live.forEach { runCatching { it.close() } }
+    }
+
     private fun <T> request(operation: Int, id: String, extra: (DataOutputStream) -> Unit = {}, body: (DataInputStream, DataOutputStream) -> T): T {
         if (!allowed) throw BridgeException(S.badAddress)
-        return connect(host, port, fingerprint).use { socket ->
-            try {
+        if (closed) throw BridgeException(S.dropped, lost = true)
+        // Tracked from before it connects, so closing also cuts a connection still waiting for the phone.
+        val socket = try { connect(host, port, fingerprint, stop = { closed }, created = { live += it; if (closed) it.close() }) }
+            catch (e: Exception) { live.removeIf { it.isClosed }; throw e }
+        return talk(socket, operation, id, extra, body)
+    }
+
+    /** Sends one request on an open connection and reads its answer with `body`, then closes the connection. */
+    private fun <T> talk(socket: SSLSocket, operation: Int, id: String, extra: (DataOutputStream) -> Unit, body: (DataInputStream, DataOutputStream) -> T): T {
+        live += socket
+        if (closed) socket.close()
+        return try {
+            socket.use {
                 val input = DataInputStream(socket.inputStream.buffered(1 shl 16))
                 val output = DataOutputStream(socket.outputStream.buffered(1 shl 16))
                 output.write(Wire.MAGIC); output.write(secret); output.writeByte(operation); Wire.writeString(output, id)
                 extra(output)
                 output.flush()
                 body(input, output)
-            } catch (e: BridgeException) { throw e }
-            // Reset, timed out or closed mid-request: the phone stopped sharing or left the network.
-            catch (e: IOException) { throw BridgeException(S.dropped, lost = true) }
+            }
+        } catch (e: BridgeException) { throw e }
+        // Reset, timed out or closed mid-request: the phone stopped sharing or left the network.
+        catch (e: IOException) { throw BridgeException(S.dropped, lost = true) }
+        finally { live -= socket }
+    }
+
+    /**
+     * A quick sign of life (INFO, with short timeouts): returns when the phone answers anything, even an error, as
+     * phones before 0.13.0 do. Throws a `lost` [BridgeException] when it can't be reached, a `forgotten` one when it
+     * no longer knows this computer. The handshake is tried twice: a busy phone may drop one extra connection.
+     */
+    fun ping(timeout: Int = 3_000) {
+        if (!allowed || closed) throw BridgeException(S.dropped, lost = true)
+        val track = { socket: SSLSocket -> live += socket; if (closed) socket.close() }
+        val socket = try { open(host, port, fingerprint, timeout, {}, track) } catch (e: BridgeException) {
+            live.removeIf { it.isClosed }
+            if (e.forgotten || closed) throw e
+            Thread.sleep(300)
+            try { open(host, port, fingerprint, timeout, {}, track) } catch (again: BridgeException) { live.removeIf { it.isClosed }; throw again }
         }
+        try {
+            talk(socket, 18, "", {}) { input, _ ->
+                status(input)
+                Wire.readString(input, 64); input.readInt(); Wire.readString(input, 128)
+            }
+        } catch (e: BridgeException) { if (e.lost) throw e }   // an error answer is still an answer
     }
 
     override fun list(id: String): List<Entry> = request(1, id) { input, _ ->

@@ -79,7 +79,7 @@ class SharingServer(private val context: Context, private val store: Store, priv
          */
         const val HOTSPOT_PORT = 41986
         /** The phone's TLS identity: made once and kept, so paired computers recognize it later. */
-        private const val IDENTITY = "openbridge-identity"
+        private const val IDENTITY = "openbridge-identity-ec"
     }
 
     /** A listening socket on one address, with its own session so requests are told apart by how they came in. */
@@ -88,6 +88,8 @@ class SharingServer(private val context: Context, private val store: Store, priv
         /** The catch-all: every address, until a connection shows which one the hotspot has. */
         val wildcard get() = address.isAnyLocalAddress
         @Volatile var learned: InetAddress? = null
+        @Volatile var handshakeLogged = false
+        @Volatile var handshakeFailureLogged = false
         val shown get() = !wildcard || learned != null
         val endpoint get() = Endpoint(via, (learned ?: address).hostAddress!!, socket.localPort)
     }
@@ -144,14 +146,15 @@ class SharingServer(private val context: Context, private val store: Store, priv
 
     init {
         // One identity for as long as the app is installed, so paired computers reconnect without a code. The private
-        // key never leaves the AndroidKeyStore. Earlier versions made a new one on every start; drop that one.
+        // key never leaves the AndroidKeyStore. It's a P-256 key that allows DIGEST_NONE: Android's TLS signs the
+        // handshake through the keystore with a raw "NONEwithECDSA" operation, so a key without it fails every
+        // handshake (as the RSA identity of 1.1.1 and earlier did on some phones). Drop the older identities.
         val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        if (keyStore.containsAlias("openbridge-session")) keyStore.deleteEntry("openbridge-session")
-        if (!keyStore.containsAlias(IDENTITY)) KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_RSA, "AndroidKeyStore").apply {
+        for (old in listOf("openbridge-session", "openbridge-identity")) if (keyStore.containsAlias(old)) keyStore.deleteEntry(old)
+        if (!keyStore.containsAlias(IDENTITY)) KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, "AndroidKeyStore").apply {
             initialize(KeyGenParameterSpec.Builder(IDENTITY, KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY)
-                .setKeySize(2048)
-                .setDigests(KeyProperties.DIGEST_SHA256, KeyProperties.DIGEST_SHA384, KeyProperties.DIGEST_SHA512)
-                .setSignaturePaddings(KeyProperties.SIGNATURE_PADDING_RSA_PKCS1, KeyProperties.SIGNATURE_PADDING_RSA_PSS)
+                .setAlgorithmParameterSpec(java.security.spec.ECGenParameterSpec("secp256r1"))
+                .setDigests(KeyProperties.DIGEST_NONE, KeyProperties.DIGEST_SHA256, KeyProperties.DIGEST_SHA384, KeyProperties.DIGEST_SHA512)
                 .setCertificateSubject(X500Principal("CN=OpenBridge"))
                 .setCertificateNotBefore(Date(System.currentTimeMillis() - 86_400_000))
                 .setCertificateNotAfter(Date(System.currentTimeMillis() + 25L * 365 * 86_400_000))
@@ -253,8 +256,9 @@ class SharingServer(private val context: Context, private val store: Store, priv
         val served = doors.firstOrNull { it.via == Via.HOTSPOT && !it.wildcard }
         if (served != null && served.address == address) return
         if (served != null) { shut(served); Log.add("Hotspot address went away") }
-        if (address != null) open(Via.HOTSPOT, address, listOf(PREFERRED_PORT, 0))
-        else if (Hotspot.on && !interfacesLogged) {
+        if (address != null) { unrecognized = 0; open(Via.HOTSPOT, address, listOf(PREFERRED_PORT, 0)) }
+        else if (Hotspot.on && !interfacesLogged && ++unrecognized >= 3) {
+            // Only once it's had a few seconds to get its address, so a hotspot that's still starting isn't reported.
             // For diagnostics: what this phone calls its interfaces, when its hotspot can't be told apart.
             interfacesLogged = true
             val seen = runCatching { java.net.NetworkInterface.getNetworkInterfaces()?.toList().orEmpty() }.getOrDefault(emptyList())
@@ -263,6 +267,7 @@ class SharingServer(private val context: Context, private val store: Store, priv
         }
     }
     private var interfacesLogged = false
+    private var unrecognized = 0
 
     private fun present(door: Door): Boolean = when (door.via) {
         Via.TETHER -> usbTetherAddress() == door.address
@@ -329,7 +334,18 @@ class SharingServer(private val context: Context, private val store: Store, priv
                     workers.execute {
                         try {
                             socket.use {
-                                it.startHandshake()
+                                try { it.startHandshake() } catch (e: IOException) {
+                                    // For diagnostics, once per listener: a computer got through but the TLS didn't.
+                                    if (door.via == Via.HOTSPOT && !door.handshakeFailureLogged) {
+                                        door.handshakeFailureLogged = true
+                                        Log.add("Hotspot: a computer at ${socket.inetAddress.hostAddress} connected to port ${door.socket.localPort} but the secure handshake failed (${e.javaClass.simpleName}: ${e.message})")
+                                    }
+                                    throw e
+                                }
+                                if (door.via == Via.HOTSPOT && !door.handshakeLogged) {
+                                    door.handshakeLogged = true
+                                    Log.add("Hotspot: secure connection from ${socket.inetAddress.hostAddress} on port ${door.socket.localPort}")
+                                }
                                 door.session.serve(it.inputStream, it.outputStream)
                             }
                         } catch (_: Exception) {
@@ -346,7 +362,7 @@ class SharingServer(private val context: Context, private val store: Store, priv
     }, "openbridge-${door.via.name.lowercase()}").start()
 
     private fun publish(): Boolean {
-        val now = doors.filter { it.shown }.sortedBy { it.via.ordinal }.map { it.endpoint }.distinctBy { it.via to it.host }
+        val now = doors.filter { it.shown }.sortedWith(compareBy({ it.via.ordinal }, { it.wildcard })).map { it.endpoint }.distinctBy { it.via to it.host }
         if (now == endpoints) return false
         endpoints = now
         return true

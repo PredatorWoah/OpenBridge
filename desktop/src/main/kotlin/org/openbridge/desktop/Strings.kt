@@ -37,6 +37,16 @@ object S {
             "投屏需要 scrcpy。请先安装（例如：sudo apt install scrcpy），或使用自带投屏组件的 OpenBridge 下载版本。")
     fun mirrorStopped(code: Int) = t("Screen mirroring stopped (code $code).", "投屏已停止（代码 $code）。")
     val disconnect = t("Disconnect", "断开连接")
+    val openApp = t("Open OpenBridge", "打开 OpenBridge")
+    val quit = t("Quit", "退出")
+    val cancelTransfer = t("Cancel transfer", "取消传输")
+    val notConnected = t("Not connected", "未连接")
+    val connectedWord = t("Connected", "已连接")
+    fun timeLeft(seconds: Long) = when {
+        seconds < 60 -> t("$seconds s left", "剩余 $seconds 秒")
+        seconds < 3600 -> ((seconds + 59) / 60).let { t("$it min left", "剩余 $it 分钟") }
+        else -> (seconds / 3600).let { hours -> ((seconds % 3600) / 60).let { t("$hours h $it min left", "剩余 $hours 小时 $it 分钟") } }
+    }
     val close = t("Close", "关闭")
     val up = t("Up", "上一级")
     val refresh = t("Refresh", "刷新")
@@ -57,6 +67,10 @@ object S {
     val sortKind = t("Kind", "类型")
     val sort = t("Sort", "排序")
     val more = t("More", "更多")
+    val selectAll = t("Select all", "全选")
+    val selectNone = t("Select none", "全不选")
+    fun selectItem(name: String) = t("Select $name", "选择 $name")
+    fun selectedCount(count: Int, total: Int) = t("$count of $total selected", "已选 $count / $total 项")
     val emptyFolder = t("This folder is empty. Drop files here to upload them.", "此文件夹为空。把文件拖到这里即可上传。")
     val dropHere = t("Drop to upload", "松开即可上传")
     val resume = t("Resume", "继续")
@@ -125,6 +139,7 @@ object S {
         "Couldn't reach the phone at $address. Check that sharing is on and both are on the same Wi‑Fi. If a VPN or proxy is on, allow local network (LAN) traffic or turn it off.",
         "无法连接到手机 $address。请确认手机正在共享，且两者连接同一个 Wi‑Fi。如果开着 VPN 或代理，请允许局域网流量或暂时关闭。")
     val dropped = t("The connection to the phone dropped.", "与手机的连接已断开。")
+    val connectionLost = t("Lost the connection to the phone.", "与手机的连接已中断。")
     val lostHint = t("Tap the sun on the phone and pair again. Unfinished transfers continue by themselves.",
         "请在手机上点一下太阳并重新配对，未完成的传输会自动继续。")
     val usbLostHint = t("Check the cable and that the phone is unlocked. Unfinished transfers continue when it's back.",

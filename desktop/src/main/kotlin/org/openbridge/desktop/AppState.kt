@@ -43,14 +43,25 @@ enum class Kind { FOLDER, IMAGE, VIDEO, AUDIO, DOCUMENT, ARCHIVE, APP, OTHER;
 
 /** One transfer; `at` is the phone folder by name, so it can be found again after pairing anew. */
 sealed class Job(val name: String) {
-    class Download(val entry: Entry, val target: File, val at: List<String>) : Job(entry.name)
-    class Upload(val file: File, val into: String, val at: List<String>, name: String = file.name) : Job(name)
+    /** How many bytes it moves. */
+    abstract val size: Long
+    class Download(val entry: Entry, val target: File, val at: List<String>) : Job(entry.name) { override val size get() = entry.size }
+    class Upload(val file: File, val into: String, val at: List<String>, name: String = file.name) : Job(name) { override val size get() = file.length() }
 }
 
+/** A queue of transfers: the file moving now (`index` of `count`, `fraction` of it), and bytes moved of the whole queue. */
 data class Transfer(
     val name: String, val upload: Boolean, val index: Int = 1, val count: Int = 1, val fraction: Float = 0f,
     val done: Boolean = false, val saved: File? = null, val remaining: List<Job> = emptyList(), val connection: Int = 0,
-)
+    val bytesDone: Long = 0, val bytesTotal: Long = 0,
+) {
+    /** How far the whole queue is, 0 to 1: by bytes when they're known, else by files. */
+    val progress: Float get() = when {
+        done -> 1f
+        bytesTotal > 0 -> (bytesDone.toFloat() / bytesTotal).coerceIn(0f, 1f)
+        else -> overallProgress(this)
+    }
+}
 
 /**
  * The desktop app's state. Work runs on one background thread, one task at a time; the UI reads these values.
@@ -156,6 +167,12 @@ class AppState {
     /** Set when quitting or installing an update: Fast USB stops calling adb, which would start its server again. */
     @Volatile private var quitting = false
     @Volatile private var cancelled = false
+    /** Set by Disconnect while work runs: what that work still reports is dropped quietly. */
+    @Volatile private var hungUp = false
+    /** Checks the open phone still answers while idle (Wi‑Fi and Fast USB). */
+    private val liveness = Liveness()
+    /** How fast the running transfer moves, over the last two seconds or so. */
+    private val meter = SpeedMeter()
     // Counts connections, on the worker thread, so a transfer planned on an earlier one finds its files again.
     @Volatile private var connection = 0
     private var lastKey: String? = null
@@ -179,6 +196,7 @@ class AppState {
             }
         }
         daemon("openbridge-searching") { Thread.sleep(10_000); ui { searchedLong = true } }
+        daemon("openbridge-liveness") { while (true) { Thread.sleep(250); runCatching { checkLiveness() } } }
         // Phones in File transfer mode; Windows only. Not while a phone is open over Fast USB: it would be listed twice.
         if (Platform.windows) daemon("openbridge-wpd") {
             while (true) {
@@ -209,7 +227,7 @@ class AppState {
                 val text = watch.changed(SystemClipboard.text()) ?: continue
                 texting.execute {
                     try { phone.setClipboard(text); ui { addText(TextItem(text, fromPhone = false, at = System.currentTimeMillis())) } }
-                    catch (e: Exception) { Log.add("Copied text not sent: ${e.message}") }
+                    catch (e: Exception) { Log.add("Copied text not sent: ${e.message}"); suspect(e) }
                 }
             }
         }
@@ -226,23 +244,61 @@ class AppState {
         Thread { Thread.sleep(2_500); ui { if (toast == message) toast = null } }.apply { isDaemon = true }.start()
     }
 
-    /** Runs blocking work in the background; errors become a readable message. */
+    /**
+     * Runs blocking work in the background; errors become a readable message. A network error on a phone open over
+     * Wi‑Fi or Fast USB shows, and has the phone checked at once: it's dropped only if it doesn't answer that either.
+     */
     private fun run(work: () -> Unit) {
         if (busy) return
-        busy = true; error = null; cancelled = false
+        busy = true; error = null; cancelled = false; hungUp = false
+        val phone = source
         worker.execute {
-            try { work() }
-            catch (e: InterruptedException) { ui { status = S.cancelled; transfer = null } }
+            try { work(); if (phone is BridgeClient) liveness.alive(System.currentTimeMillis()) }
+            catch (e: InterruptedException) { ui { status = if (hungUp) "" else S.cancelled; transfer = null } }
             catch (e: Exception) {
                 Log.add("Failed (${transport.english}): ${e.message ?: e.javaClass.simpleName}")
                 when {
+                    hungUp -> ui { status = ""; transfer = transfer?.takeIf { it.done } }   // Disconnect: already at the start
                     cancelled && source == null -> ui { status = "" }   // pairing cancelled
                     e is BridgeException && e.forgotten -> ui { current?.let(::forgetPhone); lose(S.forgotten) }
+                    e is BridgeException && e.lost && phone is BridgeClient && source === phone -> {
+                        liveness.suspect()
+                        ui { if (source === phone) error = e.message ?: S.dropped else lose(e.message ?: S.dropped) }
+                    }
                     e is BridgeException && e.lost -> ui { lose(e.message ?: S.dropped) }
                     else -> ui { error = e.message ?: e.toString() }
                 }
             }
             finally { pairing = null; ui { busy = false; pairingCode = null; pairingOver = null } }
+        }
+    }
+
+    /** A request outside the worker failed: a network error has the phone checked at once; the phone's own answers don't. */
+    private fun suspect(e: Throwable) {
+        if ((e is BridgeException && e.lost && !e.forgotten) || (e is java.io.IOException && e !is BridgeException)) liveness.suspect()
+    }
+
+    /**
+     * One turn of the liveness check (on its own thread, about four times a second): while a phone is open over
+     * Wi‑Fi or Fast USB and nothing else runs, it's asked for a sign of life when one is due. Two misses in a row
+     * take the window back to the start, where the saved phone's reconnecting takes over (and continues an
+     * interrupted transfer). Running work notices a lost phone by itself.
+     */
+    private fun checkLiveness() {
+        val phone = bridge
+        val now = System.currentTimeMillis()
+        liveness.watch(phone, now)
+        if (phone == null || busy || quitting || !liveness.due(now)) return
+        val result = try { phone.ping(); null } catch (e: Exception) { e }
+        if (source !== phone) return
+        when {
+            result == null -> { if (liveness.failures() > 0) Log.add("The phone answers again"); liveness.record(phone, true, System.currentTimeMillis()) }
+            result is BridgeException && result.forgotten -> ui { if (source === phone) { current?.let(::forgetPhone); lose(S.forgotten) } }
+            liveness.record(phone, false, System.currentTimeMillis()) -> {
+                Log.add("The phone stopped answering (${transport.english}): ${result.message ?: result.javaClass.simpleName}")
+                ui { if (source === phone && !busy) lose(S.connectionLost) }
+            }
+            else -> Log.add("The phone didn't answer a liveness check (${transport.english})")
         }
     }
 
@@ -311,12 +367,14 @@ class AppState {
 
     /** Shows a connected phone, and continues an interrupted transfer when it's the same phone as before. */
     private fun opened(phone: PhoneSource, via: Transport, name: String, key: String, saved: SavedPhone?, top: List<Entry>, serial: String? = null) {
+        if (hungUp) { (phone as? BridgeClient)?.close(); throw InterruptedException() }
         connection++
         val samePhone = lastKey == key
         lastKey = key
         autoConnect = true
         Log.add("Connected over ${via.english}" + if (phone is BridgeClient && via == Transport.WIFI) " (${phone.host}:${phone.port})" else "")
         ui {
+            if (hungUp) { (phone as? BridgeClient)?.close(); return@ui }
             source = phone; transport = via; current = saved; usbSerial = serial; openKey = key; deviceName = name
             path = listOf("" to S.phone); entries = top; selection = emptySet(); cursor = null; anchor = null; status = ""; thumbnails = emptyMap(); sizes = emptyMap()
             pendingSizes.clear(); pendingPreviews.clear(); query = ""; results = null; phoneInfo = null; phoneOutdated = null
@@ -360,7 +418,7 @@ class AppState {
 
     /** Asks the phone app's version once; tells the user to update it when it's older than this app. */
     private fun describe(phone: BridgeClient) = texting.execute {
-        val info = try { phone.info() } catch (e: BridgeException) { if (!e.unsupported) return@execute; null } catch (_: Exception) { return@execute }
+        val info = try { phone.info() } catch (e: BridgeException) { if (!e.unsupported) { suspect(e); return@execute }; null } catch (e: Exception) { suspect(e); return@execute }
         Log.add(if (info != null) "Phone app ${info.version} (revision ${info.revision})" else "Phone app older than 0.13.0 (no INFO)")
         val mine = AppVersion.current
         val outdated = when {
@@ -389,8 +447,9 @@ class AppState {
                 if (withTexts && e.unsupported) { withTexts = false; continue }
                 // A phone app before 0.12.0 can't send: stop asking.
                 if (e.unsupported || e.message?.contains("not available") == true) return@daemon
+                if (source === phone) suspect(e)
                 Thread.sleep(3_000); continue
-            } catch (_: Exception) { Thread.sleep(3_000); continue }
+            } catch (e: Exception) { if (source === phone) suspect(e); Thread.sleep(3_000); continue }
             for (item in waiting) {
                 if (source !== phone) break
                 try {
@@ -404,7 +463,7 @@ class AppState {
                         phone.receive(item.entry, target)
                         ui { received = target; show(S.received(item.entry.name)) }
                     }
-                } catch (_: Exception) { Thread.sleep(2_000); break }
+                } catch (e: Exception) { if (source === phone) suspect(e); Thread.sleep(2_000); break }
             }
         }
     }
@@ -431,7 +490,7 @@ class AppState {
         if (text.toByteArray().size > org.openbridge.protocol.Wire.MAX_CLIPBOARD) { show(S.tooLong); return }
         texting.execute {
             try { phone.setClipboard(text); ui { addText(TextItem(text, false, System.currentTimeMillis())); show(S.sentText); done() } }
-            catch (e: Exception) { ui { show(e.message ?: S.dropped) } }
+            catch (e: Exception) { suspect(e); ui { show(e.message ?: S.dropped) } }
         }
     }
 
@@ -450,7 +509,7 @@ class AppState {
                     if (text.isEmpty()) show(S.emptyClipboard)
                     else { watch.arrived(text); SystemClipboard.put(text); addText(TextItem(text, true, System.currentTimeMillis())); show(S.gotClipboard) }
                 }
-            } catch (e: Exception) { ui { show(e.message ?: S.dropped) } }
+            } catch (e: Exception) { suspect(e); ui { show(e.message ?: S.dropped) } }
         }
     }
 
@@ -666,12 +725,23 @@ class AppState {
         }
     }
 
+    /**
+     * Back to the start at once, whatever is running: the running work is cancelled and its connections cut (a
+     * transfer stops; one that had already stopped stays, to continue later). The phone doesn't reconnect by itself
+     * until the next connection.
+     */
     fun disconnect() {
-        if (busy) return
+        val phone = source
         autoConnect = false
         Log.add("Disconnected by the user")
+        if (busy) {
+            cancelled = true; hungUp = true
+            runCatching { pairing?.close() }
+            if (transfer?.done == false) transfer = null
+        }
+        (phone as? BridgeClient)?.close()
         source = null; current = null; usbSerial = null; entries = emptyList(); path = listOf("" to S.phone); selection = emptySet(); thumbnails = emptyMap()
-        phoneInfo = null; phoneOutdated = null
+        pendingPreviews.clear(); phoneInfo = null; phoneOutdated = null; status = ""; error = null; results = null
     }
 
     /** The phone is gone (stopped sharing, new identity, left the Wi‑Fi, cable out): back to the start, keeping unfinished transfers. */
@@ -679,6 +749,7 @@ class AppState {
         if (source == null) { error = message; return }
         val hint = if (transport == Transport.WIFI) S.lostHint else S.usbLostHint
         Log.add("Lost the phone (${transport.english}): $message")
+        (source as? BridgeClient)?.close()
         source = null; current = null; usbSerial = null; entries = emptyList(); path = listOf("" to S.phone); selection = emptySet(); thumbnails = emptyMap()
         pendingPreviews.clear(); phoneInfo = null; phoneOutdated = null
         error = "$message $hint"
@@ -842,6 +913,13 @@ class AppState {
     }
 
     fun selectAll() { selection = rows.toSet() }
+    fun selectNone() { selection = emptySet() }
+
+    /** A row's checkbox: adds or removes that item, keeping the rest of the selection. */
+    fun toggle(entry: Entry) {
+        selection = if (entry.id in selection) selection - entry.id else selection + entry.id
+        anchor = entry.id; cursor = entry.id
+    }
     val selected: List<Entry> get() = sorted.filter { it.id in selection }
 
     fun loadThumbnail(entry: Entry) {
@@ -849,7 +927,7 @@ class AppState {
         if (!Kind.of(entry).previewable || entry.id in thumbnails || !pendingPreviews.add(entry.id)) return
         previews.execute {
             val image = if (source !== phone) null
-                else runCatching { org.jetbrains.skia.Image.makeFromEncoded(phone.thumbnail(entry)).toComposeImageBitmap() }.getOrNull()
+                else runCatching { org.jetbrains.skia.Image.makeFromEncoded(phone.thumbnail(entry)).toComposeImageBitmap() }.onFailure(::suspect).getOrNull()
             // Without a preview the row keeps its icon; it asks again the next time the folder opens.
             ui { pendingPreviews.remove(entry.id); if (image != null && source === phone) thumbnails = thumbnails + (entry.id to image) }
         }
@@ -860,7 +938,7 @@ class AppState {
         val phone = source ?: return
         if (!entry.directory || entry.id in sizes || !pendingSizes.add(entry.id)) return
         previews.execute {
-            val size = if (source !== phone) null else runCatching { phone.measure(entry) }.getOrNull()
+            val size = if (source !== phone) null else runCatching { phone.measure(entry) }.onFailure(::suspect).getOrNull()
             ui { if (size != null && source === phone) sizes = sizes + (entry.id to size) }
         }
     }
@@ -944,15 +1022,26 @@ class AppState {
         val upload = jobs[0] is Job.Upload
         var last: File? = null
         val folders = HashMap<String, List<Entry>>()
+        val total = jobs.sumOf { it.size }
+        var before = 0L   // bytes of the files finished so far
+        var skipped = 0L  // bytes that were already there (continued files): not counted as speed
+        meter.reset(); meter.add(System.currentTimeMillis(), 0)
         jobs.forEachIndexed { index, job ->
             if (cancelled) throw InterruptedException()
-            ui { transfer = Transfer(job.name, upload, index + 1, jobs.size, 0f, remaining = jobs.drop(index), connection = planned) }
+            val start = before
+            ui { transfer = Transfer(job.name, upload, index + 1, jobs.size, 0f, remaining = jobs.drop(index), connection = planned, bytesDone = start, bytesTotal = total) }
             val current = if (planned == connection) job else relocate(job, phone, folders)
-            val progress = { done: Long, total: Long -> ui { transfer = transfer?.copy(fraction = if (total == 0L) 1f else done.toFloat() / total) } }
+            var first = true
+            val progress = { done: Long, size: Long ->
+                if (first) { skipped += done; first = false }
+                meter.add(System.currentTimeMillis(), start + done - skipped)
+                ui { transfer = transfer?.copy(fraction = if (size == 0L) 1f else done.toFloat() / size, bytesDone = start + done) }
+            }
             when (current) {
                 is Job.Download -> { phone.download(current.entry, current.target, { cancelled }, progress); last = current.target }
                 is Job.Upload -> uploadNamed(phone, current, progress)
             }
+            before += job.size
         }
         val listed = runCatching { phone.list(path.last().first) }.getOrNull()
         ui {
@@ -1002,6 +1091,9 @@ class AppState {
     }
 
     fun dismissTransfer() { transfer = null }
+
+    /** Bytes a second the running transfer moves now, averaged over about two seconds; 0 when none runs. */
+    fun rate(): Double = if (transfer?.let { !it.done && busy } == true) meter.rate(System.currentTimeMillis()) else 0.0
 
     // Updates and settings
 

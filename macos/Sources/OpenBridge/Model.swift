@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Network
 import BridgeCore
 
 /// What a file is, from its name: decides its icon, colour, sorting group and whether it has a preview.
@@ -82,6 +83,8 @@ final class BrowserModel: ObservableObject {
     @Published private(set) var update: AvailableUpdate?
     let updater = Updater()
     let texts = TextHistory()
+    /// Connected over Wi‑Fi to the phone's own hotspot: the phone is this Mac's default gateway.
+    @Published private(set) var viaHotspot = false
     /// Fast USB: the phone's own sharing reached through USB debugging. (`overUSB` means File transfer, MTP.)
     @Published private(set) var fastUSB = false
     /// A phone with USB debugging on is plugged in.
@@ -162,6 +165,16 @@ final class BrowserModel: ObservableObject {
         var connection = 0
         /// The phone the transfer was for, to continue it automatically when that phone comes back.
         var phone = ""
+        /// Bytes in the whole batch (0 when unknown), and in the files already finished.
+        var totalBytes: Int64 = 0
+        var finishedBytes: Int64 = 0
+        /// The running file: bytes so far and its size.
+        var currentBytes: Int64 = 0
+        var currentTotal: Int64 = 0
+
+        /// Bytes moved so far and in all, for "x of y" and the time left: the batch when its size is known, else the file.
+        var bytesSoFar: Int64 { totalBytes > 0 ? finishedBytes + currentBytes : currentBytes }
+        var bytesInAll: Int64 { totalBytes > 0 ? totalBytes : currentTotal }
     }
 
     /// One transfer. `at` is the phone folder by name (from the top), so the job can be found again after
@@ -177,6 +190,44 @@ final class BrowserModel: ObservableObject {
         }
     }
 
+    /// How fast the transfer moves, in bytes per second: smoothed over about 2 seconds, from the progress reports.
+    @Published private(set) var speed: Double = 0
+    /// When the speed was last measured; an old measurement means the transfer stalled.
+    private(set) var speedMeasured: Date?
+    private var speedSample: (bytes: Int64, at: Date)?
+
+    /// The speed, or 0 when nothing has moved for a few seconds.
+    func currentSpeed(at now: Date = Date()) -> Double {
+        guard let measured = speedMeasured, now.timeIntervalSince(measured) < 4 else { return 0 }
+        return speed
+    }
+
+    /// Seconds until the transfer is done at the current speed, when that can be told.
+    func timeLeft(at now: Date = Date()) -> Double? {
+        guard let transfer, !transfer.done else { return nil }
+        let rate: Double = currentSpeed(at: now)
+        let left: Int64 = transfer.bytesInAll - transfer.bytesSoFar
+        guard rate > 1, transfer.bytesInAll > 0, left >= 0 else { return nil }
+        return Double(left) / rate
+    }
+
+    private func resetSpeed() { speed = 0; speedMeasured = nil; speedSample = nil }
+
+    /// An exponential moving average of the rate between progress reports, with a 2-second time constant.
+    private func measureSpeed(_ done: Int64) {
+        let now = Date()
+        guard let last = speedSample else { speedSample = (done, now); return }
+        let seconds: Double = now.timeIntervalSince(last.at)
+        guard seconds >= 0.15 else { return }
+        // A new file starts again from 0: what it has so far is what moved.
+        let moved: Int64 = done >= last.bytes ? done - last.bytes : done
+        speedSample = (done, now)
+        let rate: Double = Double(moved) / seconds
+        let weight: Double = 1 - exp(-seconds / 2)
+        speed = speedMeasured == nil ? rate : speed + (rate - speed) * weight
+        speedMeasured = now
+    }
+
     /// Bumped on every new connection: IDs from an older one must be looked up again by name.
     private var connection = 0
     /// A transfer cut off by unplugging or disconnecting, continued when the same phone reconnects.
@@ -187,9 +238,15 @@ final class BrowserModel: ObservableObject {
     private func run(_ work: @escaping () async throws -> Void) {
         guard !busy else { return }
         busy = true; error = nil
+        runEpoch += 1
+        let epoch = runEpoch
         task = Task {
-            defer { busy = false; task = nil; pairingCode = nil; pumpThumbnails(); pumpSizes() }
+            defer {
+                // A task abandoned by Disconnect or a lost connection leaves the state to whatever came after it.
+                if epoch == runEpoch { busy = false; task = nil; pairingCode = nil; pumpThumbnails(); pumpSizes() }
+            }
             do { try await work() }
+            catch _ where epoch != runEpoch { return }
             catch is CancellationError { status = "Cancelled."; transfer = nil }
             catch BridgeError.forgotten {
                 // The phone no longer trusts this Mac: forget it here too, and offer to pair again.
@@ -200,6 +257,8 @@ final class BrowserModel: ObservableObject {
             catch {
                 self.error = error.localizedDescription
                 Diagnostics.log("Failed (\(transportName)): \(BrowserModel.redacted(error.localizedDescription))")
+                // The network failed rather than the phone saying no: find out now whether the phone is still there.
+                if connected && BrowserModel.isNetworkError(error) { checkAlive(reason: "an operation failed") }
                 status = overUSB
                     ? "Couldn't reach the phone over USB. Keep it unlocked, plugged in and in File transfer mode."
                     : fastUSB ? "Couldn't reach the phone over the cable. Keep it plugged in, with OpenBridge sharing."
@@ -235,6 +294,15 @@ final class BrowserModel: ObservableObject {
         self.saved = saved
     }
 
+    /// Sample state for the menu bar panel's screenshot: connected over the phone's hotspot, moving at `speed` bytes
+    /// per second. Never used otherwise.
+    func showSampleMenuBar(phone: String, speed: Double) {
+        deviceName = phone
+        fastUSB = false; overUSB = false; viaHotspot = true
+        connected = true
+        self.speed = speed; speedMeasured = Date()
+    }
+
     /// An error message for the diagnostics log: names in quotes (files, folders) left out.
     static func redacted(_ message: String) -> String {
         if message.contains("already exists") { return "a file or folder with that name already exists" }
@@ -243,7 +311,7 @@ final class BrowserModel: ObservableObject {
 
     var transportName: String {
         guard connected else { return "not connected" }
-        return fastUSB ? "Fast USB" : overUSB ? "USB File transfer" : "Wi‑Fi"
+        return fastUSB ? "Fast USB" : overUSB ? "USB File transfer" : viaHotspot ? "Wi‑Fi, phone hotspot" : "Wi‑Fi"
     }
 
     func show(_ message: String) {
@@ -288,6 +356,7 @@ final class BrowserModel: ObservableObject {
             if overUSB && attached == nil { drop("The phone was unplugged.") }
             else if fastUSB && debugging == nil { drop("The phone was unplugged.") }
             else if !overUSB && !fastUSB, let debugging, debugging != fastSkipped { upgradeToFastUSB(debugging) }
+            else if !overUSB && Date().timeIntervalSince(lastAliveCheck) >= 5 { checkAlive() }
             return
         }
         if usbPairable != nil { return }   // waiting for "Pair over USB"
@@ -357,18 +426,34 @@ final class BrowserModel: ObservableObject {
         probing = true
         Task {
             defer { probing = false }
-            guard let gateway = await currentGateway() else { discovery.found(atGateway: nil); return }
+            let gateway = await currentGateway()
+            if gateway != gatewayLogged {
+                gatewayLogged = gateway; gatewayFailureLogged = false
+                Diagnostics.log("Default gateway: \(gateway ?? "none (or not a private IPv4 address)")")
+            }
+            guard let gateway else { discovery.found(atGateway: nil); return }
+            var failures: [String] = []
             for port: UInt16 in [41987, 41986] {
-                guard let fingerprint = try? await BridgeClient.fingerprint(host: gateway, port: port, timeout: 1.5) else { continue }
+                let fingerprint: Data
+                do { fingerprint = try await BridgeClient.fingerprint(host: gateway, port: port, timeout: 3) } catch {
+                    failures.append("\(port): \(error.localizedDescription)")
+                    continue
+                }
                 let id = fingerprint.prefix(8).map { String(format: "%02x", $0) }.joined()
                 let name = saved.first { $0.id == id }?.name ?? "Phone (this hotspot)"
                 if discovery.atGateway == nil { Diagnostics.log("Found a phone at the default gateway (its hotspot), port \(port)") }
                 discovery.found(atGateway: PhoneDiscovery.Phone(name: name, host: gateway, port: String(port), phoneID: id))
                 return
             }
+            if !gatewayFailureLogged {
+                gatewayFailureLogged = true
+                Diagnostics.log("No phone at the default gateway \(gateway) (\(failures.joined(separator: "; ")))")
+            }
             discovery.found(atGateway: nil)
         }
     }
+    private var gatewayLogged: String?
+    private var gatewayFailureLogged = false
 
     private func currentGateway() async -> String? {
         if let checked = gatewayChecked, Date().timeIntervalSince(checked.at) < 20 { return checked.address }
@@ -421,11 +506,28 @@ final class BrowserModel: ObservableObject {
         phoneInfo = nil; phoneOutdated = false
         saved = [phone] + saved.filter { $0.id != phone.id }
         SavedPhones.save(saved)
-        Diagnostics.log(fastUSB ? "Connected over Fast USB" : "Connected over Wi‑Fi at \(phone.host):\(phone.port)")
+        let gateway: String? = gatewayChecked?.address
+        viaHotspot = !fastUSB && gateway != nil && gateway == phone.host
+        Diagnostics.log(fastUSB ? "Connected over Fast USB" : "Connected over \(transportName) at \(phone.host):\(phone.port)")
+        if !fastUSB { noticeHotspot(phone.host) }
         startReceiving(client)
         watchClipboard()
         didConnect(to: phone.name)
         askInfo(client)   // after didConnect: it belongs to this connection
+    }
+
+    /// Whether the phone is the gateway, checked again when the cached gateway is old or missing.
+    private func noticeHotspot(_ address: String) {
+        let epoch = connection
+        Task {
+            let gateway = await currentGateway()
+            guard connected, !fastUSB, epoch == connection, host == address else { return }
+            let hotspot: Bool = gateway == address
+            if hotspot != viaHotspot {
+                viaHotspot = hotspot
+                if hotspot { Diagnostics.log("The phone is the default gateway: connected over its hotspot") }
+            }
+        }
     }
 
     // MARK: Files sent from the phone
@@ -453,6 +555,7 @@ final class BrowserModel: ObservableObject {
                 } catch BridgeError.message(let text) where text.contains("Unsupported operation") || text.contains("not available") {
                     return   // a phone app before 0.12.0 can't send: stop asking
                 } catch {
+                    if BrowserModel.isNetworkError(error) { checkAlive(reason: "waiting for files from the phone failed") }
                     try? await Task.sleep(nanoseconds: 3_000_000_000); continue
                 }
                 for item in waiting {
@@ -748,8 +851,10 @@ final class BrowserModel: ObservableObject {
         }
     }
 
+    /// Always works, even while something is running or hanging on a phone that went away: the running work is
+    /// cancelled and the connection dropped at once. A cut-off transfer still continues when the phone comes back.
     func disconnect() {
-        guard !busy else { return }
+        if busy { abandonRunning() }
         if overUSB { skipped = MTPClient.attachedPhone() }
         else {
             autoConnect = false
@@ -773,10 +878,12 @@ final class BrowserModel: ObservableObject {
     }
 
     private func drop(_ reason: String) {
+        liveness?.cancel(); liveness = nil
         if connected { Announce.spoken(reason.isEmpty ? "Disconnected" : reason) }
         if !reason.isEmpty { Diagnostics.log("Connection ended: \(reason)") }
         if fastUSB { USBDebugging.shared.closeIfUnused() }
-        tunnel?.stop(); tunnel = nil; fastUSB = false
+        tunnel?.stop(); tunnel = nil; fastUSB = false; viaHotspot = false
+        resetSpeed()
         phoneInfo = nil; phoneOutdated = false
         clipboardTimer?.invalidate(); clipboardTimer = nil
         if let cut = transfer, !cut.done, !cut.remaining.isEmpty { interrupted = cut }
@@ -792,6 +899,78 @@ final class BrowserModel: ObservableObject {
     }
 
     func cancel() { task?.cancel() }
+
+    /// Cancels whatever is running and forgets it, so the next step doesn't wait for it to notice.
+    private func abandonRunning() {
+        task?.cancel(); task = nil
+        runEpoch += 1
+        busy = false; pairingCode = nil
+    }
+
+    // MARK: Liveness
+
+    /// Asks the phone whether it's still there: every 5 seconds while connected over Wi‑Fi or Fast USB and idle,
+    /// and at once after a network error. Two missed answers in a row end the connection, so the app goes back to
+    /// the connect screen (where saved phones reconnect by themselves) instead of staying on a folder that's gone.
+    private func checkAlive(reason: String? = nil) {
+        guard connected, liveness == nil, let bridge = client as? BridgeClient else { return }
+        lastAliveCheck = Date()
+        let epoch = connection
+        if let reason { Diagnostics.log("Checking the phone is still there (\(reason))") }
+        liveness = Task {
+            defer { if epoch == connection { liveness = nil } }
+            for attempt in 1...2 {
+                do {
+                    try await bridge.ping(timeout: 4)
+                    guard epoch == connection else { return }
+                    if attempt > 1 || reason != nil { Diagnostics.log("The phone answers") }
+                    return
+                } catch BridgeError.forgotten {
+                    guard epoch == connection, connected else { return }
+                    if let current { forget(current) }
+                    lose(BridgeError.forgotten.localizedDescription)
+                    return
+                } catch {
+                    guard epoch == connection, connected, !Task.isCancelled else { return }
+                    let detail: String = BrowserModel.redacted(error.localizedDescription)
+                    Diagnostics.log("No answer from the phone (\(attempt) of 2, \(transportName)): \(detail)")
+                    if attempt < 2 { try? await Task.sleep(nanoseconds: 1_000_000_000) }
+                }
+            }
+            guard epoch == connection, connected else { return }
+            lose("Lost the connection to the phone.")
+        }
+    }
+    private var liveness: Task<Void, Never>?
+    private var lastAliveCheck = Date.distantPast
+    private var runEpoch = 0
+
+    /// The phone stopped answering: stop what's running and go back to the connect screen. Saved phones keep
+    /// reconnecting by themselves, and a cut-off transfer continues when the phone is back.
+    private func lose(_ reason: String) {
+        if busy { abandonRunning() }
+        if fastUSB { fastSkipped = nil }   // try the cable again on the next look
+        drop(reason)
+    }
+
+    /// Whether an error came from the network (timed out, refused, unreachable, reset) rather than being the
+    /// phone's answer (no permission, not found, and so on).
+    static func isNetworkError(_ error: Error) -> Bool {
+        if error is CancellationError { return false }
+        if let bridge = error as? BridgeError {
+            guard case .message(let text) = bridge else { return false }
+            let lower = text.lowercased()
+            return lower.contains("timed out") || lower.contains("disconnected before") || lower.contains("empty network response")
+        }
+        let codes: Set<Int32> = [ETIMEDOUT, ECONNREFUSED, ECONNRESET, ECONNABORTED, ENETUNREACH, ENETDOWN, ENETRESET,
+                                 EHOSTUNREACH, EHOSTDOWN, EPIPE, ENOTCONN]
+        // Network.framework: refused, reset, unreachable, no route, DNS or a broken handshake. Only ever leads to a check.
+        if error is NWError { return true }
+        if let posix = error as? POSIXError { return codes.contains(posix.code.rawValue) }
+        let ns = error as NSError
+        if ns.domain == NSPOSIXErrorDomain { return codes.contains(Int32(truncatingIfNeeded: ns.code)) }
+        return ns.domain == NSURLErrorDomain
+    }
 
     // MARK: Browsing
 
@@ -915,6 +1094,26 @@ final class BrowserModel: ObservableObject {
     }
 
     func selectAll() { selection = Set(entries.map(\.id)) }
+
+    /// A checkbox: adds or removes one item, keeping the rest of the selection.
+    func toggle(_ entry: Entry) {
+        if selection.contains(entry.id) { selection.remove(entry.id) } else { selection.insert(entry.id) }
+        anchor = entry.id; cursor = entry.id
+    }
+
+    /// The folder's checkbox: on when everything shown is selected, a dash when some are.
+    var allSelectedState: CheckState {
+        let shown: [Entry] = sorted
+        let count: Int = shown.filter { selection.contains($0.id) }.count
+        if count == 0 { return .off }
+        return count == shown.count ? .on : .mixed
+    }
+
+    /// Selects everything shown, or nothing when everything already is.
+    func toggleAll() {
+        if allSelectedState == .on { selection = []; cursor = nil }
+        else { selection.formUnion(sorted.map(\.id)) }
+    }
 
     /// What the arrow keys walk through: search hits when they're shown, else the folder in its order.
     private var keyboardOrder: [Entry.ID] { results != nil ? sortedResults.map(\.id) : sorted.map(\.id) }
@@ -1081,6 +1280,7 @@ final class BrowserModel: ObservableObject {
         run {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             self.transfer = Transfer(name: entry.name, upload: false)
+            self.resetSpeed()
             try await client.download(entry, to: target) { done, total in self.update(done, total) }
             self.transfer = nil
             self.previewURL = target
@@ -1325,6 +1525,10 @@ final class BrowserModel: ObservableObject {
         if case .upload = jobs[0] { upload = true } else { upload = false }
         let planned = planned ?? connection
         transfer = Transfer(name: jobs[0].name, upload: upload, count: jobs.count, remaining: jobs, connection: planned, phone: deviceName)
+        var batch: Int64 = 0
+        for job in jobs { batch += Self.size(of: job) }
+        transfer?.totalBytes = batch
+        resetSpeed()
         let folders = FolderCache()   // phone folders looked up again by name, for this run
         do {
             var lastSaved: URL?
@@ -1332,6 +1536,8 @@ final class BrowserModel: ObservableObject {
             for (index, job) in jobs.enumerated() {
                 try Task.checkCancellation()
                 self.transfer?.name = job.name; self.transfer?.index = index + 1; self.transfer?.fraction = 0
+                self.transfer?.currentBytes = 0; self.transfer?.currentTotal = Self.size(of: job)
+                speedSample = nil   // a resumed file starts part-way: measure from its first report
                 self.transfer?.remaining = Array(jobs[index...])
                 // IDs from an earlier connection are stale: find the file or folder again by its path.
                 let current = planned == connection ? job : try await relocate(job, client: client, cache: folders)
@@ -1339,8 +1545,10 @@ final class BrowserModel: ObservableObject {
                 case .download(let entry, let target, _):
                     try await client.download(entry, to: target) { done, total in self.update(done, total) }
                     lastSaved = target
+                    self.transfer?.finishedBytes += entry.size
                 case .upload(let url, let directory, _):
                     try await client.upload(url, directoryID: directory) { done, total in self.update(done, total) }
+                    self.transfer?.finishedBytes += self.transfer?.currentTotal ?? 0
                     touchedFolder = touchedFolder || directory == self.path.last?.id
                 }
             }
@@ -1410,6 +1618,7 @@ final class BrowserModel: ObservableObject {
                     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
                     let target = folder.appendingPathComponent(entry.name)
                     self.transfer = Transfer(name: entry.name, upload: false)
+                    self.resetSpeed()
                     try await client.download(entry, to: target) { done, total in self.update(done, total) }
                     self.transfer = nil
                     completion(target, false, nil)
@@ -1426,6 +1635,19 @@ final class BrowserModel: ObservableObject {
 
     private func update(_ done: Int64, _ total: Int64) {
         transfer?.fraction = total == 0 ? 0 : Double(done) / Double(total)
+        transfer?.currentBytes = done
+        transfer?.currentTotal = total
+        measureSpeed(done)
+    }
+
+    /// A job's size in bytes, for the batch total (0 when it can't be told).
+    private static func size(of job: Job) -> Int64 {
+        switch job {
+        case .download(let entry, _, _): return entry.size
+        case .upload(let url, _, _):
+            let size: Int? = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize
+            return Int64(size ?? 0)
+        }
     }
 
     // MARK: Names

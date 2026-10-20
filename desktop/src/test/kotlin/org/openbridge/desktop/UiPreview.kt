@@ -2,7 +2,9 @@ package org.openbridge.desktop
 
 import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
 import org.jetbrains.skia.EncodedImageFormat
 import org.openbridge.desktop.wpd.UsbPhone
 import org.openbridge.ui.Look
@@ -32,6 +34,48 @@ class UiPreview {
         val image = scene.render(2_000_000_000)
         File(out, "$name.png").writeBytes(image.encodeToData(EncodedImageFormat.PNG)!!.bytes)
         scene.close()
+    }
+
+    /** The tray's status window, with names long enough that they must shorten, and the tray icons, in every look. */
+    @Test fun tray() {
+        val out = File(System.getenv("PREVIEW_DIR") ?: return).apply { mkdirs() }
+        val language = java.util.Locale.getDefault().language
+        val longPhone = "Galaxy S24 Ultra of Alexandra Konstantinopoulou-Papadimitriou (work phone)"
+        val longFile = "IMG_20261019_101500_HDR_portrait_mode_with_a_very_long_descriptive_name_final_v2.jpg"
+        val cases = listOf(
+            "moving" to TrayStatus(true, "Pixel 8", S.wifi, moving = true, file = "VID_20261018_220000.mp4", fraction = 0.42f, index = 3, count = 7,
+                rate = 18.3 * 1024 * 1024, secondsLeft = 125),
+            "moving-long" to TrayStatus(true, longPhone, S.fastUsb, moving = true, upload = true, file = longFile, fraction = 0.873f, index = 1234, count = 5678,
+                rate = 1023.9 * 1024 * 1024, secondsLeft = 3 * 3600 + 1234),
+            "idle-long" to TrayStatus(true, longPhone, S.wifi),
+            "disconnected" to TrayStatus(false, "", ""),
+        )
+        for (look in Look.entries) {
+            Palette.look = look
+            for ((name, status) in cases) {
+                val scene = ImageComposeScene(360, 300, Density(1f)) {
+                    androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.padding(20.dp)) { StatusCard(status, {}, {}, {}) }
+                }
+                for (frame in 0 until 10) scene.render(frame * 100_000_000L)
+                File(out, "tray-$language-${look.id}-$name.png").writeBytes(scene.render(2_000_000_000).encodeToData(EncodedImageFormat.PNG)!!.bytes)
+                scene.close()
+                println("tooltip ($language, $name): ${status.tooltip()}")
+            }
+            // The icons as the tray gets them (32 pixels), each also shown four times as large.
+            val states = listOf(TrayStatus(false, "", ""), TrayStatus(true, "Pixel 8", S.wifi), TrayStatus(true, "Pixel 8", S.wifi, moving = true, fraction = 0.42f))
+            val sheet = java.awt.image.BufferedImage(states.size * 150, 150, java.awt.image.BufferedImage.TYPE_INT_ARGB)
+            val g = sheet.createGraphics()
+            states.forEachIndexed { i, status ->
+                g.color = if (i % 2 == 0) java.awt.Color(0x20, 0x20, 0x28) else java.awt.Color(0xEE, 0xEE, 0xF2)
+                g.fillRect(i * 150, 0, 150, 150)
+                val icon = trayImage(32, status)
+                g.drawImage(icon, i * 150 + 8, 8, null)
+                g.drawImage(icon, i * 150 + 14, 14, 128, 128, null)
+            }
+            g.dispose()
+            javax.imageio.ImageIO.write(sheet, "png", File(out, "tray-icons-${look.id}.png"))
+        }
+        Palette.look = Look.DUSK
     }
 
     @Test fun screens() {

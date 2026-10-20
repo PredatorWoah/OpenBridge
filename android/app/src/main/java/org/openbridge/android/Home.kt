@@ -72,6 +72,8 @@ interface Actions {
     fun chooseWholePhone()
     fun chooseFolder()
     fun hotspot(on: Boolean)
+    /** The phone's own hotspot settings, where the user turns on the regular hotspot. */
+    fun hotspotSettings()
     fun update()
     fun open(url: String)
     fun copy(text: String, sensitive: Boolean = false)

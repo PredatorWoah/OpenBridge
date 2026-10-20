@@ -38,7 +38,12 @@ final class PhoneDiscovery: ObservableObject {
     /// Phones to show in the README screenshots (`--render-screenshots`), without browsing the network.
     func showSample(_ phones: [Phone]) { self.phones = phones }
 
-    private func announce(_ found: [Phone]) { announced = found; merge() }
+    private func announce(_ found: [Phone]) {
+        if found.map(\.id) != announced.map(\.id) {
+            Diagnostics.log(found.isEmpty ? "No phones announced on this network" : "Phones announced: " + found.map { "\($0.name) at \($0.id)" }.joined(separator: ", "))
+        }
+        announced = found; merge()
+    }
 
     /// The phone answering at the gateway, or nil when nothing does.
     func found(atGateway phone: Phone?) {

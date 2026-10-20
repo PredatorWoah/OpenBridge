@@ -139,6 +139,7 @@ private struct SurfaceBar: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
+                SelectAllBox(model: model)
                 UpButton(model: model)
                 ResultsButton(model: model)
                 DepthPath(model: model)
@@ -218,10 +219,13 @@ struct CapsuleRow: View {
     /// The biggest measured folder alongside, for the gauge.
     var deepest: Int64 = 0
     var focused = false
+    /// Its checkbox; none where selecting doesn't apply (search results).
+    var toggle: (() -> Void)? = nil
 
     var body: some View {
         let (name, color) = fileSymbol(FileKind(entry))
         HStack(spacing: 12) {
+            if let toggle { RowCheckbox(name: entry.name, selected: selected, toggle: toggle) }
             FileIcon(symbol: name, color: color, thumbnail: thumbnail, size: 26)
             Text(entry.name).lineLimit(1).truncationMode(.middle)
             Spacer(minLength: 8)
@@ -232,7 +236,7 @@ struct CapsuleRow: View {
                 .help(folderSize.map { $0.files > 0 ? "\($0.files) files" : "" } ?? "")
         }
         .font(.system(size: 13.5))
-        .padding(.horizontal, 16).padding(.vertical, 9)
+        .padding(.leading, toggle == nil ? 16 : 10).padding(.trailing, 16).padding(.vertical, 9)
         .background { CapsuleWater(selected: selected) }
         .overlay(Capsule().strokeBorder(Palette.amber.opacity(focused ? 0.95 : 0), lineWidth: 1.5))
         .contentShape(Capsule())
@@ -272,6 +276,8 @@ struct TideCard: View {
     var thumbnail: NSImage?
     var folderSize: FolderSize? = nil
     var focused = false
+    /// Its checkbox; none where selecting doesn't apply (search results).
+    var toggle: (() -> Void)? = nil
 
     var body: some View {
         let (name, color) = fileSymbol(FileKind(entry))
@@ -288,6 +294,9 @@ struct TideCard: View {
             .frame(width: 116, height: 96)
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .accessibilityHidden(true)
+            .overlay(alignment: .topLeading) {
+                if let toggle { RowCheckbox(name: entry.name, selected: selected, onPicture: true, toggle: toggle).padding(4) }
+            }
             Text(entry.name).font(.system(size: 12)).lineLimit(2).multilineTextAlignment(.center).truncationMode(.middle)
             Text(entry.directory ? (folderSize == nil ? " " : folderText(folderSize)) : ByteCountFormatter.string(fromByteCount: entry.size, countStyle: .file))
                 .font(.system(size: 10.5)).foregroundStyle(Palette.muted)

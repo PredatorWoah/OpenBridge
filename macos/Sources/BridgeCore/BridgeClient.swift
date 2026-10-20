@@ -265,6 +265,19 @@ public struct BridgeClient {
         return PhoneInfo(version: version, revision: Int(revision), name: name)
     }
 
+    /// Whether the phone still answers, within `timeout` seconds for connecting and again for the first byte of the
+    /// answer. Uses INFO; a phone too old for it still answers (with an error status), which counts as alive. Throws
+    /// `BridgeError.forgotten` when the phone no longer trusts this Mac, and a network error when nothing answers.
+    public func ping(timeout: TimeInterval) async throws {
+        let channel = try await open(operation: 18, id: "", connectTimeout: timeout)
+        defer { channel.close() }
+        let code = try await channel.number(1, timeout: timeout)
+        if code == 1 {
+            let message = try await channel.string(limit: 512)
+            if message == "Pairing rejected" { throw BridgeError.forgotten }
+        }
+    }
+
     /// Deletes a file, or a folder with everything in it.
     public func delete(_ entry: Entry) async throws {
         let channel = try await open(operation: 9, id: entry.id)
