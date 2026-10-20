@@ -66,27 +66,26 @@ struct Breathing: ViewModifier {
 
 struct RootView: View {
     @ObservedObject var model: BrowserModel
+    @ObservedObject private var looks = LookStore.shared
     @State private var wifi = false
+    /// Files are being dragged over the browser (Tide raises its water for them).
+    @State private var dropping = false
     @AppStorage("openAutomatically") private var openAutomatically = false
     @Environment(\.openWindow) private var openWindow
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var browsing: Bool { model.showBrowser && model.connected }
-
     var body: some View {
+        let look = looks.look
+        // A new look rebuilds the scene inside the window, crossfading, so every colour and picture follows it while the
+        // model (folder, selection, transfers) carries on.
         ZStack {
-            Backdrop(energy: model.connected ? 1 : 0, level: model.transfer.map { $0.done ? 0 : $0.fraction } ?? 0)
-                .ignoresSafeArea()
-            if browsing {
-                BrowserScreen(model: model, mirror: { openWindow(id: "mirror") })
-                    .transition(.asymmetric(insertion: .scale(scale: 1.04).combined(with: .opacity), removal: .opacity))
-            } else {
-                ConnectScreen(model: model, wifi: $wifi, openAutomatically: $openAutomatically)
-                    .transition(.scale(scale: 0.94).combined(with: .opacity))
-            }
+            LookScene(model: model, look: look, wifi: $wifi, dropping: $dropping, openAutomatically: $openAutomatically,
+                      mirror: { openWindow(id: "mirror") })
+                .id(look)
+                .transition(.opacity)
         }
-        .animation(reduceMotion ? .easeOut(duration: 0.15) : .spring(response: 0.55, dampingFraction: 0.82), value: browsing)
-        .frame(minWidth: 780, minHeight: 580)
+        .animation(.easeInOut(duration: reduceMotion ? 0.2 : 0.45), value: look)
+        .frame(minWidth: look == .dusk ? 780 : 720, minHeight: look == .dusk ? 580 : 480)
         .preferredColorScheme(.dark)
         .sheet(isPresented: $wifi) { WiFiSheet(model: model, discovery: model.discovery, isPresented: $wifi) }
         .sheet(isPresented: $model.showTexts) { TextsPanel(model: model, history: model.texts) }
@@ -99,6 +98,7 @@ struct RootView: View {
         // Toasts show on every screen: texts from the phone arrive whatever is open.
         .overlay(alignment: .bottom) { Toast(text: model.toast).animation(.easeOut(duration: 0.2), value: model.toast) }
         .onAppear { model.startWatching() }
+        .onChange(of: look) { model.grid = BrowserModel.prefersGrid($0) }
         .onChange(of: model.connected) { connected in
             guard connected else { return }
             wifi = false
@@ -109,73 +109,52 @@ struct RootView: View {
     }
 }
 
-struct ConnectScreen: View {
+/// One look's whole window: its backdrop, and its connect screen or browser.
+private struct LookScene: View {
     @ObservedObject var model: BrowserModel
+    let look: Look
     @Binding var wifi: Bool
+    @Binding var dropping: Bool
     @Binding var openAutomatically: Bool
+    var mirror: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var title: String {
-        if model.connected { return model.fastUSB ? "Connected over Fast USB" : model.overUSB ? "Connected over USB" : "Connected over Wi‑Fi" }
-        if model.usbPairable != nil { return "Pair over USB" }
-        if model.busy { return model.overUSB ? "Phone found" : "Connecting…" }
-        return "Waiting for your phone"
-    }
-    private var subtitle: String {
-        if model.connected { return "Your phone is ready." }
-        if !model.status.isEmpty { return model.status }
-        if model.usbPairable != nil { return "OpenBridge is sharing over the cable. Pair once, then it connects by itself." }
-        return "Plug it in, unlock it and choose File transfer."
-    }
+    private var browsing: Bool { model.showBrowser && model.connected }
 
     var body: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .top) {
-                Hero(active: true, connected: model.connected, centerY: 0.27, radius: 62, startScanning: true, label: title)
-                    .allowsHitTesting(false)
-                    .ignoresSafeArea()
-                VStack(spacing: 6) {
-                    Spacer().frame(height: geometry.size.height * 0.27 + 104)
-                    Text(title).font(.system(size: 24, weight: .bold, design: .rounded))
-                    Text(subtitle).foregroundStyle(Palette.muted).multilineTextAlignment(.center).textSelection(.enabled)
-                    if model.connected {
-                        DeviceCard(model: model, openAutomatically: $openAutomatically)
-                            .padding(.top, 16)
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
-                    } else {
-                        if let phone = model.usbPairable {
-                            USBPairingCard(model: model, phone: phone).padding(.top, 16)
-                        } else if model.usbNeedsAllow {
-                            HintCard(symbol: "cable.connector", text: "USB debugging is on. Allow it for this Mac to use Fast USB: instant search, real folder sizes, resumable copies.",
-                                     action: "Use Fast USB", busy: model.busy) { model.connectFastUSB(asking: true) }
-                                .padding(.top, 16)
-                        }
-                        if model.wifiIsolated {
-                            HintCard(symbol: "wifi.exclamationmark",
-                                     text: "This Wi‑Fi keeps devices apart (common on guest, hotel and campus networks). On the phone, open OpenBridge › Settings › Phone hotspot and join that network from this computer, or use a USB cable.")
-                                .padding(.top, 12)
-                        }
-                        if !model.saved.isEmpty {
-                            SavedPhonesCard(model: model, discovery: model.discovery).padding(.top, 16)
-                        }
-                        if let error = model.error {
-                            ErrorCard(message: error, busy: model.busy, retry: { if model.overUSB { model.retryUSB() } else { wifi = true } })
-                                .padding(.top, 12)
-                                .transition(.opacity)
-                        }
-                    }
-                    Spacer()
-                    HStack(spacing: 6) {
-                        Text("No cable?").foregroundStyle(Palette.muted)
-                        Button("Pair over Wi‑Fi") { wifi = true }.buttonStyle(.link).disabled(model.busy || model.connected)
-                    }
-                    .font(.system(size: 13))
-                    .padding(.bottom, 22)
-                }
-                .padding(.horizontal, 24)
-                .frame(maxWidth: .infinity)
-                .animation(reduceMotion ? nil : .spring(response: 0.6, dampingFraction: 0.68), value: model.connected)
+        ZStack {
+            Backdrop(energy: model.connected ? 1 : 0, level: level).ignoresSafeArea()
+            if browsing {
+                browser
+                    .transition(.asymmetric(insertion: .scale(scale: 1.04).combined(with: .opacity), removal: .opacity))
+            } else {
+                connect
+                    .transition(.scale(scale: 0.94).combined(with: .opacity))
             }
+        }
+        .animation(reduceMotion ? .easeOut(duration: 0.15) : .spring(response: 0.55, dampingFraction: 0.82), value: browsing)
+    }
+
+    /// Tide's water follows the transfer, and rises a little more while files are dragged over it.
+    private var level: Double {
+        let progress: Double = model.transfer.map { $0.done ? 0 : TransferProgress.overall($0) } ?? 0
+        let lift: Double = dropping && browsing ? 0.12 : 0
+        return min(1, progress + lift)
+    }
+
+    @ViewBuilder private var browser: some View {
+        switch look {
+        case .dusk: DuskBrowser(model: model, mirror: mirror, dropping: $dropping)
+        case .aurora: AuroraBrowser(model: model, mirror: mirror, dropping: $dropping)
+        case .tide: TideBrowser(model: model, mirror: mirror, dropping: $dropping)
+        }
+    }
+
+    @ViewBuilder private var connect: some View {
+        switch look {
+        case .dusk: DuskConnect(model: model, wifi: $wifi, openAutomatically: $openAutomatically)
+        case .aurora: AuroraConnect(model: model, discovery: model.discovery, wifi: $wifi, openAutomatically: $openAutomatically)
+        case .tide: TideConnect(model: model, discovery: model.discovery, wifi: $wifi, openAutomatically: $openAutomatically)
         }
     }
 }
@@ -513,11 +492,9 @@ struct OpenBridgeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     /// One model for the app, so every window and Settings see the same connection.
     @StateObject private var model = BrowserModel()
-    @StateObject private var looks = LookStore.shared
 
     var body: some Scene {
-        // A new look rebuilds the window, so every colour and picture follows it.
-        WindowGroup { RootView(model: model).id(looks.look) }
+        WindowGroup { RootView(model: model) }
             .windowStyle(.hiddenTitleBar)
             .defaultSize(width: 980, height: 660)
         Window("Phone Screen", id: "mirror") { MirrorView() }

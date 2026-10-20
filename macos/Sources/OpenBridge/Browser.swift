@@ -4,120 +4,24 @@ import QuickLook
 import UniformTypeIdentifiers
 import BridgeCore
 
-struct BrowserScreen: View {
+/// The open folder (or search results), its empty states and the drop target: the same in every look's shell; the
+/// look decides only how rows, tiles and their motion are drawn.
+struct FolderContent: View {
     @ObservedObject var model: BrowserModel
-    var mirror: () -> Void
-    @State private var dropping = false
-    @State private var newName = ""
-    /// While typing in search, keys like Space and Return go to the field, not to shortcuts.
-    @FocusState private var searching: Bool
+    let look: Look
+    @Binding var dropping: Bool
+    /// Tide says "Drop to upload" on its water surface instead of outlining the files.
+    var outlineDrop = true
 
     var body: some View {
-        HStack(spacing: 0) {
-            Sidebar(model: model, mirror: mirror)
-            VStack(spacing: 0) {
-                Toolbar(model: model, searching: $searching)
-                ZStack {
-                    if let results = model.results { ResultsList(model: model, results: results) }
-                    else if model.grid { grid } else { list }
-                    if model.results == nil && model.sorted.isEmpty && !model.entries.isEmpty {
-                        VStack(spacing: 10) {
-                            Text("Nothing in this folder matches.").foregroundStyle(Palette.muted)
-                            if !model.query.isEmpty {
-                                Button("Search all folders for “\(model.query)”", action: model.searchEverywhere)
-                                    .buttonStyle(SunsetButton()).disabled(model.busy)
-                            }
-                        }
-                    }
-                    if model.entries.isEmpty && !model.busy {
-                        Text(model.path.count > 1 ? "This folder is empty. Drop files here to upload them." : "Nothing to show.")
-                            .foregroundStyle(Palette.muted)
-                    }
-                    if dropping {
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .strokeBorder(Palette.sunset, style: StrokeStyle(lineWidth: 2, dash: [8, 6]))
-                            .background(Palette.violet.opacity(0.12), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                            .overlay(Label("Drop to upload to “\(model.path.last?.name ?? "Phone")”", systemImage: "arrow.up.circle.fill")
-                                .font(.system(size: 15, weight: .semibold)))
-                            .padding(10)
-                            .allowsHitTesting(false)
-                    }
-                }
-                .onDrop(of: [UTType.fileURL], isTargeted: $dropping, perform: drop)
-                if let error = model.error {
-                    Text(error).font(.system(size: 12.5)).foregroundStyle(Palette.amber).textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.bottom, 8)
-                }
-                if model.transfer != nil {
-                    TransferBar(model: model).padding(.horizontal, 16).padding(.bottom, 16)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-            }
-            .animation(.spring(response: 0.5, dampingFraction: 0.75), value: model.transfer != nil)
+        ZStack {
+            if let results = model.results { ResultsList(model: model, results: results) }
+            else if model.grid { FolderGrid(model: model, look: look) } else { FolderList(model: model, look: look) }
+            EmptyNotes(model: model)
+            if dropping && outlineDrop { DropOutline(model: model) }
         }
-        .quickLookPreview($model.previewURL)
-        .background { Shortcuts(model: model, searching: searching) }
-        .confirmationDialog(deleteTitle, isPresented: Binding(get: { !model.pendingDelete.isEmpty }, set: { if !$0 { model.pendingDelete = [] } })) {
-            Button("Delete", role: .destructive, action: model.deleteConfirmed)
-        } message: { Text("Folders are deleted with everything in them. The phone has no bin, so this can't be undone.") }
-        .alert("Rename", isPresented: Binding(get: { model.renaming != nil }, set: { if !$0 { model.renaming = nil } })) {
-            TextField("Name", text: $newName)
-            Button("Rename") { if let entry = model.renaming { model.rename(entry, to: newName) }; model.renaming = nil }
-            Button("Cancel", role: .cancel) { model.renaming = nil }
-        }
-        .onChange(of: model.renaming) { entry in if let entry { newName = entry.name } }
+        .onDrop(of: [UTType.fileURL], isTargeted: $dropping, perform: drop)
     }
-
-    private var deleteTitle: String {
-        model.pendingDelete.count == 1 ? "Delete “\(model.pendingDelete[0].name)” from the phone?" : "Delete \(model.pendingDelete.count) items from the phone?"
-    }
-
-    private var list: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: 2) {
-                    ForEach(model.sorted) { entry in
-                        FileRow(entry: entry, selected: model.selection.contains(entry.id), thumbnail: model.thumbnails[entry.id],
-                                folderSize: model.sizes[entry.id], focused: model.cursor == entry.id)
-                            .modifier(Item(model: model, entry: entry))
-                    }
-                }
-                .padding(10)
-            }
-            .onChange(of: model.cursor) { id in if let id { proxy.scrollTo(id) } }
-        }
-        // Each folder fades in as a whole, quickly; rows never wait on their own timers.
-        .id(model.path.last?.id ?? "")
-        .transition(.opacity.combined(with: .offset(y: 6)))
-        .animation(.easeOut(duration: 0.15), value: model.path.last?.id)
-    }
-
-    private var grid: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 128), spacing: 10)], spacing: 10) {
-                    ForEach(model.sorted) { entry in
-                        FileTile(entry: entry, selected: model.selection.contains(entry.id), thumbnail: model.thumbnails[entry.id],
-                                 folderSize: model.sizes[entry.id], focused: model.cursor == entry.id)
-                            .modifier(Item(model: model, entry: entry))
-                    }
-                }
-                .padding(12)
-            }
-            .onChange(of: model.cursor) { id in if let id { proxy.scrollTo(id) } }
-            // How many tiles fit in a row (as the adaptive grid lays them out), so ↑ and ↓ move by a row.
-            .background(GeometryReader { geometry in
-                Color.clear
-                    .onAppear { model.gridColumns = BrowserScreen.columns(geometry.size.width) }
-                    .onChange(of: geometry.size.width) { model.gridColumns = BrowserScreen.columns($0) }
-            })
-        }
-        .id("grid-" + (model.path.last?.id ?? ""))
-        .transition(.opacity)
-        .animation(.easeOut(duration: 0.15), value: model.path.last?.id)
-    }
-
-    static func columns(_ width: CGFloat) -> Int { max(1, Int((width - 24 + 10) / (128 + 10))) }
 
     /// Files dropped from Finder upload into the open folder.
     private func drop(_ providers: [NSItemProvider]) -> Bool {
@@ -133,6 +37,215 @@ struct BrowserScreen: View {
         }
         group.notify(queue: .main) { model.upload(urls) }
         return !providers.isEmpty
+    }
+}
+
+/// What shows when a folder is empty or the filter hides everything.
+private struct EmptyNotes: View {
+    @ObservedObject var model: BrowserModel
+    var body: some View {
+        if model.results == nil && model.sorted.isEmpty && !model.entries.isEmpty {
+            VStack(spacing: 10) {
+                Text("Nothing in this folder matches.").foregroundStyle(Palette.muted)
+                if !model.query.isEmpty {
+                    Button("Search all folders for “\(model.query)”", action: model.searchEverywhere)
+                        .buttonStyle(SunsetButton()).disabled(model.busy)
+                }
+            }
+        }
+        if model.entries.isEmpty && !model.busy {
+            Text(model.path.count > 1 ? "This folder is empty. Drop files here to upload them." : "Nothing to show.")
+                .foregroundStyle(Palette.muted)
+        }
+    }
+}
+
+private struct DropOutline: View {
+    @ObservedObject var model: BrowserModel
+    var body: some View {
+        RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .strokeBorder(Palette.sunset, style: StrokeStyle(lineWidth: 2, dash: [8, 6]))
+            .background(Palette.violet.opacity(0.12), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(Label("Drop to upload to “\(model.path.last?.name ?? "Phone")”", systemImage: "arrow.up.circle.fill")
+                .font(.system(size: 15, weight: .semibold)))
+            .padding(10)
+            .allowsHitTesting(false)
+    }
+}
+
+/// How a look moves between folders: Dusk fades quickly, Aurora drifts up slowly, Tide springs. With Reduce Motion
+/// every look only fades.
+enum FolderMotion {
+    static func transition(_ look: Look) -> AnyTransition {
+        switch look {
+        case .dusk: return .opacity.combined(with: .offset(y: 6))
+        case .aurora: return .opacity.combined(with: .offset(y: 8))
+        case .tide: return .opacity.combined(with: .offset(y: 10))
+        }
+    }
+
+    static func animation(_ look: Look, reduceMotion: Bool) -> Animation {
+        if reduceMotion { return .easeOut(duration: 0.15) }
+        switch look {
+        case .dusk: return .easeOut(duration: 0.15)
+        case .aurora: return .easeOut(duration: 0.45)
+        case .tide: return .spring(response: 0.45, dampingFraction: 0.72)
+        }
+    }
+}
+
+/// Tile size and spacing of a look's grid, and how many tiles fit in a row (as the adaptive grid lays them out).
+struct GridMetrics {
+    let tile: CGFloat
+    let spacing: CGFloat
+    let padding: CGFloat
+
+    static func of(_ look: Look) -> GridMetrics {
+        switch look {
+        case .dusk: return GridMetrics(tile: 128, spacing: 10, padding: 12)
+        case .aurora: return GridMetrics(tile: 160, spacing: 16, padding: 18)
+        case .tide: return GridMetrics(tile: 140, spacing: 14, padding: 14)
+        }
+    }
+
+    func columns(_ width: CGFloat) -> Int {
+        let usable: CGFloat = width - 2 * padding + spacing
+        let each: CGFloat = tile + spacing
+        return max(1, Int(usable / each))
+    }
+}
+
+/// The open folder as a list, in the look's rows.
+private struct FolderList: View {
+    @ObservedObject var model: BrowserModel
+    let look: Look
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        let entries = model.sorted
+        let deepest = Self.deepest(entries, model.sizes)
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: spacing) {
+                    ForEach(entries) { entry in
+                        row(entry, deepest: deepest).modifier(Item(model: model, entry: entry))
+                    }
+                }
+                .padding(padding)
+            }
+            .onChange(of: model.cursor) { id in if let id { proxy.scrollTo(id) } }
+        }
+        // Each folder arrives as a whole; rows never wait on their own timers.
+        .id(model.path.last?.id ?? "")
+        .transition(FolderMotion.transition(look))
+        .animation(FolderMotion.animation(look, reduceMotion: reduceMotion), value: model.path.last?.id)
+    }
+
+    private var spacing: CGFloat { look == .tide ? 8 : look == .aurora ? 4 : 2 }
+    private var padding: CGFloat { look == .tide ? 12 : look == .aurora ? 14 : 10 }
+
+    @ViewBuilder private func row(_ entry: Entry, deepest: Int64) -> some View {
+        let selected = model.selection.contains(entry.id)
+        let focused = model.cursor == entry.id
+        switch look {
+        case .dusk:
+            FileRow(entry: entry, selected: selected, thumbnail: model.thumbnails[entry.id], folderSize: model.sizes[entry.id], focused: focused)
+        case .aurora:
+            AuroraRow(entry: entry, selected: selected, thumbnail: model.thumbnails[entry.id], folderSize: model.sizes[entry.id], focused: focused)
+        case .tide:
+            CapsuleRow(entry: entry, selected: selected, thumbnail: model.thumbnails[entry.id], folderSize: model.sizes[entry.id],
+                       deepest: deepest, focused: focused)
+        }
+    }
+
+    /// The biggest measured folder here, for Tide's depth gauges.
+    private static func deepest(_ entries: [Entry], _ sizes: [Entry.ID: FolderSize]) -> Int64 {
+        var most: Int64 = 0
+        for entry in entries where entry.directory {
+            if let bytes = sizes[entry.id]?.bytes, bytes > most { most = bytes }
+        }
+        return most
+    }
+}
+
+/// The open folder as a grid, in the look's tiles.
+private struct FolderGrid: View {
+    @ObservedObject var model: BrowserModel
+    let look: Look
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        let metrics = GridMetrics.of(look)
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: metrics.tile), spacing: metrics.spacing)], spacing: metrics.spacing) {
+                    ForEach(model.sorted) { entry in
+                        tile(entry).modifier(Item(model: model, entry: entry))
+                    }
+                }
+                .padding(metrics.padding)
+            }
+            .onChange(of: model.cursor) { id in if let id { proxy.scrollTo(id) } }
+            // How many tiles fit in a row, so ↑ and ↓ move by a row.
+            .background(GeometryReader { geometry in
+                Color.clear
+                    .onAppear { model.gridColumns = metrics.columns(geometry.size.width) }
+                    .onChange(of: geometry.size.width) { model.gridColumns = metrics.columns($0) }
+            })
+        }
+        .id("grid-" + (model.path.last?.id ?? ""))
+        .transition(look == .dusk ? AnyTransition.opacity : FolderMotion.transition(look))
+        .animation(FolderMotion.animation(look, reduceMotion: reduceMotion), value: model.path.last?.id)
+    }
+
+    @ViewBuilder private func tile(_ entry: Entry) -> some View {
+        let selected = model.selection.contains(entry.id)
+        let focused = model.cursor == entry.id
+        switch look {
+        case .dusk:
+            FileTile(entry: entry, selected: selected, thumbnail: model.thumbnails[entry.id], folderSize: model.sizes[entry.id], focused: focused)
+        case .aurora:
+            AuroraTile(entry: entry, selected: selected, thumbnail: model.thumbnails[entry.id], folderSize: model.sizes[entry.id], focused: focused)
+        case .tide:
+            TideCard(entry: entry, selected: selected, thumbnail: model.thumbnails[entry.id], folderSize: model.sizes[entry.id], focused: focused)
+        }
+    }
+}
+
+/// Quick Look, keyboard shortcuts, and the delete and rename dialogs: every shell's browser has them.
+struct BrowserChrome: ViewModifier {
+    @ObservedObject var model: BrowserModel
+    var searching: Bool
+    @State private var newName = ""
+
+    func body(content: Content) -> some View {
+        content
+            .quickLookPreview($model.previewURL)
+            .background { Shortcuts(model: model, searching: searching) }
+            .confirmationDialog(deleteTitle, isPresented: Binding(get: { !model.pendingDelete.isEmpty }, set: { if !$0 { model.pendingDelete = [] } })) {
+                Button("Delete", role: .destructive, action: model.deleteConfirmed)
+            } message: { Text("Folders are deleted with everything in them. The phone has no bin, so this can't be undone.") }
+            .alert("Rename", isPresented: Binding(get: { model.renaming != nil }, set: { if !$0 { model.renaming = nil } })) {
+                TextField("Name", text: $newName)
+                Button("Rename") { if let entry = model.renaming { model.rename(entry, to: newName) }; model.renaming = nil }
+                Button("Cancel", role: .cancel) { model.renaming = nil }
+            }
+            .onChange(of: model.renaming) { entry in if let entry { newName = entry.name } }
+    }
+
+    private var deleteTitle: String {
+        model.pendingDelete.count == 1 ? "Delete “\(model.pendingDelete[0].name)” from the phone?" : "Delete \(model.pendingDelete.count) items from the phone?"
+    }
+}
+
+/// The last error, under the files.
+struct BrowserError: View {
+    @ObservedObject var model: BrowserModel
+    var body: some View {
+        if let error = model.error {
+            Text(error).font(.system(size: 12.5)).foregroundStyle(Palette.amber).textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.bottom, 8)
+        }
     }
 }
 
@@ -191,7 +304,7 @@ private struct ResultsList: View {
     }
 
     private func row(_ hit: Found) -> some View {
-        let (symbolName, color) = symbol(for: FileKind(hit.entry))
+        let (symbolName, color) = fileSymbol(FileKind(hit.entry))
         return HStack(spacing: 12) {
             Group {
                 if let thumbnail = model.thumbnails[hit.entry.id] {
@@ -219,7 +332,7 @@ private struct ResultsList: View {
 }
 
 /// Double-click and context menu for a search hit, and its preview.
-private struct Hit: ViewModifier {
+struct Hit: ViewModifier {
     @ObservedObject var model: BrowserModel
     let hit: Found
     func body(content: Content) -> some View {
@@ -237,7 +350,7 @@ private struct Hit: ViewModifier {
 }
 
 /// Click, double-click, context menu, drag to Finder and preview loading, shared by rows and tiles.
-private struct Item: ViewModifier {
+struct Item: ViewModifier {
     @ObservedObject var model: BrowserModel
     let entry: Entry
     func body(content: Content) -> some View {
@@ -270,189 +383,150 @@ private struct Item: ViewModifier {
     }
 }
 
-private struct Sidebar: View {
+// MARK: - Toolbar parts, arranged by each look's shell
+
+/// Up one folder.
+struct UpButton: View {
     @ObservedObject var model: BrowserModel
-    var mirror: () -> Void
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("DEVICES").font(.system(size: 11, weight: .semibold)).tracking(1.4).foregroundStyle(Palette.muted)
-                .padding(.horizontal, 8).padding(.bottom, 4)
-            HStack(spacing: 10) {
-                ArchMark(size: 26)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(model.deviceName).font(.system(size: 13.5, weight: .semibold)).lineLimit(1)
-                    Text(model.fastUSB ? "Fast USB" : model.overUSB ? "USB · File transfer" : "Wi‑Fi").font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.75))
-                }
-            }
-            .padding(10).frame(maxWidth: .infinity, alignment: .leading)
-            .background(LinearGradient(colors: [Palette.violet.opacity(0.45), Palette.pink.opacity(0.3)], startPoint: .leading, endPoint: .trailing),
-                        in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            Button { model.showBrowser = false } label: { Label("Devices", systemImage: "chevron.left") }
-                .buttonStyle(.plain).foregroundStyle(Palette.muted).font(.system(size: 12.5)).padding(10)
-            if model.clipboardAvailable {
-                Button { model.showTexts = true } label: { Label("Texts", systemImage: "text.bubble") }
-                    .buttonStyle(.plain).font(.system(size: 13, weight: .semibold)).padding(10)
-                    .help("Send texts to the phone, and see what it sent")
-            }
-            if model.overUSB || model.fastUSB {
-                Button(action: mirror) { Label("Mirror screen", systemImage: "rectangle.on.rectangle") }
-                    .buttonStyle(.plain).font(.system(size: 13, weight: .semibold)).padding(10)
-                    .help("Show and control the phone's screen on your Mac (needs USB debugging)")
-            }
-            Spacer()
-            Button("Disconnect", action: model.disconnect).buttonStyle(GhostButton()).disabled(model.busy).padding(8)
-        }
-        .padding(.top, 44).padding(.horizontal, 10).padding(.bottom, 10)
-        .frame(width: 220)
-        .background(Color.white.opacity(0.04))
-        .overlay(alignment: .trailing) { Rectangle().fill(.white.opacity(0.08)).frame(width: 1) }
+        Button(action: model.up) { Image(systemName: "chevron.left") }
+            .buttonStyle(GhostButton()).disabled(model.path.count < 2 || model.busy).help("Up one folder (⌘↑)")
+            .accessibilityLabel("Up one folder")
     }
 }
 
-/// One row when everything fits; when the window is narrower, the controls move to a second row instead of
-/// squeezing the path and buttons until their text breaks.
-private struct Toolbar: View {
+/// Back to the search results, after opening a folder from them.
+struct ResultsButton: View {
     @ObservedObject var model: BrowserModel
-    var searching: FocusState<Bool>.Binding
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 8) {
-                navigation(compact: false)
-                Spacer(minLength: 8)
-                controls
-                download
-            }
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
-                    navigation(compact: true)
-                    Spacer(minLength: 8)
-                    download
-                }
-                HStack(spacing: 8) { controls; Spacer(minLength: 0) }
-            }
-        }
-        .padding(.horizontal, 16).padding(.top, 40).padding(.bottom, 10)
-        .overlay(alignment: .bottom) { Rectangle().fill(.white.opacity(0.08)).frame(height: 1) }
-    }
-
-    private func navigation(compact: Bool) -> some View {
-        HStack(spacing: 8) {
-            Button(action: model.up) { Image(systemName: "chevron.left") }
-                .buttonStyle(GhostButton()).disabled(model.path.count < 2 || model.busy).help("Up one folder (⌘↑)")
-                .accessibilityLabel("Up one folder")
-            if model.canReturnToResults {
-                Button(action: model.returnToResults) { Label("Results", systemImage: "magnifyingglass") }
-                    .buttonStyle(GhostButton()).fixedSize().help("Back to the search results")
-            }
-            PathBar(model: model, compact: compact)
+        if model.canReturnToResults {
+            Button(action: model.returnToResults) { Label("Results", systemImage: "magnifyingglass") }
+                .buttonStyle(GhostButton()).fixedSize().help("Back to the search results")
         }
     }
+}
 
-    private var download: some View {
+struct DownloadButton: View {
+    @ObservedObject var model: BrowserModel
+    var body: some View {
         Button(model.selection.count > 1 ? "Download \(model.selection.count)" : "Download") { model.download(model.selected) }
             .buttonStyle(SunsetButton()).disabled(model.busy || model.selection.isEmpty)
             .fixedSize()
     }
+}
 
-    private var controls: some View {
-        HStack(spacing: 8) {
-            HStack(spacing: 5) {
-                Image(systemName: "magnifyingglass").foregroundStyle(Palette.muted).accessibilityHidden(true)
-                TextField("Search", text: $model.query).textFieldStyle(.plain).focused(searching)
-                    .onSubmit { model.searchEverywhere() }
-                if !model.query.isEmpty {
-                    Button { model.query = "" } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain).foregroundStyle(Palette.muted)
-                        .help("Clear the search (Esc)").accessibilityLabel("Clear search")
-                }
+struct SearchBox: View {
+    @ObservedObject var model: BrowserModel
+    var searching: FocusState<Bool>.Binding
+    var width: CGFloat = 180
+    var radius: CGFloat = 8
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "magnifyingglass").foregroundStyle(Palette.muted).accessibilityHidden(true)
+            TextField("Search", text: $model.query).textFieldStyle(.plain).focused(searching)
+                .onSubmit { model.searchEverywhere() }
+            if !model.query.isEmpty {
+                Button { model.query = "" } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain).foregroundStyle(Palette.muted)
+                    .help("Clear the search (Esc)").accessibilityLabel("Clear search")
             }
-            .font(.system(size: 13)).padding(.horizontal, 9).padding(.vertical, 5).frame(width: 180).glass(8)
-            .help("Type to filter this folder. Press Return to search every folder inside it.")
-            Button { model.mediaOnly.toggle() } label: { Image(systemName: model.mediaOnly ? "photo.fill.on.rectangle.fill" : "photo.on.rectangle") }
-                .buttonStyle(.plain).foregroundStyle(model.mediaOnly ? Palette.amber : .white).frame(width: 28)
-                .help(model.mediaOnly ? "Showing only photos and videos" : "Show only photos and videos")
-                .accessibilityLabel("Only photos and videos")
-                .accessibilityValue(model.mediaOnly ? "On" : "Off")
-            Picker("View", selection: $model.grid) {
-                Image(systemName: "list.bullet").accessibilityLabel("List").tag(false)
-                Image(systemName: "square.grid.2x2").accessibilityLabel("Grid").tag(true)
-            }
-            .labelsHidden()
-            .pickerStyle(.segmented).frame(width: 76).help("List or grid")
-            Menu {
-                Picker("Sort by", selection: $model.sortKey) {
-                    ForEach(SortKey.allCases) { Text($0.rawValue).tag($0) }
-                }
-                Divider()
-                Picker("Order", selection: $model.ascending) {
-                    Text("Ascending").tag(true)
-                    Text("Descending").tag(false)
-                }
-            } label: { Image(systemName: "arrow.up.arrow.down") }
-                .menuStyle(.borderlessButton).frame(width: 34).help("Sort by \(model.sortKey.rawValue.lowercased())")
-                .accessibilityLabel("Sort, by \(model.sortKey.rawValue.lowercased())")
-            Menu {
-                Button("New Folder…", action: model.newFolder)
-                Button("Upload…", action: model.chooseUploads)
-                Divider()
-                Button("Import New Photos") { model.importNewPhotos() }
-                Button("Import New Photos To…") { model.importNewPhotos(choosingFolder: true) }
-                Button("Show Files Sent from the Phone", action: model.showReceived).disabled(model.overUSB)
-                Divider()
-                Button("Rename…") { model.renaming = model.selected.first }.disabled(model.selection.count != 1)
-                Button("Delete…") { model.confirmDelete(model.selected) }.disabled(model.selection.isEmpty)
-                Divider()
-                Button("Texts…") { model.showTexts = true }.disabled(!model.clipboardAvailable)
-                Button("Send Mac clipboard to phone", action: model.sendClipboard).disabled(!model.clipboardAvailable)
-                Button("Copy phone clipboard to Mac", action: model.fetchClipboard).disabled(!model.clipboardAvailable)
-                if !model.clipboardAvailable {
-                    Text("Texts and the clipboard work over Wi‑Fi and Fast USB, or while mirroring the screen.")
-                }
-                Divider()
-                Button("Refresh", action: model.refresh)
-            } label: { Image(systemName: "ellipsis.circle") }
-                .menuStyle(.borderlessButton).frame(width: 34).disabled(model.busy)
-                .help("More actions").accessibilityLabel("More actions")
+        }
+        .font(.system(size: 13)).padding(.horizontal, 9).padding(.vertical, 5).frame(width: width).glass(radius)
+        .help("Type to filter this folder. Press Return to search every folder inside it.")
+    }
+}
+
+struct MediaToggle: View {
+    @ObservedObject var model: BrowserModel
+    var body: some View {
+        Button { model.mediaOnly.toggle() } label: { Image(systemName: model.mediaOnly ? "photo.fill.on.rectangle.fill" : "photo.on.rectangle") }
+            .buttonStyle(.plain).foregroundStyle(model.mediaOnly ? Palette.amber : .white).frame(width: 28)
+            .help(model.mediaOnly ? "Showing only photos and videos" : "Show only photos and videos")
+            .accessibilityLabel("Only photos and videos")
+            .accessibilityValue(model.mediaOnly ? "On" : "Off")
+    }
+}
+
+struct ViewToggle: View {
+    @ObservedObject var model: BrowserModel
+    var body: some View {
+        Picker("View", selection: $model.grid) {
+            Image(systemName: "list.bullet").accessibilityLabel("List").tag(false)
+            Image(systemName: "square.grid.2x2").accessibilityLabel("Grid").tag(true)
+        }
+        .labelsHidden()
+        .pickerStyle(.segmented).frame(width: 76).help("List or grid")
+    }
+}
+
+/// Sort key and order, as menu items (also inside the compact ⋯ menu).
+struct SortChoices: View {
+    @ObservedObject var model: BrowserModel
+    var body: some View {
+        Picker("Sort by", selection: $model.sortKey) {
+            ForEach(SortKey.allCases) { Text($0.rawValue).tag($0) }
+        }
+        Divider()
+        Picker("Order", selection: $model.ascending) {
+            Text("Ascending").tag(true)
+            Text("Descending").tag(false)
         }
     }
 }
 
-/// Clickable folder trail: "vivo X300 Pro › Internal shared storage › DCIM". Deep paths keep the first and last two
-/// folders and put the rest behind "…". Names never break mid-word; `compact` lets long ones shorten with an ellipsis.
-private struct PathBar: View {
+struct SortMenu: View {
     @ObservedObject var model: BrowserModel
-    var compact: Bool
+    var body: some View {
+        Menu { SortChoices(model: model) } label: { Image(systemName: "arrow.up.arrow.down") }
+            .menuStyle(.borderlessButton).frame(width: 34).help("Sort by \(model.sortKey.rawValue.lowercased())")
+            .accessibilityLabel("Sort, by \(model.sortKey.rawValue.lowercased())")
+    }
+}
+
+/// Everything else: folders, uploads, imports, rename and delete, texts and the clipboard. Shells without a sidebar
+/// add Devices and Disconnect (`devices`); compact ones fold the view, filter and sort controls in too (`folded`).
+struct MoreMenu: View {
+    @ObservedObject var model: BrowserModel
+    var devices = false
+    var folded = false
 
     var body: some View {
-        let path = Array(model.path.enumerated())
-        let hidden = path.count > 3 ? Array(path[1..<(path.count - 2)]) : []
-        let shown = hidden.isEmpty ? path : [path[0]] + path.suffix(2)
-        HStack(spacing: 4) {
-            ForEach(shown, id: \.offset) { index, crumb in
-                if index > 0 { chevron }
-                if index == path.count - 2 && !hidden.isEmpty {
-                    Menu {
-                        ForEach(hidden, id: \.offset) { hiddenIndex, folder in Button(folder.name) { model.go(to: hiddenIndex) } }
-                    } label: { Text("…").font(.system(size: 14, weight: .medium)).foregroundStyle(Palette.muted) }
-                        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("Folders in between")
-                        .accessibilityLabel("Folders in between")
-                    chevron
+        Menu {
+            if folded {
+                Toggle("Only Photos and Videos", isOn: $model.mediaOnly)
+                Picker("View", selection: $model.grid) {
+                    Text("List").tag(false)
+                    Text("Grid").tag(true)
                 }
-                crumbButton(index, crumb.name, last: index == path.count - 1)
+                Menu("Sort") { SortChoices(model: model) }
+                Divider()
             }
-        }
-    }
-
-    private var chevron: some View {
-        Image(systemName: "chevron.right").font(.system(size: 10, weight: .bold)).foregroundStyle(Palette.muted).accessibilityHidden(true)
-    }
-
-    @ViewBuilder private func crumbButton(_ index: Int, _ name: String, last: Bool) -> some View {
-        let button = Button(name) { model.go(to: index) }
-            .buttonStyle(.plain)
-            .font(.system(size: 14, weight: last ? .bold : .medium))
-            .foregroundStyle(last ? .white : Palette.muted)
-            .lineLimit(1)
-        if compact { button.truncationMode(.middle).layoutPriority(last ? 1 : 0) } else { button.fixedSize() }
+            Button("New Folder…", action: model.newFolder)
+            Button("Upload…", action: model.chooseUploads)
+            Divider()
+            Button("Import New Photos") { model.importNewPhotos() }
+            Button("Import New Photos To…") { model.importNewPhotos(choosingFolder: true) }
+            Button("Show Files Sent from the Phone", action: model.showReceived).disabled(model.overUSB)
+            Divider()
+            Button("Rename…") { model.renaming = model.selected.first }.disabled(model.selection.count != 1)
+            Button("Delete…") { model.confirmDelete(model.selected) }.disabled(model.selection.isEmpty)
+            Divider()
+            Button("Texts…") { model.showTexts = true }.disabled(!model.clipboardAvailable)
+            Button("Send Mac clipboard to phone", action: model.sendClipboard).disabled(!model.clipboardAvailable)
+            Button("Copy phone clipboard to Mac", action: model.fetchClipboard).disabled(!model.clipboardAvailable)
+            if !model.clipboardAvailable {
+                Text("Texts and the clipboard work over Wi‑Fi and Fast USB, or while mirroring the screen.")
+            }
+            Divider()
+            Button("Refresh", action: model.refresh)
+            if devices {
+                Divider()
+                Button("Devices") { model.showBrowser = false }
+                Button("Disconnect", action: model.disconnect)
+            }
+        } label: { Image(systemName: "ellipsis.circle") }
+            .menuStyle(.borderlessButton).frame(width: 34).disabled(model.busy)
+            .help("More actions").accessibilityLabel("More actions")
     }
 }
 
@@ -486,7 +560,7 @@ private struct Shortcuts: View {
     }
 }
 
-private func symbol(for kind: FileKind) -> (String, Color) {
+func fileSymbol(_ kind: FileKind) -> (String, Color) {
     switch kind {
     case .folder: return ("folder.fill", Palette.amber)
     case .image: return ("photo.fill", Palette.violet)
@@ -499,18 +573,18 @@ private func symbol(for kind: FileKind) -> (String, Color) {
     }
 }
 
-private var selectionFill: LinearGradient {
+var selectionFill: LinearGradient {
     LinearGradient(colors: [Palette.violet.opacity(0.55), Palette.pink.opacity(0.35)], startPoint: .leading, endPoint: .trailing)
 }
 
 /// "2.3 GB", "≥ 41 GB" when the phone stopped counting early, or "—" before it's measured.
-private func folderText(_ size: FolderSize?) -> String {
+func folderText(_ size: FolderSize?) -> String {
     guard let size else { return "—" }
     return (size.complete ? "" : "≥ ") + ByteCountFormatter.string(fromByteCount: size.bytes, countStyle: .file)
 }
 
 /// Where the keyboard is: a ring that shows even on a selected item.
-private func focusRing(_ radius: CGFloat, _ on: Bool) -> some View {
+func focusRing(_ radius: CGFloat, _ on: Bool) -> some View {
     RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(Palette.amber.opacity(on ? 0.9 : 0), lineWidth: 1.5)
 }
 
@@ -522,7 +596,7 @@ struct FileRow: View {
     var focused = false
 
     var body: some View {
-        let (name, color) = symbol(for: FileKind(entry))
+        let (name, color) = fileSymbol(FileKind(entry))
         HStack(spacing: 12) {
             Group {
                 if let thumbnail {
@@ -556,7 +630,7 @@ struct FileTile: View {
     var focused = false
 
     var body: some View {
-        let (name, color) = symbol(for: FileKind(entry))
+        let (name, color) = fileSymbol(FileKind(entry))
         VStack(spacing: 8) {
             ZStack {
                 RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.white.opacity(0.06))
