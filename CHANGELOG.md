@@ -4,6 +4,20 @@ All notable changes to OpenBridge are recorded here. Every release has an entry;
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-20
+
+Aurora and Tide become real layouts on the Mac, Windows and Linux, not just new colours.
+
+### Added
+- **Aurora, the observatory.** Your phone and its halo sit in a sky header, with every phone you know as a glowing orb to switch between. The folder path runs along the horizon like a constellation, a comet carries your transfers across it (click it for the queue), and your files float on one frosted sheet, as a gallery by default.
+- **Tide, the harbour.** Phones are portholes in a rail on the left, full of water when connected. The path shows depth, files are rounded capsules that fill with water when selected, and the water at the bottom of the window rises with your transfers, which float in it until they're done.
+- **New connect screens:** in Aurora, nearby and saved phones are stars around the halo; in Tide they rise as bubbles from the pool. The 6-digit code shows in the middle while pairing.
+- **Grid view in every look**, remembered per look (Aurora opens as a gallery, Dusk and Tide as lists). In the grid, the arrow keys move by tile and by row.
+
+### Changed
+- Switching looks in Settings crossfades straight away and keeps your folder, selection and running transfers.
+- Dusk keeps its layout.
+
 ## [1.0.2] - 2026-10-19
 
 Fixes from testing the phone hotspot on a vivo X300 Pro.
