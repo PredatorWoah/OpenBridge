@@ -88,6 +88,8 @@ class SharingServer(private val context: Context, private val store: Store, priv
         /** The catch-all: every address, until a connection shows which one the hotspot has. */
         val wildcard get() = address.isAnyLocalAddress
         @Volatile var learned: InetAddress? = null
+        @Volatile var handshakeLogged = false
+        @Volatile var handshakeFailureLogged = false
         val shown get() = !wildcard || learned != null
         val endpoint get() = Endpoint(via, (learned ?: address).hostAddress!!, socket.localPort)
     }
@@ -331,7 +333,18 @@ class SharingServer(private val context: Context, private val store: Store, priv
                     workers.execute {
                         try {
                             socket.use {
-                                it.startHandshake()
+                                try { it.startHandshake() } catch (e: IOException) {
+                                    // For diagnostics, once per listener: a computer got through but the TLS didn't.
+                                    if (door.via == Via.HOTSPOT && !door.handshakeFailureLogged) {
+                                        door.handshakeFailureLogged = true
+                                        Log.add("Hotspot: a computer at ${socket.inetAddress.hostAddress} connected to port ${door.socket.localPort} but the secure handshake failed (${e.javaClass.simpleName}: ${e.message})")
+                                    }
+                                    throw e
+                                }
+                                if (door.via == Via.HOTSPOT && !door.handshakeLogged) {
+                                    door.handshakeLogged = true
+                                    Log.add("Hotspot: secure connection from ${socket.inetAddress.hostAddress} on port ${door.socket.localPort}")
+                                }
                                 door.session.serve(it.inputStream, it.outputStream)
                             }
                         } catch (_: Exception) {

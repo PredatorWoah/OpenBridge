@@ -357,18 +357,34 @@ final class BrowserModel: ObservableObject {
         probing = true
         Task {
             defer { probing = false }
-            guard let gateway = await currentGateway() else { discovery.found(atGateway: nil); return }
+            let gateway = await currentGateway()
+            if gateway != gatewayLogged {
+                gatewayLogged = gateway; gatewayFailureLogged = false
+                Diagnostics.log("Default gateway: \(gateway ?? "none (or not a private IPv4 address)")")
+            }
+            guard let gateway else { discovery.found(atGateway: nil); return }
+            var failures: [String] = []
             for port: UInt16 in [41987, 41986] {
-                guard let fingerprint = try? await BridgeClient.fingerprint(host: gateway, port: port, timeout: 1.5) else { continue }
+                let fingerprint: Data
+                do { fingerprint = try await BridgeClient.fingerprint(host: gateway, port: port, timeout: 3) } catch {
+                    failures.append("\(port): \(error.localizedDescription)")
+                    continue
+                }
                 let id = fingerprint.prefix(8).map { String(format: "%02x", $0) }.joined()
                 let name = saved.first { $0.id == id }?.name ?? "Phone (this hotspot)"
                 if discovery.atGateway == nil { Diagnostics.log("Found a phone at the default gateway (its hotspot), port \(port)") }
                 discovery.found(atGateway: PhoneDiscovery.Phone(name: name, host: gateway, port: String(port), phoneID: id))
                 return
             }
+            if !gatewayFailureLogged {
+                gatewayFailureLogged = true
+                Diagnostics.log("No phone at the default gateway \(gateway) (\(failures.joined(separator: "; ")))")
+            }
             discovery.found(atGateway: nil)
         }
     }
+    private var gatewayLogged: String?
+    private var gatewayFailureLogged = false
 
     private func currentGateway() async -> String? {
         if let checked = gatewayChecked, Date().timeIntervalSince(checked.at) < 20 { return checked.address }
