@@ -17,6 +17,12 @@ android {
         targetSdk = 35
         versionCode = 25
         versionName = "1.1.1"
+        // Test APKs from the Actions tab (test-apk.yml): the next build number, so they install over the release, and a
+        // fourth version part, so the app never offers the release it was built on as an update. Never published.
+        providers.gradleProperty("testBuild").orNull?.let { build ->
+            versionCode = versionCode!! + 1
+            versionName = "$versionName.$build"
+        }
     }
     signingConfigs {
         if (releaseKeystore != null) {
