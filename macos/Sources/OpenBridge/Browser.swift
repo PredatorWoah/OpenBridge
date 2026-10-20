@@ -13,14 +13,18 @@ struct FolderContent: View {
     /// Tide says "Drop to upload" on its water surface instead of outlining the files.
     var outlineDrop = true
 
-    var body: some View {
+    @ViewBuilder var body: some View {
+        // ImageRenderer can't draw AppKit's drop target: README screenshots leave it out.
+        if Screenshots.active { files } else { files.onDrop(of: [UTType.fileURL], isTargeted: $dropping, perform: drop) }
+    }
+
+    private var files: some View {
         ZStack {
             if let results = model.results { ResultsList(model: model, results: results) }
             else if model.grid { FolderGrid(model: model, look: look) } else { FolderList(model: model, look: look) }
             EmptyNotes(model: model)
             if dropping && outlineDrop { DropOutline(model: model) }
         }
-        .onDrop(of: [UTType.fileURL], isTargeted: $dropping, perform: drop)
     }
 
     /// Files dropped from Finder upload into the open folder.
@@ -335,7 +339,11 @@ private struct ResultsList: View {
 struct Hit: ViewModifier {
     @ObservedObject var model: BrowserModel
     let hit: Found
-    func body(content: Content) -> some View {
+    @ViewBuilder func body(content: Content) -> some View {
+        if Screenshots.active { content } else { interactive(content) }
+    }
+
+    private func interactive(_ content: Content) -> some View {
         content
             .onTapGesture(count: 2) { model.openFound(hit) }
             .onAppear { if !hit.entry.directory { model.loadThumbnail(hit.entry) } }
@@ -353,7 +361,12 @@ struct Hit: ViewModifier {
 struct Item: ViewModifier {
     @ObservedObject var model: BrowserModel
     let entry: Entry
-    func body(content: Content) -> some View {
+    @ViewBuilder func body(content: Content) -> some View {
+        // ImageRenderer can't draw drag sources or context menus: README screenshots leave them out.
+        if Screenshots.active { content } else { interactive(content) }
+    }
+
+    private func interactive(_ content: Content) -> some View {
         content
             .onTapGesture(count: 2) { model.open(entry) }
             .onTapGesture { model.click(entry) }
