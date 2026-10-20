@@ -64,9 +64,6 @@ object S {
     val whatToShare get() = t("What to share", "共享内容")
     val stopToChange get() = t("Stop sharing to change what's shared.", "停止共享后才能更改共享内容。")
     val phoneHotspot get() = t("Phone hotspot", "手机热点")
-    val hotspotExplain get() = t("For Wi‑Fi that keeps devices apart (guest, hotel and campus networks): the phone makes its own network for your computer to join.",
-        "适用于不让设备互相连接的 Wi‑Fi（访客、酒店和校园网络）：手机会建立自己的网络，让电脑加入。")
-    val turnOnHotspot get() = t("Turn on hotspot", "开启热点")
     val turnOffHotspot get() = t("Turn off hotspot", "关闭热点")
     val hotspotLabel get() = t("hotspot", "热点")
     val hotspotJoin get() = t("Join this network from your computer, then it finds the phone.", "在电脑上加入这个网络，电脑就会找到手机。")
@@ -74,9 +71,12 @@ object S {
     val password get() = t("Password", "密码")
     fun hotspotServing(host: String, port: Int) = t("Sharing on the hotspot at $host · port $port", "正在通过热点共享：$host · 端口 $port")
     val hotspotStartSharing get() = t("Tap to share, and the phone shares on this network too.", "点一下开始共享，手机也会在这个网络上共享。")
-    val hotspotSystemHint get() = t("Turn on the hotspot in Android settings and join it from your computer. While sharing, OpenBridge shares on it too.",
-        "请在 Android 设置中开启热点，并在电脑上加入。共享时，OpenBridge 也会在热点上共享。")
     val openHotspotSettings get() = t("Open hotspot settings", "打开热点设置")
+    val hotspotOwn get() = t("Turn on your phone's own hotspot (from quick settings or Settings › Personal hotspot), with your own name and password or none, and join it from your computer. While sharing, OpenBridge shares on it too, and the computer finds the phone by itself.",
+        "开启手机自带的热点（在快捷设置或“设置 › 个人热点”中），名称和密码随你设置，也可以不设密码，然后在电脑上加入。共享时，OpenBridge 也会在热点上共享，电脑会自动找到手机。")
+    val temporaryHotspot get() = t("Or make a temporary hotspot", "或建立临时热点")
+    val temporaryHotspotExplain get() = t("OpenBridge can also make a temporary network with a name and password Android chooses.",
+        "OpenBridge 也可以建立临时网络，名称和密码由 Android 决定。")
     val updates get() = t("Updates", "更新")
     val help get() = t("Help", "帮助")
     val copyDiagnostics get() = t("Copy diagnostics", "复制诊断信息")
