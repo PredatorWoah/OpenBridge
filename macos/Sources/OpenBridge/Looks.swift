@@ -150,6 +150,11 @@ struct Backdrop: View {
         let paused: Bool = reduceMotion || scenePhase == .background
         if look == .dusk {
             Rectangle().fill(Palette.background)
+        } else if Screenshots.active {
+            // One still frame: screenshots can't wait for the clock.
+            Canvas { context, size in
+                LookArt.backdrop(look, &context, size: size, time: 7, energy: energy, level: level)
+            }
         } else {
             TimelineView(.animation(minimumInterval: 1.0 / 30, paused: paused)) { timeline in
                 Canvas { context, size in

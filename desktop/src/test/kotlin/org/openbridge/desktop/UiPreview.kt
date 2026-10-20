@@ -27,8 +27,9 @@ class UiPreview {
 
     private fun render(out: File, name: String, state: AppState, width: Int = 1060, height: Int = 700) {
         val scene = ImageComposeScene(width, height, Density(1f)) { App(state, false, FocusRequester()) }
-        scene.render(0)
-        val image = scene.render(500_000_000)
+        // Frames a tenth of a second apart for two seconds, so things that arrive with a motion have arrived.
+        for (frame in 0 until 20) scene.render(frame * 100_000_000L)
+        val image = scene.render(2_000_000_000)
         File(out, "$name.png").writeBytes(image.encodeToData(EncodedImageFormat.PNG)!!.bytes)
         scene.close()
     }
@@ -47,7 +48,7 @@ class UiPreview {
                 isolated = true
                 update = Release("0.13.1", "https://example.invalid")
             }
-            render(out, "connect-${look.id}", start)
+            render(out, "${look.id}-connect", start)
 
             val browse = AppState().apply {
                 source = Nothing; transport = Transport.FAST_USB; deviceName = "vivo X300 Pro"
@@ -61,16 +62,32 @@ class UiPreview {
                 update = Release("0.13.1", "https://example.invalid")
                 texts = listOf(TextItem("Meet at 7 by the north entrance", true, 1_760_000_000_000), TextItem("https://example.com/a/very/long/link", false, 1_759_990_000_000))
             }
-            render(out, "browser-${look.id}", browse)
+            browse.saved = listOf(vivo); browse.nearby = start.nearby; browse.usbLinks = start.usbLinks
+            browse.transfer = null; browse.update = null; browse.phoneOutdated = null
+            browse.grid = false
+            render(out, "${look.id}-browser-list", browse)
+            browse.grid = true
+            render(out, "${look.id}-browser-grid", browse)
+            browse.grid = null
+            // A queue of seven, the third file 42% of the way.
+            val jobs = (1..7).map { Job.Upload(File("IMG_2026101${it}_0900.jpg"), "", emptyList()) }
+            browse.transfer = Transfer(jobs[2].name, upload = true, index = 3, count = 7, fraction = 0.42f, remaining = jobs.drop(2))
+            browse.busy = true
+            browse.update = Release("0.13.1", "https://example.invalid")
+            browse.phoneOutdated = S.phoneOlder("0.12.2", "0.13.0")
+            render(out, "${look.id}-transfers", browse)
+            browse.busy = false
+            render(out, "${look.id}-transfers-stopped", browse)
+            browse.update = null; browse.phoneOutdated = null
+            browse.path = listOf("" to S.phone, "i" to "Internal storage", "d" to "DCIM", "c" to "Camera", "2" to "2026", "o" to "October trip")
+            render(out, "${look.id}-compact", browse, width = 740, height = 500)
+            render(out, "${look.id}-connect-compact", start, width = 740, height = 500)
             browse.panel = Panel.SETTINGS
-            render(out, "settings-${look.id}", browse)
+            render(out, "${look.id}-settings", browse)
+            browse.panel = Panel.TEXTS
+            render(out, "${look.id}-texts", browse)
             browse.panel = null
-            if (look == Look.DUSK) {
-                browse.panel = Panel.TEXTS
-                render(out, "texts-${look.id}", browse)
-                browse.panel = null
-                render(out, "browser-narrow-${look.id}", browse, width = 820, height = 620)
-            }
+            render(out, "${look.id}-browser-narrow", browse, width = 820, height = 620)
         }
         Palette.look = Look.DUSK
     }

@@ -70,7 +70,7 @@ class AppState {
     var pairingCode by mutableStateOf<String?>(null); internal set
     /** The cable a pairing runs through, or null over Wi‑Fi: where the code shows. */
     var pairingOver by mutableStateOf<String?>(null); private set
-    var busy by mutableStateOf(false); private set
+    var busy by mutableStateOf(false); internal set
     var status by mutableStateOf(""); private set
     var error by mutableStateOf<String?>(null); internal set
     var toast by mutableStateOf<String?>(null); internal set
@@ -130,6 +130,11 @@ class AppState {
     var searchedLong by mutableStateOf(false); internal set
     /** The sheet open over the window, if any. */
     var panel by mutableStateOf<Panel?>(null)
+    /** Files as a grid of previews instead of a list; null follows the look (Aurora opens as a gallery). */
+    var grid by mutableStateOf<Boolean?>(null)
+    val showGrid: Boolean get() = grid ?: (Palette.look == Look.AURORA)
+    /** How many tiles the grid shows in a row, so the up and down arrows move a row. */
+    var columns = 1
 
     private val worker = Executors.newSingleThreadExecutor { Thread(it, "openbridge-work").apply { isDaemon = true } }
     // One preview at a time: the phone serves only a few connections at once, and browsing and transfers come first.
@@ -513,6 +518,10 @@ class AppState {
         val seen = nearby.firstOrNull { it.id == phone.id } ?: return phone
         return phone.copy(host = seen.host, port = seen.port.toIntOrNull() ?: phone.port)
     }
+
+    /** Whether this saved phone, or this phone in File transfer mode, is the one open in the browser. */
+    fun isOpen(phone: SavedPhone) = source != null && current == phone
+    fun isOpen(phone: UsbPhone) = source != null && transport == Transport.USB && openKey == "usb-" + sha(phone.id)
 
     fun isNearby(phone: SavedPhone) = nearby.any { it.id == phone.id }
 
@@ -1033,6 +1042,7 @@ class AppState {
 
     fun changeLook(look: Look) {
         Palette.look = look
+        grid = null
         preferences.put("look", look.id)
         Log.add("Look: ${look.label}")
     }

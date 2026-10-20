@@ -1,5 +1,7 @@
 package org.openbridge.desktop
 
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.Text
@@ -20,6 +22,7 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import org.openbridge.ui.Backdrop
+import org.openbridge.ui.Look
 import org.openbridge.ui.Palette
 import java.awt.datatransfer.DataFlavor
 import java.awt.dnd.DnDConstants
@@ -76,11 +79,15 @@ private fun shortcut(state: AppState, event: KeyEvent, searchFocus: FocusRequest
     }
     if (state.source == null) return false
     val shift = event.isShiftPressed
+    val grid = state.showGrid && state.results == null
     return when {
         event.isCtrlPressed && event.key == Key.A -> { state.selectAll(); true }
         event.isCtrlPressed && event.key == Key.F -> { runCatching { searchFocus.requestFocus() }; true }
-        event.key == Key.DirectionDown && !event.isAltPressed -> { state.move(1, shift); true }
-        event.key == Key.DirectionUp && !event.isAltPressed -> { state.move(-1, shift); true }
+        // In the grid, up and down move a row of tiles, left and right one tile.
+        event.key == Key.DirectionDown && !event.isAltPressed -> { state.move(if (grid) state.columns else 1, shift); true }
+        event.key == Key.DirectionUp && !event.isAltPressed -> { state.move(if (grid) -state.columns else -1, shift); true }
+        event.key == Key.DirectionRight && grid -> { state.move(1, shift); true }
+        event.key == Key.DirectionLeft && grid -> { state.move(-1, shift); true }
         event.key == Key.PageDown -> { state.move(10, shift); true }
         event.key == Key.PageUp -> { state.move(-10, shift); true }
         event.key == Key.MoveHome -> { state.move(0, shift, index = 0); true }
@@ -110,13 +117,29 @@ fun promptRename(state: AppState) {
     state.rename(entry, name)
 }
 
+/**
+ * The window: the look's background and its shell (each look arranges the same parts its own way), the sheets,
+ * and the toasts. Switching looks crossfades between shells; everything they show lives in [AppState], so the folder,
+ * selection and transfers carry over.
+ */
 @Composable
 fun App(state: AppState, dropping: Boolean, searchFocus: FocusRequester) {
     val connected = state.source != null
-    // The background livens up while a phone is connected (or pairing), and Tide's water follows a transfer.
-    val level = state.transfer?.takeIf { !it.done }?.fraction ?: 0f
+    val look = Palette.look
+    // The background livens up while a phone is connected (or pairing). Tide's water follows the whole queue, and
+    // rises a little to meet files dragged over the window.
+    val progress = state.transfer?.takeIf { !it.done }?.let(::overallProgress) ?: 0f
+    val level = if (dropping && connected) maxOf(progress, 0.16f) else progress
     Backdrop(Modifier.fillMaxSize(), energy = if (connected || state.pairingCode != null) 1f else 0f, level = level, still = Platform.reduceMotion) {
-        if (connected) BrowserScreen(state, dropping, searchFocus) else ConnectScreen(state)
+        Crossfade(look, animationSpec = tween(if (Platform.reduceMotion) 0 else 450)) { shown ->
+            when (shown) {
+                Look.DUSK -> DuskShell(state, dropping, searchFocus)
+                Look.AURORA -> AuroraShell(state, dropping, searchFocus)
+                Look.TIDE -> TideShell(state, dropping, searchFocus)
+            }
+        }
+        // Pairing with another phone from a shell's switcher, while one is open: the code to compare.
+        if (connected && state.pairingCode != null) PairingCard(state, Modifier.align(Alignment.Center))
         when (state.panel) {
             Panel.TEXTS -> TextsPanel(state)
             Panel.SETTINGS -> SettingsPanel(state) {
@@ -126,8 +149,10 @@ fun App(state: AppState, dropping: Boolean, searchFocus: FocusRequester) {
             null -> {}
         }
         state.toast?.let { message ->
+            // Above Tide's dock of transfers when it's showing.
+            val lift = if (look == Look.TIDE && connected && state.transfer != null) 118.dp else 22.dp
             Text(message, color = Palette.fg, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 22.dp).glass(CircleShape)
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = lift).glass(CircleShape)
                     .semantics { liveRegion = LiveRegionMode.Polite }.padding(horizontal = 18.dp, vertical = 10.dp))
         }
     }
