@@ -46,7 +46,7 @@ enum TextFile {
 /// Texts history, newest first.
 @MainActor
 final class TextHistory: ObservableObject {
-    @Published private(set) var items: [TextItem] = TextFile.load()
+    @Published private(set) var items: [TextItem] = Screenshots.active ? [] : TextFile.load()
 
     func add(_ text: String, fromPhone: Bool) {
         items.insert(TextItem(text: text, fromPhone: fromPhone, date: Date()), at: 0)

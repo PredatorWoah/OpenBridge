@@ -169,7 +169,7 @@ struct DuskConnect: View {
                 VStack(spacing: 6) {
                     Spacer().frame(height: geometry.size.height * 0.27 + 104)
                     Text(ConnectText.title(model)).font(.system(size: 24, weight: .bold, design: .rounded))
-                    Text(ConnectText.subtitle(model)).foregroundStyle(Palette.muted).multilineTextAlignment(.center).textSelection(.enabled)
+                    Text(ConnectText.subtitle(model)).foregroundStyle(Palette.muted).multilineTextAlignment(.center).modifier(Selectable())
                     if model.connected {
                         DeviceCard(model: model, openAutomatically: $openAutomatically)
                             .padding(.top, 16)

@@ -125,7 +125,7 @@ private struct FolderList: View {
         let entries = model.sorted
         let deepest = Self.deepest(entries, model.sizes)
         ScrollViewReader { proxy in
-            ScrollView {
+            FileScroll {
                 LazyVStack(spacing: spacing) {
                     ForEach(entries) { entry in
                         row(entry, deepest: deepest).modifier(Item(model: model, entry: entry))
@@ -177,7 +177,7 @@ private struct FolderGrid: View {
     var body: some View {
         let metrics = GridMetrics.of(look)
         ScrollViewReader { proxy in
-            ScrollView {
+            FileScroll {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: metrics.tile), spacing: metrics.spacing)], spacing: metrics.spacing) {
                     ForEach(model.sorted) { entry in
                         tile(entry).modifier(Item(model: model, entry: entry))
@@ -221,7 +221,7 @@ struct BrowserChrome: ViewModifier {
     func body(content: Content) -> some View {
         content
             .quickLookPreview($model.previewURL)
-            .background { Shortcuts(model: model, searching: searching) }
+            .background { if !Screenshots.active { Shortcuts(model: model, searching: searching) } }
             .confirmationDialog(deleteTitle, isPresented: Binding(get: { !model.pendingDelete.isEmpty }, set: { if !$0 { model.pendingDelete = [] } })) {
                 Button("Delete", role: .destructive, action: model.deleteConfirmed)
             } message: { Text("Folders are deleted with everything in them. The phone has no bin, so this can't be undone.") }
@@ -424,8 +424,12 @@ struct SearchBox: View {
     var body: some View {
         HStack(spacing: 5) {
             Image(systemName: "magnifyingglass").foregroundStyle(Palette.muted).accessibilityHidden(true)
-            TextField("Search", text: $model.query).textFieldStyle(.plain).focused(searching)
-                .onSubmit { model.searchEverywhere() }
+            if Screenshots.active {
+                Text("Search").foregroundStyle(Palette.muted).frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                TextField("Search", text: $model.query).textFieldStyle(.plain).focused(searching)
+                    .onSubmit { model.searchEverywhere() }
+            }
             if !model.query.isEmpty {
                 Button { model.query = "" } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain).foregroundStyle(Palette.muted)
                     .help("Clear the search (Esc)").accessibilityLabel("Clear search")
@@ -450,12 +454,16 @@ struct MediaToggle: View {
 struct ViewToggle: View {
     @ObservedObject var model: BrowserModel
     var body: some View {
-        Picker("View", selection: $model.grid) {
-            Image(systemName: "list.bullet").accessibilityLabel("List").tag(false)
-            Image(systemName: "square.grid.2x2").accessibilityLabel("Grid").tag(true)
+        if Screenshots.active {
+            ClosedSegments(grid: model.grid)
+        } else {
+            Picker("View", selection: $model.grid) {
+                Image(systemName: "list.bullet").accessibilityLabel("List").tag(false)
+                Image(systemName: "square.grid.2x2").accessibilityLabel("Grid").tag(true)
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented).frame(width: 76).help("List or grid")
         }
-        .labelsHidden()
-        .pickerStyle(.segmented).frame(width: 76).help("List or grid")
     }
 }
 
@@ -477,9 +485,13 @@ struct SortChoices: View {
 struct SortMenu: View {
     @ObservedObject var model: BrowserModel
     var body: some View {
-        Menu { SortChoices(model: model) } label: { Image(systemName: "arrow.up.arrow.down") }
-            .menuStyle(.borderlessButton).frame(width: 34).help("Sort by \(model.sortKey.rawValue.lowercased())")
-            .accessibilityLabel("Sort, by \(model.sortKey.rawValue.lowercased())")
+        if Screenshots.active {
+            ClosedMenu(symbol: "arrow.up.arrow.down")
+        } else {
+            Menu { SortChoices(model: model) } label: { Image(systemName: "arrow.up.arrow.down") }
+                .menuStyle(.borderlessButton).frame(width: 34).help("Sort by \(model.sortKey.rawValue.lowercased())")
+                .accessibilityLabel("Sort, by \(model.sortKey.rawValue.lowercased())")
+        }
     }
 }
 
@@ -491,6 +503,10 @@ struct MoreMenu: View {
     var folded = false
 
     var body: some View {
+        if Screenshots.active { ClosedMenu(symbol: "ellipsis.circle") } else { menu }
+    }
+
+    private var menu: some View {
         Menu {
             if folded {
                 Toggle("Only Photos and Videos", isOn: $model.mediaOnly)

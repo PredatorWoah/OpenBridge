@@ -54,18 +54,18 @@ final class BrowserModel: ObservableObject {
     @Published var thumbnails: [Entry.ID: NSImage] = [:]
     /// A downloaded copy shown with Quick Look.
     @Published var previewURL: URL?
-    @Published var sortKey: SortKey = SortKey(rawValue: UserDefaults.standard.string(forKey: "sortKey") ?? "") ?? .name {
-        didSet { UserDefaults.standard.set(sortKey.rawValue, forKey: "sortKey") }
+    @Published var sortKey: SortKey = SortKey(rawValue: BrowserModel.stored?.string(forKey: "sortKey") ?? "") ?? .name {
+        didSet { BrowserModel.stored?.set(sortKey.rawValue, forKey: "sortKey") }
     }
-    @Published var ascending = !UserDefaults.standard.bool(forKey: "sortDescending") {
-        didSet { UserDefaults.standard.set(!ascending, forKey: "sortDescending") }
+    @Published var ascending = !(BrowserModel.stored?.bool(forKey: "sortDescending") ?? false) {
+        didSet { BrowserModel.stored?.set(!ascending, forKey: "sortDescending") }
     }
     /// List or grid, remembered for each look (`prefersGrid`).
     @Published var grid = BrowserModel.prefersGrid(Palette.look) {
-        didSet { UserDefaults.standard.set(grid, forKey: BrowserModel.gridKey(Palette.look)) }
+        didSet { BrowserModel.stored?.set(grid, forKey: BrowserModel.gridKey(Palette.look)) }
     }
     /// Phones paired before, which reconnect by themselves while sharing.
-    @Published private(set) var saved: [SavedPhone] = SavedPhones.load()
+    @Published private(set) var saved: [SavedPhone] = Screenshots.active ? [] : SavedPhones.load()
     /// Phones sharing on this Wi‑Fi; runs for the whole session.
     let discovery = PhoneDiscovery()
     /// Filters for the open folder; clearing it closes search results.
@@ -105,8 +105,8 @@ final class BrowserModel: ObservableObject {
     @Published var showTexts = false
     @Published private(set) var textProblem: String?
     /// Off by default: what's copied on this Mac goes to the phone's clipboard while connected.
-    @Published var autoSendTexts = UserDefaults.standard.bool(forKey: "autoSendTexts") {
-        didSet { UserDefaults.standard.set(autoSendTexts, forKey: "autoSendTexts"); watchClipboard() }
+    @Published var autoSendTexts = BrowserModel.stored?.bool(forKey: "autoSendTexts") ?? false {
+        didSet { BrowserModel.stored?.set(autoSendTexts, forKey: "autoSendTexts"); watchClipboard() }
     }
     private var clipboardTimer: Timer?
     private var pasteboardSeen = 0
@@ -214,8 +214,25 @@ final class BrowserModel: ObservableObject {
     /// Dusk keeps the choice made before looks had their own layouts.
     static func prefersGrid(_ look: Look) -> Bool {
         let key = gridKey(look)
-        guard UserDefaults.standard.object(forKey: key) != nil else { return look == .aurora }
-        return UserDefaults.standard.bool(forKey: key)
+        guard let defaults = stored, defaults.object(forKey: key) != nil else { return look == .aurora }
+        return defaults.bool(forKey: key)
+    }
+
+    /// Where preferences are remembered; none while rendering screenshots, which must leave them alone.
+    static var stored: UserDefaults? { Screenshots.active ? nil : UserDefaults.standard }
+
+    /// Sample content for the README screenshots (`--render-screenshots`); never used otherwise. Sets what only the
+    /// model may set.
+    func showSample(phone: String, overFastUSB: Bool, path: [(id: String, name: String)], entries: [Entry],
+                    sizes: [Entry.ID: FolderSize], saved: [SavedPhone]) {
+        deviceName = phone
+        fastUSB = overFastUSB
+        connected = overFastUSB
+        showBrowser = overFastUSB
+        self.path = path
+        self.entries = entries
+        self.sizes = sizes
+        self.saved = saved
     }
 
     /// An error message for the diagnostics log: names in quotes (files, folders) left out.

@@ -222,20 +222,35 @@ struct Hero: View {
         let look = Palette.look
         let interval: Double? = look == .dusk ? nil : 1.0 / 30
         let hidden: Bool = scenePhase == .background
-        // Dusk's sun keeps the display's frame rate; the drafts' richer pictures are capped at about 30 frames a second.
-        TimelineView(.animation(minimumInterval: interval, paused: hidden)) { timeline in
-            Canvas { context, size in
-                let dt = engine.elapsed(until: timeline.date)
-                var frame = engine.step(dt, active: active, connected: connected, reduceMotion: reduceMotion)
-                if reduceMotion { frame.bloom = 0; frame.pulse = 0 }
-                LookArt.hero(look, &context, engine: engine, frame: frame,
-                             center: CGPoint(x: size.width / 2, y: size.height * centerY), radius: radius, reach: reach,
-                             time: reduceMotion ? 7 : engine.time)
+        Group {
+            if Screenshots.active {
+                still(look)
+            } else {
+                // Dusk's sun keeps the display's frame rate; the drafts' richer pictures are capped at about 30 frames a second.
+                TimelineView(.animation(minimumInterval: interval, paused: hidden)) { timeline in
+                    Canvas { context, size in
+                        let dt = engine.elapsed(until: timeline.date)
+                        var frame = engine.step(dt, active: active, connected: connected, reduceMotion: reduceMotion)
+                        if reduceMotion { frame.bloom = 0; frame.pulse = 0 }
+                        LookArt.hero(look, &context, engine: engine, frame: frame,
+                                     center: CGPoint(x: size.width / 2, y: size.height * centerY), radius: radius, reach: reach,
+                                     time: reduceMotion ? 7 : engine.time)
+                    }
+                }
             }
         }
         .accessibilityElement()
         .accessibilityLabel(label ?? "")
         .accessibilityHidden(label == nil)
+    }
+
+    /// One settled frame, for screenshots: lit when connected, moonlight otherwise.
+    private func still(_ look: Look) -> some View {
+        let warmth: Double = connected ? 1 : 0.35
+        return Canvas { context, size in
+            LookArt.hero(look, &context, engine: SunEngine(restingWarmth: warmth), frame: SunEngine.Frame(glow: 0.2),
+                         center: CGPoint(x: size.width / 2, y: size.height * centerY), radius: radius, reach: 0, time: 7)
+        }
     }
 }
 
