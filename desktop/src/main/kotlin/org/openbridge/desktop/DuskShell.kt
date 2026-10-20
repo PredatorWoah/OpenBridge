@@ -84,6 +84,7 @@ private fun Toolbar(state: AppState) {
 private fun FilterBar(state: AppState, searchFocus: FocusRequester) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        SelectAllBox(state, Look.DUSK)
         SearchField(state, searchFocus, Modifier.weight(1f))
         SearchAllButton(state)
         listOf(Show.ALL to S.showAll, Show.MEDIA to S.showMedia).forEach { (option, label) ->

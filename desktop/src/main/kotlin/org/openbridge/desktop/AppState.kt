@@ -900,6 +900,13 @@ class AppState {
     }
 
     fun selectAll() { selection = rows.toSet() }
+    fun selectNone() { selection = emptySet() }
+
+    /** A row's checkbox: adds or removes that item, keeping the rest of the selection. */
+    fun toggle(entry: Entry) {
+        selection = if (entry.id in selection) selection - entry.id else selection + entry.id
+        anchor = entry.id; cursor = entry.id
+    }
     val selected: List<Entry> get() = sorted.filter { it.id in selection }
 
     fun loadThumbnail(entry: Entry) {

@@ -166,6 +166,7 @@ private fun SurfaceBar(state: AppState, searchFocus: FocusRequester, compact: Bo
         verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             IconButton(Icons.Filled.ArrowUpward, S.up, enabled = state.path.size > 1 && !state.busy) { state.up() }
+            SelectAllBox(state, Look.TIDE)
             DepthPath(state, if (compact) 3 else 4, Modifier.weight(1f))
             if (!compact) SearchField(state, searchFocus, Modifier.width(220.dp))
             SortButton(state)
