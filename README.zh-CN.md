@@ -8,7 +8,7 @@
 [![许可证: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![平台](https://img.shields.io/badge/platforms-Android%208%2B%20%7C%20macOS%2013%2B%20%7C%20Windows%2010%2B%20%7C%20Linux-lightgrey)
 
-![手机上的 OpenBridge 拱桥亮起金色，电脑上正在浏览手机相册并下载照片](docs/images/screens.png)
+![Mac 上极光外观的 OpenBridge：星空标题栏中的手机光环，以及漂浮在玻璃面板上的相机文件夹](docs/images/mac-aurora-browser.png)
 
 **OpenBridge 在安卓手机和 Mac、Windows 电脑或 Linux 电脑之间传文件和文字。** 免费、开源、私密：无需账号，不经云端，没有追踪。所有内容都通过你自己的 Wi‑Fi 或数据线，直接从一台设备传到另一台。
 
@@ -26,7 +26,7 @@
 - 📸 **导入新照片**：一键只导入还没导入过的相机照片和视频。
 - 📺 **投屏控制**：内置开源的 [scrcpy](https://github.com/Genymobile/scrcpy)，用鼠标键盘操作手机。先用数据线连接，然后可以切换到 Wi‑Fi，拔掉数据线。
 - 📶 **应对受限的 Wi‑Fi**：酒店、校园和访客网络常常把设备隔开。OpenBridge 会发现这种情况，并提供绕过的办法：使用手机热点，或者用数据线。
-- 🎨 **三种外观**：经典的“黄昏”，以及预览中的“极光”和“潮汐”两种流动的动画外观，手机和电脑都能用。
+- 🎨 **三种外观，三种布局**：经典的“黄昏”、北极光下的天文台“极光”、水位随传输上涨的港湾“潮汐”。在 Mac、Windows、Linux 和手机上各有自己的动画布局。
 - 🐘 **大文件没问题**：4 GB 以上的文件双向都能传，中断后从断点继续。
 - 🛡️ **从不覆盖文件**：两边已有的文件都不会被替换。
 - 🔔 **一键更新**：有新版本时，点一下就会下载、用发布页的校验值核对，然后安装。
@@ -47,13 +47,33 @@
 
 ## 开始使用
 
-![三种外观：黄昏、极光和潮汐，每种都显示手机上亮起的共享按钮](docs/images/looks.png)
 
 1. **在手机上** 打开 OpenBridge，点一下大按钮。第一次请允许“所有文件访问权限”（也可以只共享一个文件夹）。
 2. **在电脑上** 打开 OpenBridge，手机会出现在“附近的手机”中，点它。
 3. **核对两边的 6 位数字**，一样就在手机上点“配对”。完成！可以浏览、拖入拖出文件，下次会自动连接。
 
 想用数据线？插上手机、解锁并选择“文件传输”，Mac 和 Windows 版会直接打开，无需配对。
+
+## 三种外观，各有各的布局
+
+在每台设备的设置中选择外观。“黄昏”是经典的落日风格。**极光**像一座天文台：你的手机是天空标题栏里的星星，文件夹路径沿着地平线延伸，彗星带着传输进度划过，文件漂浮在一块玻璃面板上。**潮汐**像一座港湾：手机是一个个舷窗，文件是被选中时会注满水的胶囊，传输时水位会随之上涨。
+
+<table>
+<tr><th></th><th>黄昏</th><th>极光</th><th>潮汐</th></tr>
+<tr><td><b>Mac</b></td>
+<td><img src="docs/images/mac-dusk-browser.png" alt="Mac 上的黄昏外观"></td>
+<td><img src="docs/images/mac-aurora-browser.png" alt="Mac 上的极光外观"></td>
+<td><img src="docs/images/mac-tide-transfers.png" alt="Mac 上的潮汐外观，正在下载视频"></td></tr>
+<tr><td><b>Mac，等待连接</b></td>
+<td><img src="docs/images/mac-dusk-connect.png" alt="黄昏外观的连接界面"></td>
+<td><img src="docs/images/mac-aurora-connect.png" alt="极光外观的连接界面"></td>
+<td><img src="docs/images/mac-tide-connect.png" alt="潮汐外观的连接界面"></td></tr>
+<tr><td><b>Windows 和 Linux</b></td>
+<td><img src="docs/images/desktop-dusk-browser-list.png" alt="Windows 和 Linux 上的黄昏外观"></td>
+<td><img src="docs/images/desktop-aurora-browser-grid.png" alt="Windows 和 Linux 上的极光外观"></td>
+<td><img src="docs/images/desktop-tide-transfers.png" alt="Windows 和 Linux 上的潮汐外观"></td></tr>
+<tr><td><b>手机</b></td><td colspan="3"><img src="docs/images/looks.png" alt="手机上三种外观的共享按钮"></td></tr>
+</table>
 
 ## 连接方式
 
@@ -103,7 +123,7 @@
 
 ### 外观
 
-在每台设备的设置中选择 **黄昏**、**极光** 或 **潮汐**。极光的光带在星空中飘动，光环闪烁；潮汐的海浪翻涌，电脑连接时玻璃水池会注满水。极光和潮汐还在预览阶段，欢迎告诉我们你的想法。开启系统的“减弱动态效果”后，背景会保持静止。
+在每台设备的设置中选择 **黄昏**、**极光** 或 **潮汐**（见上方截图）。在电脑上，每种外观都有自己的布局，而不只是换颜色；切换外观时，当前文件夹、选择和传输都会保留。在手机上，极光的光带在星空中飘动，潮汐的玻璃水池会在电脑连接时注满水。极光和潮汐仍标注为预览，欢迎告诉我们你的想法。开启系统的“减弱动态效果”后，一切都会保持静止。
 
 ### 更新和帮助
 

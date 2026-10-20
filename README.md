@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Platforms](https://img.shields.io/badge/platforms-Android%208%2B%20%7C%20macOS%2013%2B%20%7C%20Windows%2010%2B%20%7C%20Linux-lightgrey)
 
-![OpenBridge on an Android phone and a Mac: the phone's sunset arch glows gold while the Mac browses the phone's Camera folder and downloads a photo](docs/images/screens.png)
+![OpenBridge on a Mac in the Aurora look: the phone's halo in a starry sky header, and the Camera folder as a gallery on a floating glass sheet](docs/images/mac-aurora-browser.png)
 
 **OpenBridge moves files and text between your Android phone and your Mac, Windows PC or Linux computer.** Free, open source, and private: no account, no cloud, no tracking. Everything goes straight from one device to the other, over your Wi‑Fi or a cable.
 
@@ -22,7 +22,7 @@
 - 📸 **Import new photos.** One click copies only the camera photos and videos you haven't imported yet.
 - 📺 **Screen mirroring.** See and control your phone in a window, powered by [scrcpy](https://github.com/Genymobile/scrcpy). Start on the cable, then go wireless and unplug.
 - 📶 **Works on awkward Wi‑Fi.** Hotel, campus and guest networks often keep devices apart. OpenBridge notices and offers the way round: the phone's own hotspot, or the cable.
-- 🎨 **Three looks.** Dusk (the original sunset), plus Aurora and Tide, two fluid animated looks in preview, on the phone and the computer.
+- 🎨 **Three looks, three layouts.** Dusk (the original sunset), Aurora (an observatory under the northern lights) and Tide (a harbour where the water rises with your transfers), each with its own animated layout on the Mac, Windows and Linux, and on the phone.
 - 🐘 **Big files are fine.** 4 GB and more both ways; an interrupted download or upload continues where it stopped.
 - 🛡️ **Never overwrites.** Existing files are never replaced on either side.
 - 🔔 **Updates itself.** When a new version is out, one click downloads it, checks it against the release's checksums and installs it.
@@ -43,13 +43,33 @@ Every release lists its files' SHA-256 in `SHA256SUMS.txt`, and the APK is signe
 
 ## Getting started
 
-![The three looks, Dusk, Aurora and Tide, each showing the phone's share button lit up](docs/images/looks.png)
 
 1. **On the phone,** open OpenBridge and tap the big button. The first time, allow *All files access* (or choose one folder to share instead).
 2. **On the computer,** open OpenBridge. Your phone shows up under **Phones nearby**; click it.
 3. **Compare the 6 digits** on both screens and tap **Pair** on the phone if they match. That's it: browse, drag files in and out, and next time it connects by itself.
 
 Prefer a cable? Plug in, unlock the phone and choose **File transfer**. The Mac and Windows apps open it straight away, no pairing needed.
+
+## Three looks, each with its own layout
+
+Pick a look in Settings on each device. Dusk is the classic sunset. **Aurora** is an observatory: your phones are stars in a sky header, the folder path runs along the horizon, a comet carries your transfers, and files float on a glass sheet. **Tide** is a harbour: phones are portholes, files are capsules that fill with water when selected, and the water rises as files move.
+
+<table>
+<tr><th></th><th>Dusk</th><th>Aurora</th><th>Tide</th></tr>
+<tr><td><b>Mac</b></td>
+<td><img src="docs/images/mac-dusk-browser.png" alt="OpenBridge on a Mac in Dusk: a sidebar with the phone, and the Camera folder as a list"></td>
+<td><img src="docs/images/mac-aurora-browser.png" alt="OpenBridge on a Mac in Aurora: a starry sky header with the phone's halo, and the Camera folder as a gallery on a glass sheet"></td>
+<td><img src="docs/images/mac-tide-transfers.png" alt="OpenBridge on a Mac in Tide: porthole rail, capsule rows, and a video downloading in the water at the bottom"></td></tr>
+<tr><td><b>Mac, connecting</b></td>
+<td><img src="docs/images/mac-dusk-connect.png" alt="The Mac waiting for a phone in Dusk, with saved phones listed under the sun arch"></td>
+<td><img src="docs/images/mac-aurora-connect.png" alt="The Mac waiting for a phone in Aurora, with phones as stars around the halo"></td>
+<td><img src="docs/images/mac-tide-connect.png" alt="The Mac waiting for a phone in Tide, with phones as bubbles under the glass pool"></td></tr>
+<tr><td><b>Windows and Linux</b></td>
+<td><img src="docs/images/desktop-dusk-browser-list.png" alt="OpenBridge on Windows and Linux in Dusk, browsing the Camera folder"></td>
+<td><img src="docs/images/desktop-aurora-browser-grid.png" alt="OpenBridge on Windows and Linux in Aurora, the Camera folder as a gallery under the sky header"></td>
+<td><img src="docs/images/desktop-tide-transfers.png" alt="OpenBridge on Windows and Linux in Tide, transfers floating in the water dock"></td></tr>
+<tr><td><b>Phone</b></td><td colspan="3"><img src="docs/images/looks.png" alt="The phone's share button in Dusk, Aurora and Tide"></td></tr>
+</table>
 
 ## Ways to connect
 
@@ -99,7 +119,7 @@ See your phone's screen in a window and use it with the mouse and keyboard, with
 
 ### Looks
 
-Pick **Dusk**, **Aurora** or **Tide** in Settings on each device. Aurora's ribbons drift across a starry sky and its halo shimmers; in Tide the waves roll and the glass pool fills with water when your computer connects. Aurora and Tide are in preview: tell us what you think. With your system's reduce-motion setting on, the backgrounds hold still.
+Pick **Dusk**, **Aurora** or **Tide** in Settings on each device ([see them above](#three-looks-each-with-its-own-layout)). On the computer each look has its own layout, not just its own colours, and switching keeps your folder, selection and transfers. On the phone, Aurora's ribbons drift across a starry sky and in Tide the glass pool fills with water when your computer connects. Aurora and Tide are still marked Preview: tell us what you think. With your system's reduce-motion setting on, everything holds still.
 
 ### Updates and help
 
