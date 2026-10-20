@@ -10,3 +10,4 @@ local.properties
 *.keystore
 *.p12
 __pycache__/
+!android/test-signing/debug.p12

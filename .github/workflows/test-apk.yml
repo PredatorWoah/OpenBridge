@@ -1,7 +1,7 @@
 name: Test APK
-# Run from the Actions tab on any branch: an APK signed with the release key, for testing fixes on a real phone before a
-# release. It installs over the current release (same key, next build number). Nothing is published; the APK is an
-# artifact of the run.
+# Run from the Actions tab on any branch: a debug APK for testing fixes on a real phone before a release, signed with the
+# public test key in android/test-signing so each one installs over the last. Nothing is published; the APK is an
+# artifact of the run. Uninstall the release once before the first one (different key).
 on:
   workflow_dispatch:
 permissions:
@@ -22,25 +22,15 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
-      - name: Build the test APK with the release key
+      - name: Build the debug test APK
         env:
-          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          OPENBRIDGE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          OPENBRIDGE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           BUILD: ${{ github.run_number }}
         run: |
-          [ -n "$KEYSTORE_BASE64" ] || { echo "::error::The release key secrets are not configured (see docs/releasing.md)."; exit 1; }
-          keystore="$RUNNER_TEMP/release.p12"
-          trap 'rm -f "$keystore"' EXIT
-          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$keystore"
-          OPENBRIDGE_KEYSTORE="$keystore" gradle -PtestBuild="$BUILD" :protocol:check :android:app:assembleRelease :android:app:lintRelease --stacktrace
-          apk=android/app/build/outputs/apk/release/app-release.apk
-          expected=4e41b5c80d00e40b264abfe65c986a8b6d1f4fdff7e6d17eeb66105ae4bb1685
-          actual="$("$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$apk" | grep -m1 'certificate SHA-256 digest' | sed 's/.*digest: //' | tr -d ': \n' | tr 'A-F' 'a-f')"
-          [ "$actual" = "$expected" ] || { echo "::error::APK signed with $actual, not the OpenBridge release key."; exit 1; }
-          mkdir out && cp "$apk" "out/OpenBridge-test-$BUILD.apk"
+          gradle -PtestBuild="$BUILD" :protocol:check :android:app:assembleDebug :android:app:lintDebug --stacktrace
+          mkdir out && cp android/app/build/outputs/apk/debug/app-debug.apk "out/OpenBridge-debug-$BUILD.apk"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "out/OpenBridge-debug-$BUILD.apk" | grep -m1 'SHA-256'
       - uses: actions/upload-artifact@v4
         with:
-          name: OpenBridge-test-apk-${{ github.run_number }}
+          name: OpenBridge-debug-apk-${{ github.run_number }}
           path: out/*.apk
           retention-days: 30
