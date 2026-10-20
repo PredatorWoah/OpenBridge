@@ -52,6 +52,17 @@ public struct BridgeClient {
         return seen
     }
 
+    /// The certificate fingerprint of whatever answers at a private Wi‑Fi address, with only the TLS handshake. Used to
+    /// find a phone sharing on its own hotspot, where it doesn't announce itself but is this Mac's gateway.
+    public static func fingerprint(host: String, port: UInt16, timeout: TimeInterval = 2) async throws -> Data {
+        guard Wire.privateIPv4(host), port > 0 else { throw BridgeError.message("Not a private Wi-Fi IPv4 address.") }
+        let channel = TLSChannel(host: host, port: port, fingerprint: nil)
+        defer { channel.close() }
+        try await channel.connect(timeout: timeout)
+        guard let seen = channel.peerFingerprint else { throw BridgeError.message("The phone sent no certificate.") }
+        return seen
+    }
+
     /// The short ID the phone announces on the network: the first 8 bytes of its certificate fingerprint.
     public var phoneID: String { fingerprint.prefix(8).map { String(format: "%02x", $0) }.joined() }
 

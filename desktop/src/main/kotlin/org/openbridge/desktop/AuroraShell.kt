@@ -20,6 +20,7 @@ import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.*
@@ -259,12 +260,21 @@ private fun TransferPill(state: AppState, transfer: Transfer, progress: Float, t
         Row(Modifier.pressable(CircleShape, label = S.transfers, onClick = toggle).padding(horizontal = 10.dp, vertical = 7.dp)
             .semantics(mergeDescendants = true) { progressBarRangeInfo = ProgressBarRangeInfo(progress, 0f..1f) },
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Icon(if (transfer.upload) Icons.Filled.Upload else Icons.Filled.Download, null, tint = if (stopped) auroraWarning else Palette.amber, modifier = Modifier.size(15.dp))
+            Icon(if (transfer.upload) Icons.Filled.Upload else Icons.Filled.Download, null, tint = if (stopped) auroraWarning else Palette.amber, modifier = Modifier.size(16.dp))
+            if (!transfer.done) {
+                Text(transfer.name, color = Palette.fg, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1,
+                    overflow = TextOverflow.MiddleEllipsis, modifier = Modifier.widthIn(max = 200.dp))
+                Box(Modifier.width(120.dp).height(5.dp).clip(CircleShape).background(Palette.fg.copy(alpha = 0.12f))) {
+                    Box(Modifier.fillMaxHeight().fillMaxWidth(progress.coerceIn(0.02f, 1f))
+                        .background(if (stopped) SolidColor(auroraWarning) else accentBrush(1000f)))
+                }
+            }
             Text(when {
                 transfer.done -> if (transfer.count > 1) S.doneCount(transfer.count) else transfer.name
                 stopped -> S.paused
                 else -> "${(progress * 100).toInt()}%" + if (transfer.count > 1) " · ${S.ofCount(transfer.index, transfer.count)}" else ""
-            }, color = Palette.fg, fontSize = 12.5.sp, maxLines = 1, overflow = TextOverflow.MiddleEllipsis, modifier = Modifier.widthIn(max = 220.dp))
+            }, color = if (stopped) auroraWarning else Palette.amber, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+                overflow = TextOverflow.MiddleEllipsis, modifier = Modifier.widthIn(max = 220.dp))
         }
         TransferActions(state, transfer, percent = false)
     }
@@ -300,14 +310,14 @@ private fun SheetToolbar(state: AppState, searchFocus: FocusRequester, compact: 
         IconButton(Icons.Filled.ArrowUpward, S.up, enabled = state.path.size > 1 && !state.busy) { state.up() }
         SearchField(state, searchFocus, Modifier.weight(1f))
         SearchAllButton(state)
+        SortButton(state)
+        ViewToggle(state)
+        MediaToggle(state)
         if (!compact) {
-            SortButton(state)
-            ViewToggle(state)
-            MediaToggle(state)
             UploadButton(state)
             NewFolderButton(state)
         }
-        MoreButton(state, compact = compact, withUpload = false)
+        MoreButton(state, withUpload = compact)
         if (state.selection.isNotEmpty()) DownloadButton(state)
     }
 }

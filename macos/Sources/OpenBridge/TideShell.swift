@@ -144,12 +144,18 @@ private struct SurfaceBar: View {
                 DepthPath(model: model)
                 Spacer(minLength: 8)
                 SearchBox(model: model, searching: searching, width: compact ? 140 : 180, radius: 99)
+                SortMenu(model: model)
+                ViewToggle(model: model)
+                MediaToggle(model: model)
                 if !compact {
-                    SortMenu(model: model)
-                    ViewToggle(model: model)
-                    MediaToggle(model: model)
+                    Button(action: model.chooseUploads) { Image(systemName: "square.and.arrow.up") }
+                        .buttonStyle(.plain).frame(width: 28).disabled(model.busy)
+                        .help("Upload files to this folder").accessibilityLabel("Upload")
+                    Button(action: model.newFolder) { Image(systemName: "folder.badge.plus") }
+                        .buttonStyle(.plain).frame(width: 28).disabled(model.busy)
+                        .help("New folder (⌘⇧N)").accessibilityLabel("New folder")
                 }
-                MoreMenu(model: model, devices: true, folded: compact)
+                MoreMenu(model: model, devices: true, folded: false)
                 DownloadButton(model: model)
             }
             .padding(.horizontal, 16).padding(.top, 40).padding(.bottom, 8)

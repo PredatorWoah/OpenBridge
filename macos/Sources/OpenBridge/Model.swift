@@ -296,7 +296,8 @@ final class BrowserModel: ObservableObject {
         if let attached, attached != skipped { connectUSB(); return }
         // About every 4.5 seconds, look for a saved phone that's sharing.
         polls += 1
-        if polls % 3 == 0, autoConnect, !saved.isEmpty, !probing { reconnectSaved() }
+        if polls % 6 == 0, !probing { lookAtGateway() }
+        if polls % 3 == 1, autoConnect, !saved.isEmpty, !probing { reconnectSaved() }
     }
 
     // MARK: Saved phones
@@ -322,9 +323,12 @@ final class BrowserModel: ObservableObject {
             for phone in phones {
                 var candidates = [(phone, false)]
                 if let gateway, gateway != phone.host {
-                    var hotspot = phone
-                    hotspot.host = gateway; hotspot.port = 41987
-                    candidates.append((hotspot, true))
+                    // The phone shares on 41987 when it knows its hotspot, and on 41986 on every address when it doesn't.
+                    for port: UInt16 in [41987, 41986] {
+                        var hotspot = phone
+                        hotspot.host = gateway; hotspot.port = port
+                        candidates.append((hotspot, true))
+                    }
                 }
                 for (candidate, viaGateway) in candidates {
                     guard let client = try? candidate.client() else { continue }
@@ -344,6 +348,25 @@ final class BrowserModel: ObservableObject {
                     }
                 }
             }
+        }
+    }
+
+    /// On a phone's own hotspot the phone doesn't announce itself, but it is this Mac's gateway: ask what answers there
+    /// (only the TLS handshake, no secret) and list it under Phones nearby, so it can be paired like any other.
+    private func lookAtGateway() {
+        probing = true
+        Task {
+            defer { probing = false }
+            guard let gateway = await currentGateway() else { discovery.found(atGateway: nil); return }
+            for port: UInt16 in [41987, 41986] {
+                guard let fingerprint = try? await BridgeClient.fingerprint(host: gateway, port: port, timeout: 1.5) else { continue }
+                let id = fingerprint.prefix(8).map { String(format: "%02x", $0) }.joined()
+                let name = saved.first { $0.id == id }?.name ?? "Phone (this hotspot)"
+                if discovery.atGateway == nil { Diagnostics.log("Found a phone at the default gateway (its hotspot), port \(port)") }
+                discovery.found(atGateway: PhoneDiscovery.Phone(name: name, host: gateway, port: String(port), phoneID: id))
+                return
+            }
+            discovery.found(atGateway: nil)
         }
     }
 

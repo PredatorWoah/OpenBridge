@@ -223,26 +223,71 @@ private struct AuroraHorizon: View {
             ConstellationPath(model: model)
             Spacer(minLength: 8)
             if model.transfer != nil {
-                Button { showQueue.toggle() } label: {
-                    Text(TransferProgress.summary(model))
-                        .font(.system(size: 12, weight: .semibold)).monospacedDigit()
-                        .foregroundStyle(TransferProgress.stopped(model) ? Color(red: 1, green: 0.72, blue: 0.3) : Palette.amber)
-                }
-                .buttonStyle(.plain)
-                .fixedSize()
-                .help("Transfers")
-                .accessibilityLabel("Transfers, \(TransferProgress.summary(model))")
-                .onHover { inside in if inside { showQueue = true } }
-                .popover(isPresented: $showQueue, arrowEdge: .bottom) { TransferQueue(model: model) }
+                TransferPill(model: model, showQueue: $showQueue)
+                    .popover(isPresented: $showQueue, arrowEdge: .bottom) { TransferQueue(model: model) }
             }
         }
-        .frame(height: 34)
+        .frame(minHeight: 34)
+        .padding(.vertical, model.transfer == nil ? 0 : 4)
         .background(alignment: .bottom) {
             CometLine(progress: model.transfer.map { TransferProgress.overall($0) },
                       stopped: TransferProgress.stopped(model), done: model.transfer?.done ?? false)
                 .frame(height: 10)
         }
         .onChange(of: TransferProgress.stopped(model)) { stopped in if stopped { showQueue = true } }
+    }
+}
+
+/// The running transfer on the horizon, big enough to read at a glance: which way, the file, a bar, how far, and the
+/// one action that fits (Cancel, Resume or Close). Clicking it opens the whole queue.
+private struct TransferPill: View {
+    @ObservedObject var model: BrowserModel
+    @Binding var showQueue: Bool
+
+    var body: some View {
+        if let transfer = model.transfer {
+            let stopped = TransferProgress.stopped(model)
+            let tint: Color = stopped ? Color(red: 1, green: 0.72, blue: 0.3) : Palette.amber
+            let progress: Double = TransferProgress.overall(transfer)
+            HStack(spacing: 10) {
+                Button { showQueue.toggle() } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: transfer.upload ? "arrow.up.circle.fill" : "arrow.down.circle.fill")
+                            .font(.system(size: 16)).foregroundStyle(tint).accessibilityHidden(true)
+                        Text(transfer.name).font(.system(size: 13, weight: .medium)).lineLimit(1).truncationMode(.middle)
+                            .frame(maxWidth: 220, alignment: .leading)
+                        ProgressView(value: progress).progressViewStyle(.linear).tint(tint).frame(width: 140)
+                        Text(TransferProgress.summary(model)).font(.system(size: 13, weight: .semibold)).monospacedDigit()
+                            .foregroundStyle(tint).fixedSize()
+                    }
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .help("Show all transfers")
+                .accessibilityLabel("Transfers, \(transfer.name), \(TransferProgress.summary(model))")
+                action(transfer, stopped: stopped)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 7)
+            .background(Palette.night.opacity(0.7), in: Capsule())
+            .overlay(Capsule().strokeBorder(tint.opacity(0.55), lineWidth: 1))
+            .shadow(color: tint.opacity(0.25), radius: 10)
+        }
+    }
+
+    @ViewBuilder private func action(_ transfer: BrowserModel.Transfer, stopped: Bool) -> some View {
+        if transfer.done || stopped {
+            if stopped && !transfer.remaining.isEmpty {
+                Button("Resume", action: model.resume).buttonStyle(SunsetButton())
+            }
+            Button { model.transfer = nil } label: { Image(systemName: "xmark") }
+                .buttonStyle(.plain).foregroundStyle(Palette.muted)
+                .help(transfer.done ? "Close" : "Forget what's left")
+                .accessibilityLabel(transfer.done ? "Close" : "Forget what's left")
+        } else {
+            Button { model.cancel() } label: { Image(systemName: "xmark.circle.fill").font(.system(size: 15)) }
+                .buttonStyle(.plain).foregroundStyle(Palette.muted)
+                .help("Cancel").accessibilityLabel("Cancel transfer")
+        }
     }
 }
 
@@ -284,10 +329,10 @@ private struct SheetToolbar: View {
             ResultsButton(model: model)
             SearchBox(model: model, searching: searching, width: compact ? 150 : 210, radius: 10)
             Spacer(minLength: 6)
+            SortMenu(model: model)
+            ViewToggle(model: model)
+            MediaToggle(model: model)
             if !compact {
-                SortMenu(model: model)
-                ViewToggle(model: model)
-                MediaToggle(model: model)
                 Button(action: model.chooseUploads) { Image(systemName: "square.and.arrow.up") }
                     .buttonStyle(.plain).frame(width: 28).disabled(model.busy)
                     .help("Upload files to this folder").accessibilityLabel("Upload")
@@ -295,7 +340,7 @@ private struct SheetToolbar: View {
                     .buttonStyle(.plain).frame(width: 28).disabled(model.busy)
                     .help("New folder (⌘⇧N)").accessibilityLabel("New folder")
             }
-            MoreMenu(model: model, devices: true, folded: compact)
+            MoreMenu(model: model, devices: true, folded: false)
             DownloadButton(model: model)
         }
         .padding(.horizontal, 14).padding(.vertical, 10)

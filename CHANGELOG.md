@@ -4,6 +4,15 @@ All notable changes to OpenBridge are recorded here. Every release has an entry;
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-10-20
+
+The phone hotspot, take three, and two things that were hard to see on the Mac.
+
+### Fixed
+- **Phone hotspot on vivo and similar phones.** Some phones hide their hotspot from apps completely, so OpenBridge never listened on it. The phone now also answers on port 41986 on any hotspot address it can't see by name (still private addresses only, never Wi‑Fi, mobile data or VPN), and the Mac, Windows and Linux apps look for the phone at the hotspot's gateway. Join the phone's hotspot from the computer and the phone shows up under Phones nearby as "Phone (this hotspot)", ready to pair, even if it was never paired before.
+- **Aurora's download progress was nearly invisible.** The horizon now shows a proper progress pill: which way, the file name, a bar, the percent and "x of y", with Cancel (or Resume after an error) right there. The comet still flies.
+- **Aurora and Tide hid sort, view and the photo filter in the ⋯ menu.** They now have their own buttons in the toolbar, like Dusk, at every window size. Upload and New folder fold into ⋯ only when the window is narrow.
+
 ## [1.1.0] - 2026-10-20
 
 Aurora and Tide become real layouts on the Mac, Windows and Linux, not just new colours.
