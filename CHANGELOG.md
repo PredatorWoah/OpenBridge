@@ -10,12 +10,12 @@ All notable changes to OpenBridge are recorded here. Every release has an entry;
 
 ### Added
 - **Phone hotspot connections.** The phone shares on its own hotspot, whichever hotspot it is, including phones that hide it from apps (vivo, for one). Computers look for the phone at the hotspot's gateway, so it appears under Phones nearby even before it was ever paired. Settings › Phone hotspot points straight to your phone's hotspot settings (your own name and password, or none, and your computer remembers it); OpenBridge's temporary hotspot is still there as a second option.
-<!-- status-widget -->
-<!-- checkboxes -->
+- **Status in the menu bar (Mac) and system tray (Windows, Linux).** The sun icon shows whether a phone is connected and draws a progress ring while files move. Click it for a small panel with the phone, how it's connected (Wi‑Fi, Phone hotspot, Fast USB or USB), the file, a progress bar, speed, time left, and Open, Disconnect and Cancel buttons. Long names shorten instead of wrapping.
+- **Checkboxes on every file and folder** in Dusk, Aurora and Tide, list and grid, plus a select all or none box in the toolbar.
 
 ### Fixed
 - **Secure connections failed on some phones (vivo on Android 17 among them).** The phone's identity key couldn't sign the encrypted handshake the way Android asks it to, so every connection over Wi‑Fi, the hotspot or Fast USB failed right after reaching the phone. The phone now uses an ECDSA P-256 identity made for this. It's a new identity, so computers that saved the phone pair once more.
-<!-- disconnect -->
+- **A phone that went away left the computer stuck** on the last folder, with Disconnect doing nothing. Now the computer notices within seconds, says "Lost the connection to the phone.", goes back to the connect screen and reconnects by itself when the phone is back, continuing any unfinished transfer. Disconnect always works, even in the middle of a transfer or while a folder loads.
 - **Aurora's download progress was nearly invisible.** The horizon now shows a proper progress pill: which way, the file name, a bar, the percent and "x of y", with Cancel (or Resume after an error) right there.
 - **Aurora and Tide hid sort, view and the photo filter in the ⋯ menu.** They now have their own toolbar buttons, like Dusk, at every window size.
 - The Mac's diagnostics show the default gateway, what answered there, and which phones are announced on the network.
