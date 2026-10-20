@@ -276,13 +276,15 @@ struct CablePairPrompt: View {
 struct BigCode: View {
     let code: String
     var size: CGFloat = 34
+    /// "Codes match?" under the digits; off where the screen already says it.
+    var caption = true
 
     var body: some View {
         let spaced = code.count == 6 ? String(code.prefix(3)) + " " + String(code.suffix(3)) : code
         VStack(spacing: 2) {
             Text(spaced).font(.system(size: size, weight: .bold, design: .rounded)).monospacedDigit()
                 .textSelection(.enabled)
-            Text("Codes match? Tap Pair on the phone.").font(.system(size: 11)).foregroundStyle(Palette.muted)
+            if caption { Text("Codes match? Tap Pair on the phone.").font(.system(size: 11)).foregroundStyle(Palette.muted) }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Pairing code \(code.map { String($0) }.joined(separator: " ")). Codes match? Tap Pair on the phone.")
