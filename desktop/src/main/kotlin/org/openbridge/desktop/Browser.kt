@@ -243,7 +243,7 @@ private fun EntryTile(state: AppState, entry: Entry, look: Look) {
         Text(sizeText, color = Palette.muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
     }
     when (look) {
-        Look.DUSK -> Column(Modifier.clip(RoundedCornerShape(12.dp))
+        Look.DUSK -> Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
             .background(if (selected) Brush.verticalGradient(listOf(Palette.violet.copy(alpha = 0.55f), Palette.pink.copy(alpha = 0.35f))) else SolidColor(Palette.fg.copy(alpha = 0.05f)))
             .then(if (cursor) Modifier.border(1.5.dp, Palette.sun.copy(alpha = 0.7f), RoundedCornerShape(12.dp)) else Modifier)
             .entryInput(state, entry, selected, description).padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -253,7 +253,7 @@ private fun EntryTile(state: AppState, entry: Entry, look: Look) {
             Spacer(Modifier.height(6.dp))
             caption()
         }
-        Look.AURORA -> Column(Modifier.entryInput(state, entry, selected, description), horizontalAlignment = Alignment.CenterHorizontally) {
+        Look.AURORA -> Column(Modifier.fillMaxWidth().entryInput(state, entry, selected, description), horizontalAlignment = Alignment.CenterHorizontally) {
             Box(Modifier.fillMaxWidth().aspectRatio(1f).auroraGlow(selected, cursor, RoundedCornerShape(16.dp), resting = true), contentAlignment = Alignment.Center) {
                 Box(Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp)), contentAlignment = Alignment.Center) { PreviewFill(state, entry) }
             }
@@ -267,7 +267,7 @@ private fun EntryTile(state: AppState, entry: Entry, look: Look) {
             val fill by animateFloatAsState(if (selected) 1f else 0f, if (Platform.reduceMotion) tween(0) else spring(0.62f, Spring.StiffnessLow))
             val time = if (fill > 0f) animationTime() else 0f
             val shape = RoundedCornerShape(24.dp)
-            Column(Modifier.graphicsLayer { translationY = rise.value * density }.clip(shape).background(Palette.night.copy(alpha = 0.42f))
+            Column(Modifier.fillMaxWidth().graphicsLayer { translationY = rise.value * density }.clip(shape).background(Palette.night.copy(alpha = 0.42f))
                 .drawBehind { drawWaterFill(fill, time, vertical = true) }
                 .border(if (cursor) 1.5.dp else 1.dp, if (cursor) Palette.sun.copy(alpha = 0.85f) else Palette.fg.copy(alpha = 0.10f), shape)
                 .entryInput(state, entry, selected, description).padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {

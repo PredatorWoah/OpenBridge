@@ -88,7 +88,7 @@ private fun TideBrowser(state: AppState, dropping: Boolean, searchFocus: FocusRe
                 modifier = Modifier.align(Alignment.TopCenter).offset(y = surface - 52.dp).clip(CircleShape).background(Palette.night.copy(alpha = 0.6f))
                     .border(1.5.dp, Palette.amber.copy(alpha = 0.7f), CircleShape).padding(horizontal = 20.dp, vertical = 10.dp))
         }
-        if (transfer != null) TransferDock(state, transfer, Modifier.align(Alignment.BottomCenter).padding(bottom = 18.dp, start = 16.dp, end = 16.dp))
+        if (transfer != null) TransferDock(state, transfer, compact, Modifier.align(Alignment.BottomCenter).padding(bottom = 18.dp, start = 16.dp, end = 16.dp))
     }
 }
 
@@ -219,9 +219,9 @@ private fun DepthPath(state: AppState, room: Int, modifier: Modifier) {
  * it, finished ones sink away. Shows only while there's a transfer.
  */
 @Composable
-private fun TransferDock(state: AppState, transfer: Transfer, modifier: Modifier) {
+private fun TransferDock(state: AppState, transfer: Transfer, compact: Boolean, modifier: Modifier) {
     val time = animationTime()
-    val queue = queueOf(transfer, show = 2)
+    val queue = queueOf(transfer, show = if (compact) 0 else 2)
     val rise = remember { Animatable(if (Platform.reduceMotion) 0f else 80f) }
     LaunchedEffect(Unit) { rise.animateTo(0f, buoyant()) }
     // A file that just finished sinks out of the dock.
@@ -237,7 +237,7 @@ private fun TransferDock(state: AppState, transfer: Transfer, modifier: Modifier
         }
         val stopped = stalled(transfer, state.busy)
         val shape = CircleShape
-        Row(Modifier.widthIn(max = 560.dp).graphicsLayer { translationY = 1.5f * density * sin(time * 1.4f) }.clip(shape).background(Palette.night.copy(alpha = 0.7f))
+        Row(Modifier.weight(1f, fill = false).widthIn(max = 560.dp).graphicsLayer { translationY = 1.5f * density * sin(time * 1.4f) }.clip(shape).background(Palette.night.copy(alpha = 0.7f))
             .drawBehind { drawWaterFill(if (transfer.done) 1f else transfer.fraction, time) }
             .border(1.dp, (if (stopped) Palette.pink else Palette.amber).copy(alpha = 0.6f), shape)
             .semantics(mergeDescendants = true) { progressBarRangeInfo = ProgressBarRangeInfo(overallProgress(transfer), 0f..1f) }
@@ -255,7 +255,7 @@ private fun TransferDock(state: AppState, transfer: Transfer, modifier: Modifier
                     .clip(CircleShape).background(Palette.night.copy(alpha = 0.5f)).border(1.dp, Palette.cream.copy(alpha = 0.18f), CircleShape)
                     .padding(horizontal = 12.dp, vertical = 7.dp))
         }
-        if (queue.more > 0) Text("+${queue.more}", color = Palette.muted, fontSize = 12.sp)
+        if (queue.more > 0) Text("+${queue.more}", color = Palette.muted, fontSize = 12.sp, maxLines = 1, softWrap = false)
     }
 }
 
@@ -336,7 +336,7 @@ private fun Bubble(state: AppState, star: PhoneStar, size: Dp, time: Float, seed
                 if (star.cable) Icon(Icons.Filled.Usb, null, tint = Palette.amber, modifier = Modifier.size(14.dp))
                 Text(star.name, color = Palette.fg.copy(alpha = 0.6f + 0.4f * bright), fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 2,
                     overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
-                if (action.isNotEmpty()) Text(action, color = if (star.here) Palette.amber else Palette.muted, fontSize = 11.sp, maxLines = 1, textAlign = TextAlign.Center)
+                if (action.isNotEmpty()) Text(action, color = if (star.here) Palette.amber else Palette.muted, fontSize = 11.sp, lineHeight = 13.sp, maxLines = 2, textAlign = TextAlign.Center)
             }
         }
         DropdownMenu(menu, { menu = false }) {

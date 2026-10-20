@@ -335,7 +335,7 @@ private fun AuroraConnect(state: AppState, compact: Boolean) {
             Hero(active = true, connected = state.pairingCode != null, modifier = Modifier.size(hero).align(Alignment.Center))
             state.pairingCode?.let { CodeDigits(it, if (compact) 28.sp else 36.sp, Modifier.align(Alignment.Center)) }
             // Stars in a loose ring: first to the sides, then above and below, never on the halo.
-            val rx = minOf(maxWidth / 2 - 84.dp, hero * 0.92f)
+            val rx = minOf(maxWidth / 2 - 84.dp, hero * 1.0f)
             val ry = minOf(maxHeight / 2 - 44.dp, hero * 0.5f)
             stars.forEachIndexed { index, star ->
                 val angle = Math.toRadians((ringAngles[index % ringAngles.size] + (hashOf(star.key) - 0.5f) * 10f).toDouble())
@@ -358,7 +358,7 @@ private fun AuroraConnect(state: AppState, compact: Boolean) {
 }
 
 /** Where the stars sit around the halo, in degrees (0 to the right, clockwise). */
-private val ringAngles = listOf(200f, -20f, 160f, 20f, 235f, -55f, 125f, 55f, 270f, 90f)
+private val ringAngles = listOf(210f, -30f, 150f, 30f, 250f, -70f, 110f, 70f, 270f, 90f)
 
 private fun hashOf(key: String) = ((key.hashCode() and 0x7fffffff) % 1000) / 1000f
 
