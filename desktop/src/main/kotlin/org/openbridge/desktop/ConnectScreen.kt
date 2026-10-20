@@ -2,6 +2,7 @@ package org.openbridge.desktop
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -175,7 +176,7 @@ private fun NearbyCard(state: AppState) {
 
 /** The 6-digit code to compare with the phone's, the progress of connecting, and what went wrong. */
 @Composable
-private fun Pairing(state: AppState) {
+fun Pairing(state: AppState) {
     state.pairingCode?.let { code ->
         Text(S.compare, color = Palette.muted, fontSize = 12.sp)
         Row(Modifier.semantics(mergeDescendants = true) { contentDescription = "${S.compare} ${code.toList().joinToString(" ")}"; liveRegion = LiveRegionMode.Assertive },
@@ -255,6 +256,81 @@ private fun DeviceRow(icon: androidx.compose.ui.graphics.vector.ImageVector, nam
         }
         Spacer(Modifier.width(8.dp))
         action()
+    }
+}
+
+// Pieces Aurora's and Tide's connect screens share with each other.
+
+/** The 6-digit code, large: inside Aurora's halo, floating above Tide's pool, or in a card while a phone is open. */
+@Composable
+fun CodeDigits(code: String, size: androidx.compose.ui.unit.TextUnit = 40.sp, modifier: Modifier = Modifier) {
+    Row(modifier.semantics(mergeDescendants = true) { contentDescription = "${S.compare} ${code.toList().joinToString(" ")}"; liveRegion = LiveRegionMode.Assertive },
+        horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+        code.forEachIndexed { index, digit ->
+            if (index == 3) Spacer(Modifier.width(size.value.dp * 0.35f))
+            Text(digit.toString(), color = Palette.fg, fontSize = size, fontWeight = FontWeight.Light, letterSpacing = 2.sp)
+        }
+    }
+}
+
+/** Comparing codes with another phone while one is open: the code, the hint and Cancel. */
+@Composable
+fun PairingCard(state: AppState, modifier: Modifier) {
+    val code = state.pairingCode ?: return
+    Column(modifier.widthIn(max = 420.dp).clip(glassShape).background(Palette.dusk.copy(alpha = 0.96f)).border(1.dp, Palette.fg.copy(alpha = 0.16f), glassShape)
+        .padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        CodeDigits(code)
+        Text(S.compare, color = Palette.muted, fontSize = 13.sp, textAlign = TextAlign.Center)
+        GhostButton(S.cancel) { state.cancel() }
+    }
+}
+
+/** Typing a phone's address, and starting screen mirroring: what's left of Dusk's cards once phones are stars or bubbles. */
+@Composable
+fun AddressStrip(state: AppState, modifier: Modifier = Modifier) {
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        val go = { if (!state.busy && state.host.isNotBlank()) state.pair() }
+        Field(state.host, { state.host = it }, S.address, Modifier.weight(1f), onEnter = go)
+        Field(state.port, { state.port = it }, S.port, Modifier.width(84.dp), onEnter = go)
+        SunsetButton(S.pair, enabled = !state.busy && state.host.isNotBlank() && state.port.isNotBlank()) { state.pair() }
+        if (state.busy) GhostButton(S.cancel) { state.cancel() }
+        IconButton(Icons.Filled.ScreenShare, "${S.mirror}. ${S.mirrorHint}", enabled = !state.mirroring) { state.mirror() }
+        if (state.usbLinks.any { it.state != UsbLink.State.UNAUTHORIZED })
+            IconButton(Icons.Filled.Wifi, S.mirrorWireless, enabled = !state.mirroring) { state.mirror(wireless = true) }
+    }
+}
+
+/** Asks before forgetting a saved phone. */
+fun confirmForget(state: AppState, phone: SavedPhone) {
+    if (JOptionPane.showConfirmDialog(null, S.forgetConfirm(phone.name), S.forget, JOptionPane.OK_CANCEL_OPTION) == JOptionPane.OK_OPTION) state.forgetPhone(phone)
+}
+
+/** A short label under a phone's star or inside its bubble: what clicking it does. */
+fun starAction(star: PhoneStar): String = when (val reach = star.reach) {
+    is PhoneStar.Reach.Saved -> if (star.here) S.connect else ""
+    is PhoneStar.Reach.Nearby -> S.pair
+    is PhoneStar.Reach.Link -> when { reach.link.ready && reach.link.phone != null -> S.connect; reach.link.ready -> S.pairOverUsb; else -> S.usb }
+    is PhoneStar.Reach.Wpd -> S.open
+    PhoneStar.Reach.Current -> ""
+}
+
+/**
+ * The quiet lines under the hero while waiting: progress or the error, the code's hint, phones on the cable that
+ * need something, and the hints for Wi‑Fi that keeps devices apart and for phones that don't show up.
+ */
+@Composable
+fun ConnectNotes(state: AppState, modifier: Modifier = Modifier) {
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        val note: @Composable (String, androidx.compose.ui.graphics.Color) -> Unit = { text, color ->
+            Text(text, color = color, fontSize = 12.5.sp, textAlign = TextAlign.Center, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+        }
+        if (state.pairingCode != null) note(S.compare, Palette.fg)
+        else if (state.busy && state.status.isNotEmpty()) note(state.status, Palette.muted)
+        state.error?.let { note(it, Palette.amber) }
+        for (link in state.usbLinks) if (!link.ready) note("${link.name}: ${linkStatus(link)}", Palette.muted)
+        if (state.isolated) note(S.isolated, Palette.amber)
+        if (state.nearby.isEmpty() && state.searchedLong && state.saved.isEmpty()) note(S.notFound, Palette.muted)
+        if (state.usbLinks.isEmpty() && state.wpdPhones.isEmpty()) note(S.cableHint, Palette.muted.copy(alpha = 0.8f))
     }
 }
 

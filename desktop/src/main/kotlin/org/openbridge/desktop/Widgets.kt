@@ -75,7 +75,8 @@ fun Field(value: String, change: (String) -> Unit, placeholder: String, modifier
             if (onEnter != null && event.type == KeyEventType.KeyDown && event.key == Key.Enter && !event.isShiftPressed) { onEnter(); true } else false
         }
         .padding(horizontal = 12.dp, vertical = 10.dp)) {
-        if (value.isEmpty()) Text(placeholder, color = Palette.muted.copy(alpha = 0.7f), fontSize = 13.5.sp)
+        if (value.isEmpty()) Text(placeholder, color = Palette.muted.copy(alpha = 0.7f), fontSize = 13.5.sp, maxLines = if (singleLine) 1 else 6,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         BasicTextField(value, change, singleLine = singleLine, maxLines = if (singleLine) 1 else 6, cursorBrush = SolidColor(Palette.sun),
             textStyle = TextStyle(color = Palette.fg, fontSize = 13.5.sp, fontFamily = if (monospace) FontFamily.Monospace else FontFamily.Default),
             modifier = Modifier.fillMaxWidth().semantics { contentDescription = placeholder }
@@ -99,19 +100,27 @@ fun GhostButton(text: String, enabled: Boolean = true, modifier: Modifier = Modi
     }
 }
 
-/** A round icon button with a tooltip; `description` is also what screen readers say. */
-@OptIn(ExperimentalFoundationApi::class)
+/** A round icon button with a tooltip; `description` is also what screen readers say. `on` makes it a toggle. */
 @Composable
-fun IconButton(icon: ImageVector, description: String, enabled: Boolean = true, tint: Color? = null, onClick: () -> Unit) {
-    TooltipArea(tooltip = {
-        Text(description, color = Palette.fg, fontSize = 12.sp, modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Palette.night.copy(alpha = 0.95f))
-            .border(1.dp, Palette.fg.copy(alpha = 0.16f), RoundedCornerShape(8.dp)).padding(horizontal = 10.dp, vertical = 6.dp))
-    }, delayMillis = 500, tooltipPlacement = TooltipPlacement.CursorPoint(offset = DpOffset(0.dp, 18.dp))) {
-        Box(Modifier.size(34.dp).clip(CircleShape).background(Palette.fg.copy(alpha = 0.08f)).pressable(CircleShape, enabled, onClick = onClick),
+fun IconButton(icon: ImageVector, description: String, enabled: Boolean = true, tint: Color? = null, on: Boolean? = null, onClick: () -> Unit) {
+    Tip(description) {
+        Box(Modifier.size(34.dp).clip(CircleShape).background(if (on == true) Palette.amber.copy(alpha = 0.26f) else Palette.fg.copy(alpha = 0.08f))
+            .pressable(CircleShape, enabled, role = if (on != null) Role.Checkbox else Role.Button, onClick = onClick)
+            .then(if (on != null) Modifier.semantics { stateDescription = if (on) S.on else S.off } else Modifier),
             contentAlignment = Alignment.Center) {
             Icon(icon, description, tint = if (enabled) tint ?: Palette.fg else Palette.muted.copy(alpha = 0.5f), modifier = Modifier.size(18.dp))
         }
     }
+}
+
+/** A tooltip after a short hover, in the look's colours. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun Tip(text: String, content: @Composable () -> Unit) {
+    TooltipArea(tooltip = {
+        Text(text, color = Palette.fg, fontSize = 12.sp, modifier = Modifier.widthIn(max = 320.dp).clip(RoundedCornerShape(8.dp)).background(Palette.night.copy(alpha = 0.95f))
+            .border(1.dp, Palette.fg.copy(alpha = 0.16f), RoundedCornerShape(8.dp)).padding(horizontal = 10.dp, vertical = 6.dp))
+    }, delayMillis = 500, tooltipPlacement = TooltipPlacement.CursorPoint(offset = DpOffset(0.dp, 18.dp)), content = content)
 }
 
 /** An on/off switch with its label, read as one control. */
