@@ -383,7 +383,7 @@ struct Item: ViewModifier {
             .accessibilityAddTraits(model.selection.contains(entry.id) ? AccessibilityTraits.isSelected : AccessibilityTraits())
             .accessibilityHint(entry.directory ? "Opens the folder" : "Downloads the file")
             .accessibilityAction { model.open(entry) }
-            .accessibilityAction(named: Text(model.selection.contains(entry.id) ? "Deselect \(entry.name)" : "Select \(entry.name)")) {
+            .accessibilityAction(named: Text(verbatim: model.selection.contains(entry.id) ? "Deselect \(entry.name)" : "Select \(entry.name)")) {
                 model.toggle(entry)
             }
             .accessibilityAction(named: "Rename") { model.renaming = entry }
