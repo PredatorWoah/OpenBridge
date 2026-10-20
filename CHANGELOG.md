@@ -4,6 +4,15 @@ All notable changes to OpenBridge are recorded here. Every release has an entry;
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-10-19
+
+Fixes from testing the phone hotspot on a vivo X300 Pro.
+
+### Fixed
+- **The regular hotspot wasn't used.** With the hotspot from the phone's quick settings on, OpenBridge didn't listen on it, so a Mac that joined it never found the phone. Some phones (vivo among them) never tell apps their hotspot is on; OpenBridge now finds it by looking at the phone's network interfaces, whichever hotspot it is.
+- **Sharing stopped when Wi‑Fi dropped.** Many phones turn Wi‑Fi off as their hotspot starts, and that ended sharing just before the hotspot came up. Sharing now carries on over the hotspot and Fast USB, and picks the same Wi‑Fi up again when it comes back (never a different Wi‑Fi by itself).
+- **Computers on the hotspot didn't see the phone while it was also on Wi‑Fi.** The phone now announces itself on its hotspot too, as "<phone> (hotspot)", so it shows up under Phones nearby.
+
 ## [1.0.1] - 2026-10-19
 
 ### Fixed

@@ -68,6 +68,7 @@ object S {
         "适用于不让设备互相连接的 Wi‑Fi（访客、酒店和校园网络）：手机会建立自己的网络，让电脑加入。")
     val turnOnHotspot get() = t("Turn on hotspot", "开启热点")
     val turnOffHotspot get() = t("Turn off hotspot", "关闭热点")
+    val hotspotLabel get() = t("hotspot", "热点")
     val hotspotJoin get() = t("Join this network from your computer, then it finds the phone.", "在电脑上加入这个网络，电脑就会找到手机。")
     val networkName get() = t("Network name", "网络名称")
     val password get() = t("Password", "密码")

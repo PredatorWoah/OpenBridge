@@ -142,11 +142,11 @@ object Hotspot {
     }
 
     /**
-     * The private IPv4 address of the phone's own Wi-Fi hotspot while one is on, or null. That's an access point
-     * interface that isn't one of Android's networks (the Wi-Fi the phone joined, mobile data, a VPN). Any thread.
+     * The private IPv4 address of the phone's own Wi-Fi hotspot while one is on, or null: this app's or the regular one.
+     * That's an access point interface that isn't one of Android's networks (the Wi-Fi the phone joined, mobile data, a
+     * VPN). Found by looking at the interfaces, since some phones never tell apps the regular hotspot is on. Any thread.
      */
     fun address(context: Context): InetAddress? {
-        if (!ours && !anyOn) return null
         val connectivity = context.getSystemService(ConnectivityManager::class.java)
         @Suppress("DEPRECATION")
         val networks = runCatching { connectivity.allNetworks.mapNotNull { connectivity.getLinkProperties(it)?.interfaceName }.toSet() }

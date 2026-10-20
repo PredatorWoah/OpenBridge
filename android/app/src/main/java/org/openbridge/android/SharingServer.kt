@@ -2,6 +2,7 @@ package org.openbridge.android
 
 import android.content.Context
 import android.net.ConnectivityManager
+import android.net.LinkAddress
 import android.net.LinkProperties
 import android.net.Network
 import android.net.NetworkCapabilities
@@ -101,12 +102,15 @@ class SharingServer(private val context: Context, private val store: Store, priv
     private var callbackRegistered = false
     /** The Wi-Fi network being served, while one is. */
     private var wifi: Network? = null
-    /** Wi-Fi or tethering was served and went away: sharing doesn't follow the phone onto another network by itself. */
+    /**
+     * Wi-Fi or tethering was served and went away. Sharing carries on (Fast USB, the hotspot), and comes back on the same
+     * Wi-Fi when it returns, but doesn't follow the phone onto another Wi-Fi by itself.
+     */
     private var networkLost = false
-    /** A computer used Fast USB during this sharing, so losing Wi-Fi doesn't end it. */
-    @Volatile private var usedCable = false
-    private var announcement: NsdManager.RegistrationListener? = null
-    private var announced: Endpoint? = null
+    /** The Wi-Fi address being served, or the one lost, to recognize the same network when it comes back. */
+    private var wifiLink: LinkAddress? = null
+    /** What's announced on each network (Wi-Fi and the hotspot), with the listener to withdraw it. */
+    private val announcements = HashMap<Via, Pair<Endpoint, NsdManager.RegistrationListener>>()
 
     /** Where computers can reach the phone now: Wi-Fi or tethering first, then the hotspot, then Fast USB. */
     @Volatile var endpoints: List<Endpoint> = emptyList(); private set
@@ -169,7 +173,6 @@ class SharingServer(private val context: Context, private val store: Store, priv
     /** Brings the listeners in line with the phone's addresses: drops the ones that went away, adds new ones. */
     private fun refresh() {
         var problem: String? = null
-        var end: String? = null
         var changed: Boolean
         synchronized(this) {
             if (closed.get() || cableOnly) return
@@ -181,28 +184,43 @@ class SharingServer(private val context: Context, private val store: Store, priv
             }
             network()
             hotspot()
-            // Losing the network ends sharing, as it always has, unless the hotspot or Fast USB is what's being used.
-            // Many phones drop Wi-Fi while their hotspot starts, so a hotspot on its way counts too.
-            if (networkLost && doors.none { it.via != Via.USB } && !Hotspot.on && !usedCable) end = problem ?: S.wifiDisconnected
+            // Losing Wi-Fi doesn't end sharing: many phones drop it as their hotspot starts, Fast USB keeps working,
+            // and the same Wi-Fi is picked up again when it comes back.
             changed = publish()
-            if (end == null) announce()
+            announce()
         }
-        end?.let { stop(it); return }
         if (changed) events.changed(problem)
     }
 
-    /** Wi-Fi or tethering, if none is served yet and none was lost during this sharing. */
+    /** Wi-Fi or tethering, if none is served yet: after Wi-Fi was lost, only the same Wi-Fi coming back. */
     private fun network() {
-        if (networkLost || doors.any { it.via == Via.WIFI || it.via == Via.TETHER }) return
+        if (doors.any { it.via == Via.WIFI || it.via == Via.TETHER }) return
         // A USB tethering link is preferred: it only reaches the cable-connected computer.
         usbTetherAddress()?.let { open(Via.TETHER, it, listOf(PREFERRED_PORT, 0)); return }
         @Suppress("DEPRECATION") for (candidate in connectivity.allNetworks) {
             val caps = connectivity.getNetworkCapabilities(candidate) ?: continue
             if (!caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) || !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)) continue
-            val address = connectivity.getLinkProperties(candidate)?.linkAddresses?.firstOrNull { Wire.isPrivateIPv4(it.address) }?.address ?: continue
-            if (open(Via.WIFI, address, listOf(PREFERRED_PORT, 0)) != null) wifi = candidate
+            val link = connectivity.getLinkProperties(candidate)?.linkAddresses?.firstOrNull { Wire.isPrivateIPv4(it.address) } ?: continue
+            if (networkLost && !sameNetwork(wifiLink, link)) continue
+            if (open(Via.WIFI, link.address, listOf(PREFERRED_PORT, 0)) != null) { wifi = candidate; wifiLink = link; networkLost = false }
             return
         }
+    }
+
+    /** The same subnet as the Wi-Fi served before: the home network coming back, not a café's. */
+    private fun sameNetwork(before: LinkAddress?, now: LinkAddress): Boolean {
+        before ?: return false
+        if (before.prefixLength != now.prefixLength) return false
+        val a = before.address.address; val b = now.address.address
+        if (a.size != b.size) return false
+        var bits = before.prefixLength
+        for (i in a.indices) {
+            if (bits <= 0) break
+            val mask = if (bits >= 8) 0xFF else (0xFF shl (8 - bits)) and 0xFF
+            if ((a[i].toInt() and mask) != (b[i].toInt() and mask)) return false
+            bits -= 8
+        }
+        return true
     }
 
     /** The phone's own hotspot, while it's on (see [Hotspot.address]). */
@@ -252,10 +270,7 @@ class SharingServer(private val context: Context, private val store: Store, priv
         override fun admit(computer: String): ByteArray = trust.admit(computer).also { seen(computer, via) }
     }, fingerprint, approver, clipboard, PhoneOutbox).describe(BuildConfig.VERSION_NAME, deviceName)
 
-    private fun seen(computer: String, via: Via) {
-        if (via == Via.USB) usedCable = true
-        events.seen(computer, via)
-    }
+    private fun seen(computer: String, via: Via) = events.seen(computer, via)
 
     private fun accept(door: Door) = Thread({
         try {
@@ -303,13 +318,20 @@ class SharingServer(private val context: Context, private val store: Store, priv
      * recognizes it at a new address); pairing still needs the 6-digit code.
      */
     private fun announce() {
-        val target = doors.firstOrNull { it.via == Via.WIFI }?.endpoint ?: doors.firstOrNull { it.via == Via.HOTSPOT }?.endpoint
-        if (target == announced) return
-        announcement?.let { runCatching { nsd.unregisterService(it) } }
-        announcement = null; announced = null
-        if (target == null || closed.get() || !started) return
+        if (closed.get() || !started) return
+        val wifi = doors.firstOrNull { it.via == Via.WIFI }?.endpoint
+        val hotspot = doors.firstOrNull { it.via == Via.HOTSPOT }?.endpoint
+        announceOn(Via.WIFI, wifi, deviceName)
+        // A computer on the hotspot can't reach the Wi-Fi address, so the hotspot gets its own announcement.
+        announceOn(Via.HOTSPOT, hotspot, if (wifi != null) "$deviceName (${S.hotspotLabel})" else deviceName)
+    }
+
+    private fun announceOn(via: Via, target: Endpoint?, name: String) {
+        if (announcements[via]?.first == target) return
+        announcements.remove(via)?.let { runCatching { nsd.unregisterService(it.second) } }
+        if (target == null) return
         val info = NsdServiceInfo().apply {
-            serviceName = deviceName.take(60)
+            serviceName = name.take(60)
             serviceType = "_openbridge._tcp"
             port = target.port
             setAttribute("ip", target.host)
@@ -319,19 +341,19 @@ class SharingServer(private val context: Context, private val store: Store, priv
         }
         val listener = object : NsdManager.RegistrationListener {
             override fun onServiceRegistered(info: NsdServiceInfo) {}
-            override fun onRegistrationFailed(info: NsdServiceInfo, error: Int) { Log.add("Announcing on the network failed ($error)") }
+            override fun onRegistrationFailed(info: NsdServiceInfo, error: Int) { Log.add("Announcing on the ${via.label} failed ($error)") }
             override fun onServiceUnregistered(info: NsdServiceInfo) {}
             override fun onUnregistrationFailed(info: NsdServiceInfo, error: Int) {}
         }
-        runCatching { nsd.registerService(info, NsdManager.PROTOCOL_DNS_SD, listener); announcement = listener; announced = target }
+        runCatching { nsd.registerService(info, NsdManager.PROTOCOL_DNS_SD, listener); announcements[via] = target to listener }
     }
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
         watcher.shutdownNow()
         synchronized(this) {
-            announcement?.let { runCatching { nsd.unregisterService(it) } }
-            announcement = null
+            announcements.values.forEach { runCatching { nsd.unregisterService(it.second) } }
+            announcements.clear()
             if (callbackRegistered) runCatching { connectivity.unregisterNetworkCallback(callback) }
             callbackRegistered = false
             doors.forEach { it.closed = true; runCatching { it.socket.close() } }
