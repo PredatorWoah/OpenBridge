@@ -394,7 +394,7 @@ struct TideConnect: View {
     @Binding var wifi: Bool
     @Binding var openAutomatically: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var forgetting: SavedPhone?
+    @State private var forgetting: SavedPhone? = nil
 
     var body: some View {
         GeometryReader { geometry in

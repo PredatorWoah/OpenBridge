@@ -414,7 +414,7 @@ struct AuroraConnect: View {
     @Binding var wifi: Bool
     @Binding var openAutomatically: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var forgetting: SavedPhone?
+    @State private var forgetting: SavedPhone? = nil
 
     var body: some View {
         GeometryReader { geometry in
@@ -535,10 +535,16 @@ private struct StarButton: View {
     let choose: () -> Void
     let forget: (() -> Void)?
 
+    /// Saved phones shine brighter, brightest when they're on this Wi‑Fi now.
+    private var glow: Double {
+        guard phone.kind == .saved else { return 0.5 }
+        return phone.here ? 1 : 0.75
+    }
+
     var body: some View {
         Button(action: choose) {
             VStack(spacing: 5) {
-                Orb(size: phone.kind == .saved ? 13 : 9, brightness: phone.kind == .saved ? (phone.here ? 1 : 0.75) : 0.5,
+                Orb(size: phone.kind == .saved ? 13 : 9, brightness: glow,
                     color: phone.kind == .nearby ? Palette.pink : Palette.amber)
                     .modifier(Twinkle(seed: seed))
                     .frame(width: 26, height: 26)
