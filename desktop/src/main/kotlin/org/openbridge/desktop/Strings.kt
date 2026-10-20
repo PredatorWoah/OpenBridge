@@ -137,6 +137,15 @@ object S {
         else t("Not seeing your phone? Type the address shown on the phone below. A firewall on this computer can also hide phones: allow mDNS (UDP port 5353).",
             "看不到手机？请在下方输入手机上显示的地址。这台电脑上的防火墙也可能挡住手机：请允许 mDNS（UDP 端口 5353）。")
 
+    // Window layouts
+    val listView = t("Show as a list", "以列表显示")
+    val gridView = t("Show as a grid", "以网格显示")
+    val phones = t("Phones", "手机")
+    val transfers = t("Transfers", "传输")
+    fun doneCount(count: Int) = t(if (count == 1) "1 done" else "$count done", "已完成 $count 项")
+    fun andMore(count: Int) = t("and $count more", "还有 $count 项")
+    val paused = t("Paused", "已暂停")
+
     // Transports
     val wifi = t("Wi‑Fi", "Wi‑Fi")
     val fastUsb = t("Fast USB", "高速 USB")
