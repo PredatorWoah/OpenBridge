@@ -520,7 +520,8 @@ struct MoreMenu: View {
     }
 
     private var menu: some View {
-        Menu {
+        let busy: Bool = model.busy
+        return Menu {
             if folded {
                 Toggle("Only Photos and Videos", isOn: $model.mediaOnly)
                 Picker("View", selection: $model.grid) {
@@ -530,31 +531,35 @@ struct MoreMenu: View {
                 Menu("Sort") { SortChoices(model: model) }
                 Divider()
             }
-            Button("New Folder…", action: model.newFolder)
-            Button("Upload…", action: model.chooseUploads)
-            Divider()
-            Button("Import New Photos") { model.importNewPhotos() }
-            Button("Import New Photos To…") { model.importNewPhotos(choosingFolder: true) }
+            // While something runs, only what can't wait stays: Devices and Disconnect.
+            Group {
+                Button("New Folder…", action: model.newFolder)
+                Button("Upload…", action: model.chooseUploads)
+                Divider()
+                Button("Import New Photos") { model.importNewPhotos() }
+                Button("Import New Photos To…") { model.importNewPhotos(choosingFolder: true) }
+            }
+            .disabled(busy)
             Button("Show Files Sent from the Phone", action: model.showReceived).disabled(model.overUSB)
             Divider()
-            Button("Rename…") { model.renaming = model.selected.first }.disabled(model.selection.count != 1)
-            Button("Delete…") { model.confirmDelete(model.selected) }.disabled(model.selection.isEmpty)
+            Button("Rename…") { model.renaming = model.selected.first }.disabled(busy || model.selection.count != 1)
+            Button("Delete…") { model.confirmDelete(model.selected) }.disabled(busy || model.selection.isEmpty)
             Divider()
             Button("Texts…") { model.showTexts = true }.disabled(!model.clipboardAvailable)
-            Button("Send Mac clipboard to phone", action: model.sendClipboard).disabled(!model.clipboardAvailable)
-            Button("Copy phone clipboard to Mac", action: model.fetchClipboard).disabled(!model.clipboardAvailable)
+            Button("Send Mac clipboard to phone", action: model.sendClipboard).disabled(busy || !model.clipboardAvailable)
+            Button("Copy phone clipboard to Mac", action: model.fetchClipboard).disabled(busy || !model.clipboardAvailable)
             if !model.clipboardAvailable {
                 Text("Texts and the clipboard work over Wi‑Fi and Fast USB, or while mirroring the screen.")
             }
             Divider()
-            Button("Refresh", action: model.refresh)
+            Button("Refresh", action: model.refresh).disabled(busy)
             if devices {
                 Divider()
                 Button("Devices") { model.showBrowser = false }
                 Button("Disconnect", action: model.disconnect)
             }
         } label: { Image(systemName: "ellipsis.circle") }
-            .menuStyle(.borderlessButton).frame(width: 34).disabled(model.busy)
+            .menuStyle(.borderlessButton).frame(width: 34)
             .help("More actions").accessibilityLabel("More actions")
     }
 }

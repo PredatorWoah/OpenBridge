@@ -188,7 +188,7 @@ struct DeviceCard: View {
                     }.font(.system(size: 12.5))
                 }
                 Spacer()
-                Button("Disconnect", action: model.disconnect).buttonStyle(GhostButton()).disabled(model.busy)
+                Button("Disconnect", action: model.disconnect).buttonStyle(GhostButton())
             }
             // Chips wrap onto another row rather than shortening their names.
             FlowLayout(spacing: 8) {

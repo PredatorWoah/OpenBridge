@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Network
 import BridgeCore
 
 /// What a file is, from its name: decides its icon, colour, sorting group and whether it has a preview.
@@ -187,9 +188,15 @@ final class BrowserModel: ObservableObject {
     private func run(_ work: @escaping () async throws -> Void) {
         guard !busy else { return }
         busy = true; error = nil
+        runEpoch += 1
+        let epoch = runEpoch
         task = Task {
-            defer { busy = false; task = nil; pairingCode = nil; pumpThumbnails(); pumpSizes() }
+            defer {
+                // A task abandoned by Disconnect or a lost connection leaves the state to whatever came after it.
+                if epoch == runEpoch { busy = false; task = nil; pairingCode = nil; pumpThumbnails(); pumpSizes() }
+            }
             do { try await work() }
+            catch _ where epoch != runEpoch { return }
             catch is CancellationError { status = "Cancelled."; transfer = nil }
             catch BridgeError.forgotten {
                 // The phone no longer trusts this Mac: forget it here too, and offer to pair again.
@@ -200,6 +207,8 @@ final class BrowserModel: ObservableObject {
             catch {
                 self.error = error.localizedDescription
                 Diagnostics.log("Failed (\(transportName)): \(BrowserModel.redacted(error.localizedDescription))")
+                // The network failed rather than the phone saying no: find out now whether the phone is still there.
+                if connected && BrowserModel.isNetworkError(error) { checkAlive(reason: "an operation failed") }
                 status = overUSB
                     ? "Couldn't reach the phone over USB. Keep it unlocked, plugged in and in File transfer mode."
                     : fastUSB ? "Couldn't reach the phone over the cable. Keep it plugged in, with OpenBridge sharing."
@@ -288,6 +297,7 @@ final class BrowserModel: ObservableObject {
             if overUSB && attached == nil { drop("The phone was unplugged.") }
             else if fastUSB && debugging == nil { drop("The phone was unplugged.") }
             else if !overUSB && !fastUSB, let debugging, debugging != fastSkipped { upgradeToFastUSB(debugging) }
+            else if !overUSB && Date().timeIntervalSince(lastAliveCheck) >= 5 { checkAlive() }
             return
         }
         if usbPairable != nil { return }   // waiting for "Pair over USB"
@@ -469,6 +479,7 @@ final class BrowserModel: ObservableObject {
                 } catch BridgeError.message(let text) where text.contains("Unsupported operation") || text.contains("not available") {
                     return   // a phone app before 0.12.0 can't send: stop asking
                 } catch {
+                    if BrowserModel.isNetworkError(error) { checkAlive(reason: "waiting for files from the phone failed") }
                     try? await Task.sleep(nanoseconds: 3_000_000_000); continue
                 }
                 for item in waiting {
@@ -764,8 +775,10 @@ final class BrowserModel: ObservableObject {
         }
     }
 
+    /// Always works, even while something is running or hanging on a phone that went away: the running work is
+    /// cancelled and the connection dropped at once. A cut-off transfer still continues when the phone comes back.
     func disconnect() {
-        guard !busy else { return }
+        if busy { abandonRunning() }
         if overUSB { skipped = MTPClient.attachedPhone() }
         else {
             autoConnect = false
@@ -789,6 +802,7 @@ final class BrowserModel: ObservableObject {
     }
 
     private func drop(_ reason: String) {
+        liveness?.cancel(); liveness = nil
         if connected { Announce.spoken(reason.isEmpty ? "Disconnected" : reason) }
         if !reason.isEmpty { Diagnostics.log("Connection ended: \(reason)") }
         if fastUSB { USBDebugging.shared.closeIfUnused() }
@@ -808,6 +822,78 @@ final class BrowserModel: ObservableObject {
     }
 
     func cancel() { task?.cancel() }
+
+    /// Cancels whatever is running and forgets it, so the next step doesn't wait for it to notice.
+    private func abandonRunning() {
+        task?.cancel(); task = nil
+        runEpoch += 1
+        busy = false; pairingCode = nil
+    }
+
+    // MARK: Liveness
+
+    /// Asks the phone whether it's still there: every 5 seconds while connected over Wi‑Fi or Fast USB and idle,
+    /// and at once after a network error. Two missed answers in a row end the connection, so the app goes back to
+    /// the connect screen (where saved phones reconnect by themselves) instead of staying on a folder that's gone.
+    private func checkAlive(reason: String? = nil) {
+        guard connected, liveness == nil, let bridge = client as? BridgeClient else { return }
+        lastAliveCheck = Date()
+        let epoch = connection
+        if let reason { Diagnostics.log("Checking the phone is still there (\(reason))") }
+        liveness = Task {
+            defer { if epoch == connection { liveness = nil } }
+            for attempt in 1...2 {
+                do {
+                    try await bridge.ping(timeout: 4)
+                    guard epoch == connection else { return }
+                    if attempt > 1 || reason != nil { Diagnostics.log("The phone answers") }
+                    return
+                } catch BridgeError.forgotten {
+                    guard epoch == connection, connected else { return }
+                    if let current { forget(current) }
+                    lose(BridgeError.forgotten.localizedDescription)
+                    return
+                } catch {
+                    guard epoch == connection, connected, !Task.isCancelled else { return }
+                    let detail: String = BrowserModel.redacted(error.localizedDescription)
+                    Diagnostics.log("No answer from the phone (\(attempt) of 2, \(transportName)): \(detail)")
+                    if attempt < 2 { try? await Task.sleep(nanoseconds: 1_000_000_000) }
+                }
+            }
+            guard epoch == connection, connected else { return }
+            lose("Lost the connection to the phone.")
+        }
+    }
+    private var liveness: Task<Void, Never>?
+    private var lastAliveCheck = Date.distantPast
+    private var runEpoch = 0
+
+    /// The phone stopped answering: stop what's running and go back to the connect screen. Saved phones keep
+    /// reconnecting by themselves, and a cut-off transfer continues when the phone is back.
+    private func lose(_ reason: String) {
+        if busy { abandonRunning() }
+        if fastUSB { fastSkipped = nil }   // try the cable again on the next look
+        drop(reason)
+    }
+
+    /// Whether an error came from the network (timed out, refused, unreachable, reset) rather than being the
+    /// phone's answer (no permission, not found, and so on).
+    static func isNetworkError(_ error: Error) -> Bool {
+        if error is CancellationError { return false }
+        if let bridge = error as? BridgeError {
+            guard case .message(let text) = bridge else { return false }
+            let lower = text.lowercased()
+            return lower.contains("timed out") || lower.contains("disconnected before") || lower.contains("empty network response")
+        }
+        let codes: Set<Int32> = [ETIMEDOUT, ECONNREFUSED, ECONNRESET, ECONNABORTED, ENETUNREACH, ENETDOWN, ENETRESET,
+                                 EHOSTUNREACH, EHOSTDOWN, EPIPE, ENOTCONN]
+        // Network.framework: refused, reset, unreachable, no route, DNS or a broken handshake. Only ever leads to a check.
+        if error is NWError { return true }
+        if let posix = error as? POSIXError { return codes.contains(posix.code.rawValue) }
+        let ns = error as NSError
+        if ns.domain == NSPOSIXErrorDomain { return codes.contains(Int32(truncatingIfNeeded: ns.code)) }
+        return ns.domain == NSURLErrorDomain
+    }
 
     // MARK: Browsing
 
