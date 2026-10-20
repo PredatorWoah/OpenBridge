@@ -4,21 +4,21 @@ All notable changes to OpenBridge are recorded here. Every release has an entry;
 
 ## [Unreleased]
 
-### Changed
-- **Your phone's own hotspot comes first.** Settings › Phone hotspot now points to the phone's regular hotspot (your own name and password, or none, remembered by your computer) with Open hotspot settings. The temporary hotspot with an Android-chosen password is still there as a second option.
-
-### Fixed
-- **Secure connections failed on some phones (vivo on Android 17 among them).** The phone's identity key couldn't sign the TLS handshake the way Android's TLS asks the keystore to, so every connection over Wi‑Fi, the hotspot or Fast USB failed right after it reached the phone. The phone now uses an ECDSA P-256 identity made for this. It's a new identity: computers that saved the phone pair once more.
-- **Phone hotspot on vivo, for real this time.** vivo reports its hotspot (`ap0`) to apps as a Wi‑Fi network, so OpenBridge either refused it as "a different Wi‑Fi" or turned computers away on it. An access point interface (`ap`, `softap`, `swlan`) now always counts as the phone hotspot, whatever Android calls it.
-
 ## [1.1.1] - 2026-10-20
 
-The phone hotspot, take three, and two things that were hard to see on the Mac.
+**Your phone's own hotspot now works.** Turn on the hotspot from your phone's quick settings, join it from your Mac, Windows or Linux computer, and the phone shows up by itself, ready to pair. No router, no shared Wi‑Fi, no typing addresses.
+
+### Added
+- **Phone hotspot connections.** The phone shares on its own hotspot, whichever hotspot it is, including phones that hide it from apps (vivo, for one). Computers look for the phone at the hotspot's gateway, so it appears under Phones nearby even before it was ever paired. Settings › Phone hotspot points straight to your phone's hotspot settings (your own name and password, or none, and your computer remembers it); OpenBridge's temporary hotspot is still there as a second option.
+<!-- status-widget -->
+<!-- checkboxes -->
 
 ### Fixed
-- **Phone hotspot on vivo and similar phones.** Some phones hide their hotspot from apps completely, so OpenBridge never listened on it. The phone now also answers on port 41986 on any hotspot address it can't see by name (still private addresses only, never Wi‑Fi, mobile data or VPN), and the Mac, Windows and Linux apps look for the phone at the hotspot's gateway. Join the phone's hotspot from the computer and the phone shows up under Phones nearby as "Phone (this hotspot)", ready to pair, even if it was never paired before.
-- **Aurora's download progress was nearly invisible.** The horizon now shows a proper progress pill: which way, the file name, a bar, the percent and "x of y", with Cancel (or Resume after an error) right there. The comet still flies.
-- **Aurora and Tide hid sort, view and the photo filter in the ⋯ menu.** They now have their own buttons in the toolbar, like Dusk, at every window size. Upload and New folder fold into ⋯ only when the window is narrow.
+- **Secure connections failed on some phones (vivo on Android 17 among them).** The phone's identity key couldn't sign the encrypted handshake the way Android asks it to, so every connection over Wi‑Fi, the hotspot or Fast USB failed right after reaching the phone. The phone now uses an ECDSA P-256 identity made for this. It's a new identity, so computers that saved the phone pair once more.
+<!-- disconnect -->
+- **Aurora's download progress was nearly invisible.** The horizon now shows a proper progress pill: which way, the file name, a bar, the percent and "x of y", with Cancel (or Resume after an error) right there.
+- **Aurora and Tide hid sort, view and the photo filter in the ⋯ menu.** They now have their own toolbar buttons, like Dusk, at every window size.
+- The Mac's diagnostics show the default gateway, what answered there, and which phones are announced on the network.
 
 ## [1.1.0] - 2026-10-20
 
