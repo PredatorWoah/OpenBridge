@@ -167,14 +167,12 @@ private fun SurfaceBar(state: AppState, searchFocus: FocusRequester, compact: Bo
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             IconButton(Icons.Filled.ArrowUpward, S.up, enabled = state.path.size > 1 && !state.busy) { state.up() }
             DepthPath(state, if (compact) 3 else 4, Modifier.weight(1f))
-            if (!compact) {
-                SearchField(state, searchFocus, Modifier.width(220.dp))
-                SortButton(state)
-                ViewToggle(state)
-                MediaToggle(state)
-                UploadButton(state)
-            }
-            MoreButton(state, compact = compact)
+            if (!compact) SearchField(state, searchFocus, Modifier.width(220.dp))
+            SortButton(state)
+            ViewToggle(state)
+            MediaToggle(state)
+            if (!compact) UploadButton(state)
+            MoreButton(state)
             if (state.selection.isNotEmpty()) DownloadButton(state)
         }
         if (compact || (state.query.isNotBlank() && state.results == null)) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {

@@ -166,6 +166,7 @@ object S {
     val noApp = t("Install OpenBridge on the phone for Fast USB.", "请在手机上安装 OpenBridge 以使用高速 USB。")
 
     // Wi‑Fi that keeps devices apart
+    val hotspotPhone = t("Phone (this hotspot)", "手机（当前热点）")
     val isolated = t("This Wi‑Fi keeps devices apart (common on guest, hotel and campus networks). On the phone, open OpenBridge › Settings › Phone hotspot and join that network from this computer, or use a USB cable.",
         "此 Wi‑Fi 会把设备相互隔开（访客、酒店和校园网络常见）。请在手机上打开 OpenBridge › 设置 › 手机热点，让这台电脑连接该热点，或使用 USB 数据线。")
 

@@ -15,6 +15,9 @@ final class PhoneDiscovery: ObservableObject {
 
     @Published private(set) var phones: [Phone] = []
     private var browser: NWBrowser?
+    /// Phones announced on the network, and the phone found at the gateway (its own hotspot, which isn't announced).
+    private var announced: [Phone] = []
+    private(set) var atGateway: Phone?
 
     func start() {
         guard browser == nil else { return }
@@ -26,7 +29,7 @@ final class PhoneDiscovery: ObservableObject {
                       let host = txt["ip"], let port = txt["port"] else { return nil }
                 return Phone(name: name, host: host, port: port, phoneID: txt["id"])
             }
-            Task { @MainActor in owner.discovery?.phones = found.sorted { $0.name < $1.name } }
+            Task { @MainActor in owner.discovery?.announce(found.sorted { $0.name < $1.name }) }
         }
         browser.start(queue: .main)
         self.browser = browser
@@ -35,8 +38,24 @@ final class PhoneDiscovery: ObservableObject {
     /// Phones to show in the README screenshots (`--render-screenshots`), without browsing the network.
     func showSample(_ phones: [Phone]) { self.phones = phones }
 
+    private func announce(_ found: [Phone]) { announced = found; merge() }
+
+    /// The phone answering at the gateway, or nil when nothing does.
+    func found(atGateway phone: Phone?) {
+        guard phone != atGateway else { return }
+        atGateway = phone; merge()
+    }
+
+    private func merge() {
+        var all = announced
+        if let atGateway, !all.contains(where: { $0.host == atGateway.host || ($0.phoneID != nil && $0.phoneID == atGateway.phoneID) }) {
+            all.append(atGateway)
+        }
+        phones = all
+    }
+
     func stop() {
-        browser?.cancel(); browser = nil; phones = []
+        browser?.cancel(); browser = nil; announced = []; atGateway = nil; phones = []
     }
 }
 

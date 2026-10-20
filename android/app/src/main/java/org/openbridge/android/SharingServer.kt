@@ -72,6 +72,12 @@ class SharingServer(private val context: Context, private val store: Store, priv
         const val PREFERRED_PORT = 41987
         /** Fast USB listens on the first free one of these, so computers know where to look. */
         val FAST_USB_PORTS = 41987..41990
+        /**
+         * The hotspot catch-all listens here: on every IPv4 address, taking only connections that arrive on an interface
+         * that isn't one of Android's networks (the phone's hotspot or tethering). Computers on a phone's hotspot try the
+         * gateway on this port too.
+         */
+        const val HOTSPOT_PORT = 41986
         /** The phone's TLS identity: made once and kept, so paired computers recognize it later. */
         private const val IDENTITY = "openbridge-identity"
     }
@@ -79,7 +85,21 @@ class SharingServer(private val context: Context, private val store: Store, priv
     /** A listening socket on one address, with its own session so requests are told apart by how they came in. */
     private class Door(val via: Via, val address: InetAddress, val socket: SSLServerSocket, val session: Session) {
         @Volatile var closed = false
-        val endpoint get() = Endpoint(via, address.hostAddress!!, socket.localPort)
+        /** The catch-all: every address, until a connection shows which one the hotspot has. */
+        val wildcard get() = address.isAnyLocalAddress
+        @Volatile var learned: InetAddress? = null
+        val shown get() = !wildcard || learned != null
+        val endpoint get() = Endpoint(via, (learned ?: address).hostAddress!!, socket.localPort)
+    }
+
+    /** The addresses of Android's own networks (Wi-Fi, mobile data, VPNs): the catch-all never serves those. */
+    @Volatile private var androidAddresses: Set<InetAddress> = emptySet()
+
+    private fun readAndroidAddresses() {
+        @Suppress("DEPRECATION")
+        androidAddresses = runCatching {
+            connectivity.allNetworks.flatMap { connectivity.getLinkProperties(it)?.linkAddresses.orEmpty().map { link -> link.address } }.toSet()
+        }.getOrDefault(androidAddresses)
     }
 
     private val connectivity = context.getSystemService(ConnectivityManager::class.java)
@@ -145,7 +165,7 @@ class SharingServer(private val context: Context, private val store: Store, priv
                 // Never 0.0.0.0, cellular or a public interface, and no port mapping.
                 if (open(Via.USB, InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), FAST_USB_PORTS.toList()) == null && cableOnly)
                     throw IllegalStateException(S.fastUsbBusy)
-                if (!cableOnly) { network(); hotspot() }
+                if (!cableOnly) { readAndroidAddresses(); network(); hotspot(); open(Via.HOTSPOT, InetAddress.getByAddress(byteArrayOf(0, 0, 0, 0)), listOf(HOTSPOT_PORT)) }
                 if (doors.isEmpty()) throw IllegalStateException(S.couldNotStart)
                 publish()
             }
@@ -182,6 +202,7 @@ class SharingServer(private val context: Context, private val store: Store, priv
                 problem = if (current.via == Via.TETHER) S.cableRemoved else S.wifiDisconnected
                 Log.add("${current.via.label} address went away")
             }
+            readAndroidAddresses()
             network()
             hotspot()
             // Losing Wi-Fi doesn't end sharing: many phones drop it as their hotspot starts, Fast USB keeps working,
@@ -226,11 +247,19 @@ class SharingServer(private val context: Context, private val store: Store, priv
     /** The phone's own hotspot, while it's on (see [Hotspot.address]). */
     private fun hotspot() {
         val address = Hotspot.address(context)
-        val served = doors.firstOrNull { it.via == Via.HOTSPOT }
+        val served = doors.firstOrNull { it.via == Via.HOTSPOT && !it.wildcard }
         if (served != null && served.address == address) return
         if (served != null) { shut(served); Log.add("Hotspot address went away") }
         if (address != null) open(Via.HOTSPOT, address, listOf(PREFERRED_PORT, 0))
+        else if (Hotspot.on && !interfacesLogged) {
+            // For diagnostics: what this phone calls its interfaces, when its hotspot can't be told apart.
+            interfacesLogged = true
+            val seen = runCatching { java.net.NetworkInterface.getNetworkInterfaces()?.toList().orEmpty() }.getOrDefault(emptyList())
+                .joinToString { "${it.name}${if (it.inetAddresses.toList().any { a -> a is java.net.Inet4Address && Wire.isPrivateIPv4(a) }) "*" else ""}" }
+            Log.add("Hotspot interface not recognized; interfaces: ${seen.ifEmpty { "none visible" }}")
+        }
     }
+    private var interfacesLogged = false
 
     private fun present(door: Door): Boolean = when (door.via) {
         Via.TETHER -> usbTetherAddress() == door.address
@@ -278,8 +307,19 @@ class SharingServer(private val context: Context, private val store: Store, priv
                 val socket = door.socket.accept() as SSLSocket
                 // Fast USB takes only connections from the phone itself (USB debugging forwards them there); the
                 // network addresses only from private addresses.
-                val allowed = if (door.via == Via.USB) socket.inetAddress.isLoopbackAddress else Wire.isPrivateIPv4(socket.inetAddress)
+                val local = socket.localAddress
+                val allowed = when {
+                    door.via == Via.USB -> socket.inetAddress.isLoopbackAddress
+                    // The catch-all serves only interfaces that aren't Android networks: never Wi-Fi, mobile data or a VPN.
+                    door.wildcard -> Wire.isPrivateIPv4(socket.inetAddress) && Wire.isPrivateIPv4(local) && local !in androidAddresses
+                    else -> Wire.isPrivateIPv4(socket.inetAddress)
+                }
                 if (!allowed) { socket.close(); continue }
+                if (door.wildcard && door.learned != local) {
+                    door.learned = local
+                    Log.add("A computer reached the phone hotspot at ${local.hostAddress}")
+                    check()
+                }
                 socket.soTimeout = 30_000
                 sockets.add(socket)
                 try {
@@ -303,7 +343,7 @@ class SharingServer(private val context: Context, private val store: Store, priv
     }, "openbridge-${door.via.name.lowercase()}").start()
 
     private fun publish(): Boolean {
-        val now = doors.sortedBy { it.via.ordinal }.map { it.endpoint }
+        val now = doors.filter { it.shown }.sortedBy { it.via.ordinal }.map { it.endpoint }.distinctBy { it.via to it.host }
         if (now == endpoints) return false
         endpoints = now
         return true
@@ -320,7 +360,7 @@ class SharingServer(private val context: Context, private val store: Store, priv
     private fun announce() {
         if (closed.get() || !started) return
         val wifi = doors.firstOrNull { it.via == Via.WIFI }?.endpoint
-        val hotspot = doors.firstOrNull { it.via == Via.HOTSPOT }?.endpoint
+        val hotspot = doors.filter { it.via == Via.HOTSPOT && it.shown }.minByOrNull { if (it.wildcard) 1 else 0 }?.endpoint
         announceOn(Via.WIFI, wifi, deviceName)
         // A computer on the hotspot can't reach the Wi-Fi address, so the hotspot gets its own announcement.
         announceOn(Via.HOTSPOT, hotspot, if (wifi != null) "$deviceName (${S.hotspotLabel})" else deviceName)

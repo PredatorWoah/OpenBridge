@@ -57,6 +57,9 @@ data class Transfer(
  * The browser works on any [PhoneSource]: a phone over Wi‑Fi or Fast USB (OB01), or in File transfer mode over USB.
  * (Setters that are internal let the tests draw the screens with chosen values.)
  */
+/** Phones also listen here on their hotspot, on any address (see the phone's SharingServer). */
+const val HOTSPOT_PORT = 41986
+
 class AppState {
     private val preferences = java.util.prefs.Preferences.userRoot().node("org/openbridge")
 
@@ -141,7 +144,11 @@ class AppState {
     private val previews = Executors.newSingleThreadExecutor { Thread(it, "openbridge-previews").apply { isDaemon = true } }
     // Texts and the clipboard go on their own thread, so they work during a long transfer.
     private val texting = Executors.newSingleThreadExecutor { Thread(it, "openbridge-texts").apply { isDaemon = true } }
-    private val discovery = Discovery { found -> ui { nearby = found } }
+    private val discovery = Discovery { found -> ui { discovered = found; nearby = withHotspot() } }
+    private var discovered = emptyList<NearbyPhone>()
+    /** A phone answering at the default gateway: this computer is on its hotspot, where announcements may not reach. */
+    private var hotspotPhone: NearbyPhone? = null
+    private fun withHotspot() = discovered + listOfNotNull(hotspotPhone?.takeIf { h -> discovered.none { it.id == h.id } })
     private val isolation = Isolation()
     private val watch = ClipboardWatch()
     private var adb: AdbTool? = null
@@ -540,7 +547,9 @@ class AppState {
                 if (here.host.isNotBlank()) add(here)
                 if (gateway != null && gateway != here.host) {
                     add(phone.copy(host = gateway, port = 41987))
-                    if (phone.port != 41987) add(phone.copy(host = gateway))
+                    // Phones listen on their hotspot here too, whatever the hotspot interface is called.
+                    add(phone.copy(host = gateway, port = HOTSPOT_PORT))
+                    if (phone.port != 41987 && phone.port != HOTSPOT_PORT) add(phone.copy(host = gateway))
                 }
             }
             for (target in candidates) {
@@ -564,10 +573,27 @@ class AppState {
                 return
             }
         }
+        lookAtGateway(gateway)
         // Phones announcing themselves that aren't saved: can their port be reached at all?
         for (phone in nearby.filter { n -> saved.none { it.id == n.id } }) {
             val port = phone.port.toIntOrNull() ?: continue
             noteReach(phone.id ?: phone.host, BridgeClient.reachable(phone.host, port))
+        }
+    }
+
+    /** An unsaved phone at the gateway is listed as nearby, so it can be paired on its own hotspot. */
+    private fun lookAtGateway(gateway: String?) {
+        val found = gateway?.let { host ->
+            listOf(41987, HOTSPOT_PORT).firstNotNullOfOrNull { port ->
+                BridgeClient.fingerprintAt(host, port, 1_500)?.let { print -> port to print }
+            }?.let { (port, print) ->
+                val id = print.take(8).joinToString("") { "%02x".format(it) }
+                if (saved.any { it.id == id }) null else NearbyPhone(S.hotspotPhone, host, port.toString(), id)
+            }
+        }
+        if (found != hotspotPhone) {
+            if (found != null) Log.add("A phone answers at the default gateway (its hotspot)")
+            ui { hotspotPhone = found; nearby = withHotspot() }
         }
     }
 
