@@ -50,6 +50,9 @@ object Hotspot {
     private val main = Handler(Looper.getMainLooper())
     /** Names Android gives Wi-Fi access point interfaces. */
     private val accessPoint = Regex("(wlan|swlan|ap|softap|wifi|wigig)\\d+")
+    /** Names only an access point uses. Some phones (vivo) list their hotspot as a Wi-Fi network; it's still the hotspot. */
+    private val accessPointOnly = Regex("(swlan|ap|softap)\\d+")
+    fun isAccessPoint(name: String?): Boolean = name != null && accessPointOnly.matches(name)
 
     /** A hotspot is on or starting (any thread). */
     val on: Boolean get() = ours || anyOn || starting
@@ -153,7 +156,7 @@ object Hotspot {
             .getOrDefault(emptySet())
         val known = interfaces.keys
         return runCatching { NetworkInterface.getNetworkInterfaces()?.toList().orEmpty() }.getOrDefault(emptyList())
-            .filter { runCatching { it.isUp && !it.isLoopback }.getOrDefault(false) && it.name !in networks && accessPoint.matches(it.name) }
+            .filter { runCatching { it.isUp && !it.isLoopback }.getOrDefault(false) && (it.name !in networks || isAccessPoint(it.name)) && accessPoint.matches(it.name) }
             .sortedBy { if (it.name in known) 0 else 1 }
             .firstNotNullOfOrNull { candidate -> candidate.inetAddresses.toList().firstOrNull { it is Inet4Address && Wire.isPrivateIPv4(it) } }
     }

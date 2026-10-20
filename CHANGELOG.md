@@ -4,6 +4,9 @@ All notable changes to OpenBridge are recorded here. Every release has an entry;
 
 ## [Unreleased]
 
+### Fixed
+- **Phone hotspot on vivo, for real this time.** vivo reports its hotspot (`ap0`) to apps as a Wi‑Fi network, so OpenBridge either refused it as "a different Wi‑Fi" or turned computers away on it. An access point interface (`ap`, `softap`, `swlan`) now always counts as the phone hotspot, whatever Android calls it.
+
 ## [1.1.1] - 2026-10-20
 
 The phone hotspot, take three, and two things that were hard to see on the Mac.

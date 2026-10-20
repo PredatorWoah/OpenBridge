@@ -98,7 +98,8 @@ class SharingServer(private val context: Context, private val store: Store, priv
     private fun readAndroidAddresses() {
         @Suppress("DEPRECATION")
         androidAddresses = runCatching {
-            connectivity.allNetworks.flatMap { connectivity.getLinkProperties(it)?.linkAddresses.orEmpty().map { link -> link.address } }.toSet()
+            connectivity.allNetworks.mapNotNull { connectivity.getLinkProperties(it) }.filterNot { Hotspot.isAccessPoint(it.interfaceName) }
+                .flatMap { it.linkAddresses.map { link -> link.address } }.toSet()
         }.getOrDefault(androidAddresses)
     }
 
@@ -221,7 +222,9 @@ class SharingServer(private val context: Context, private val store: Store, priv
         @Suppress("DEPRECATION") for (candidate in connectivity.allNetworks) {
             val caps = connectivity.getNetworkCapabilities(candidate) ?: continue
             if (!caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) || !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)) continue
-            val link = connectivity.getLinkProperties(candidate)?.linkAddresses?.firstOrNull { Wire.isPrivateIPv4(it.address) } ?: continue
+            val properties = connectivity.getLinkProperties(candidate) ?: continue
+            if (Hotspot.isAccessPoint(properties.interfaceName)) continue   // the phone's own hotspot, served as such
+            val link = properties.linkAddresses.firstOrNull { Wire.isPrivateIPv4(it.address) } ?: continue
             if (networkLost && !sameNetwork(wifiLink, link)) continue
             if (open(Via.WIFI, link.address, listOf(PREFERRED_PORT, 0)) != null) { wifi = candidate; wifiLink = link; networkLost = false }
             return
