@@ -500,12 +500,19 @@ struct OpenBridgeApp: App {
     }
 
     var body: some Scene {
-        WindowGroup { RootView(model: model) }
+        WindowGroup(id: MainWindow.id) { RootView(model: model) }
             .windowStyle(.hiddenTitleBar)
             .defaultSize(width: 980, height: 660)
         Window("Phone Screen", id: "mirror") { MirrorView() }
             .windowStyle(.hiddenTitleBar)
             .defaultSize(width: 380, height: 780)
         Settings { SettingsView(model: model) }
+        // Always in the menu bar while OpenBridge runs: the phone, the transfer and the main actions.
+        MenuBarExtra {
+            MenuBarContent(model: model)
+        } label: {
+            MenuBarIcon(model: model)
+        }
+        .menuBarExtraStyle(.window)
     }
 }

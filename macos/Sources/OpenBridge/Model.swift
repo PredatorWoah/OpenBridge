@@ -294,6 +294,15 @@ final class BrowserModel: ObservableObject {
         self.saved = saved
     }
 
+    /// Sample state for the menu bar panel's screenshot: connected over the phone's hotspot, moving at `speed` bytes
+    /// per second. Never used otherwise.
+    func showSampleMenuBar(phone: String, speed: Double) {
+        deviceName = phone
+        fastUSB = false; overUSB = false; viaHotspot = true
+        connected = true
+        self.speed = speed; speedMeasured = Date()
+    }
+
     /// An error message for the diagnostics log: names in quotes (files, folders) left out.
     static func redacted(_ message: String) -> String {
         if message.contains("already exists") { return "a file or folder with that name already exists" }
