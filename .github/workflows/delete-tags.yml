@@ -1,0 +1,28 @@
+name: Delete tags
+# Run from the Actions tab to remove tags left behind by deleted releases. Refuses any tag that still has a release.
+on:
+  workflow_dispatch:
+    inputs:
+      tags:
+        description: 'Tags to delete, separated by spaces (for example: v0.9.0 v0.9.1)'
+        required: true
+permissions:
+  contents: write
+jobs:
+  delete:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete the tags that have no release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAGS: ${{ inputs.tags }}
+          REPO: ${{ github.repository }}
+        run: |
+          for tag in $TAGS; do
+            case "$tag" in v[0-9]*) ;; *) echo "::error::Not a version tag: $tag"; exit 1 ;; esac
+            if gh release view "$tag" --repo "$REPO" >/dev/null 2>&1; then
+              echo "::warning::$tag still has a release; kept"
+              continue
+            fi
+            gh api -X DELETE "repos/$REPO/git/refs/tags/$tag" && echo "Deleted $tag"
+          done
