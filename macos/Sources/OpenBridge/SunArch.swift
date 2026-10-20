@@ -204,13 +204,17 @@ struct Hero: View {
     var radius: Double = 62
     /// What VoiceOver reads for it; without one it's decoration and hidden.
     var label: String?
+    /// How far the connect ripples spread.
+    var reach: Double = 300
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Minimized or hidden: nothing to see, so no frames to draw.
     @Environment(\.scenePhase) private var scenePhase
     @State private var engine: SunEngine
 
-    init(active: Bool, connected: Bool, centerY: Double = 0.3, radius: Double = 62, startScanning: Bool = false, label: String? = nil) {
+    init(active: Bool, connected: Bool, centerY: Double = 0.3, radius: Double = 62, startScanning: Bool = false, label: String? = nil,
+         reach: Double = 300) {
         self.active = active; self.connected = connected; self.centerY = centerY; self.radius = radius; self.label = label
+        self.reach = reach
         _engine = State(initialValue: SunEngine(state: startScanning ? .scan : .idle))
     }
 
@@ -225,7 +229,7 @@ struct Hero: View {
                 var frame = engine.step(dt, active: active, connected: connected, reduceMotion: reduceMotion)
                 if reduceMotion { frame.bloom = 0; frame.pulse = 0 }
                 LookArt.hero(look, &context, engine: engine, frame: frame,
-                             center: CGPoint(x: size.width / 2, y: size.height * centerY), radius: radius, reach: 300,
+                             center: CGPoint(x: size.width / 2, y: size.height * centerY), radius: radius, reach: reach,
                              time: reduceMotion ? 7 : engine.time)
             }
         }

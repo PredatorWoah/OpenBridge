@@ -60,8 +60,9 @@ final class BrowserModel: ObservableObject {
     @Published var ascending = !UserDefaults.standard.bool(forKey: "sortDescending") {
         didSet { UserDefaults.standard.set(!ascending, forKey: "sortDescending") }
     }
-    @Published var grid = UserDefaults.standard.bool(forKey: "gridView") {
-        didSet { UserDefaults.standard.set(grid, forKey: "gridView") }
+    /// List or grid, remembered for each look (`prefersGrid`).
+    @Published var grid = BrowserModel.prefersGrid(Palette.look) {
+        didSet { UserDefaults.standard.set(grid, forKey: BrowserModel.gridKey(Palette.look)) }
     }
     /// Phones paired before, which reconnect by themselves while sharing.
     @Published private(set) var saved: [SavedPhone] = SavedPhones.load()
@@ -115,6 +116,8 @@ final class BrowserModel: ObservableObject {
     private var lastShared: String?
     /// The saved phone connected now, when the connection came from one.
     private var current: SavedPhone?
+    /// Which saved phone is open, so the looks' phone switchers can mark it.
+    var currentID: String? { connected ? current?.id : nil }
     /// Off after Disconnect, so a saved phone doesn't reconnect straight away.
     private var autoConnect = true
     private var probing = false
@@ -203,6 +206,16 @@ final class BrowserModel: ObservableObject {
                     : "Couldn't reach the phone. Check Wi‑Fi and that sharing is still on, or pair again."
             }
         }
+    }
+
+    static func gridKey(_ look: Look) -> String { look == .dusk ? "gridView" : "gridView." + look.rawValue }
+
+    /// Each look remembers list or grid on its own. Aurora opens as a gallery and Tide as a list until changed;
+    /// Dusk keeps the choice made before looks had their own layouts.
+    static func prefersGrid(_ look: Look) -> Bool {
+        let key = gridKey(look)
+        guard UserDefaults.standard.object(forKey: key) != nil else { return look == .aurora }
+        return UserDefaults.standard.bool(forKey: key)
     }
 
     /// An error message for the diagnostics log: names in quotes (files, folders) left out.
