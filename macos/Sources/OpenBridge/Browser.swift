@@ -151,14 +151,17 @@ private struct FolderList: View {
     @ViewBuilder private func row(_ entry: Entry, deepest: Int64) -> some View {
         let selected = model.selection.contains(entry.id)
         let focused = model.cursor == entry.id
+        let toggle: () -> Void = { model.toggle(entry) }
         switch look {
         case .dusk:
-            FileRow(entry: entry, selected: selected, thumbnail: model.thumbnails[entry.id], folderSize: model.sizes[entry.id], focused: focused)
+            FileRow(entry: entry, selected: selected, thumbnail: model.thumbnails[entry.id], folderSize: model.sizes[entry.id], focused: focused,
+                    toggle: toggle)
         case .aurora:
-            AuroraRow(entry: entry, selected: selected, thumbnail: model.thumbnails[entry.id], folderSize: model.sizes[entry.id], focused: focused)
+            AuroraRow(entry: entry, selected: selected, thumbnail: model.thumbnails[entry.id], folderSize: model.sizes[entry.id], focused: focused,
+                      toggle: toggle)
         case .tide:
             CapsuleRow(entry: entry, selected: selected, thumbnail: model.thumbnails[entry.id], folderSize: model.sizes[entry.id],
-                       deepest: deepest, focused: focused)
+                       deepest: deepest, focused: focused, toggle: toggle)
         }
     }
 
@@ -205,13 +208,17 @@ private struct FolderGrid: View {
     @ViewBuilder private func tile(_ entry: Entry) -> some View {
         let selected = model.selection.contains(entry.id)
         let focused = model.cursor == entry.id
+        let toggle: () -> Void = { model.toggle(entry) }
         switch look {
         case .dusk:
-            FileTile(entry: entry, selected: selected, thumbnail: model.thumbnails[entry.id], folderSize: model.sizes[entry.id], focused: focused)
+            FileTile(entry: entry, selected: selected, thumbnail: model.thumbnails[entry.id], folderSize: model.sizes[entry.id], focused: focused,
+                     toggle: toggle)
         case .aurora:
-            AuroraTile(entry: entry, selected: selected, thumbnail: model.thumbnails[entry.id], folderSize: model.sizes[entry.id], focused: focused)
+            AuroraTile(entry: entry, selected: selected, thumbnail: model.thumbnails[entry.id], folderSize: model.sizes[entry.id], focused: focused,
+                       toggle: toggle)
         case .tide:
-            TideCard(entry: entry, selected: selected, thumbnail: model.thumbnails[entry.id], folderSize: model.sizes[entry.id], focused: focused)
+            TideCard(entry: entry, selected: selected, thumbnail: model.thumbnails[entry.id], folderSize: model.sizes[entry.id], focused: focused,
+                     toggle: toggle)
         }
     }
 }
@@ -376,7 +383,9 @@ struct Item: ViewModifier {
             .accessibilityAddTraits(model.selection.contains(entry.id) ? AccessibilityTraits.isSelected : AccessibilityTraits())
             .accessibilityHint(entry.directory ? "Opens the folder" : "Downloads the file")
             .accessibilityAction { model.open(entry) }
-            .accessibilityAction(named: "Select") { model.click(entry) }
+            .accessibilityAction(named: Text(model.selection.contains(entry.id) ? "Deselect \(entry.name)" : "Select \(entry.name)")) {
+                model.toggle(entry)
+            }
             .accessibilityAction(named: "Rename") { model.renaming = entry }
             .accessibilityAction(named: "Delete") { model.confirmDelete([entry]) }
             .contextMenu {
@@ -628,10 +637,13 @@ struct FileRow: View {
     var thumbnail: NSImage?
     var folderSize: FolderSize? = nil
     var focused = false
+    /// Its checkbox; none where selecting doesn't apply (search results).
+    var toggle: (() -> Void)? = nil
 
     var body: some View {
         let (name, color) = fileSymbol(FileKind(entry))
         HStack(spacing: 12) {
+            if let toggle { RowCheckbox(name: entry.name, selected: selected, toggle: toggle) }
             Group {
                 if let thumbnail {
                     Image(nsImage: thumbnail).resizable().scaledToFill().frame(width: 26, height: 26)
@@ -649,7 +661,7 @@ struct FileRow: View {
                 .help(folderSize.map { $0.files > 0 ? "\($0.files) files" : "" } ?? "")
         }
         .font(.system(size: 13.5))
-        .padding(.horizontal, 12).padding(.vertical, 6)
+        .padding(.leading, toggle == nil ? 12 : 6).padding(.trailing, 12).padding(.vertical, 6)
         .background { if selected { RoundedRectangle(cornerRadius: 8, style: .continuous).fill(selectionFill) } }
         .overlay(focusRing(8, focused))
         .contentShape(Rectangle())
@@ -662,6 +674,8 @@ struct FileTile: View {
     var thumbnail: NSImage?
     var folderSize: FolderSize? = nil
     var focused = false
+    /// Its checkbox; none where selecting doesn't apply (search results).
+    var toggle: (() -> Void)? = nil
 
     var body: some View {
         let (name, color) = fileSymbol(FileKind(entry))
@@ -677,6 +691,9 @@ struct FileTile: View {
             }
             .frame(width: 108, height: 96)
             .clipped()
+            .overlay(alignment: .topLeading) {
+                if let toggle { RowCheckbox(name: entry.name, selected: selected, onPicture: true, toggle: toggle).padding(2) }
+            }
             Text(entry.name).font(.system(size: 12)).lineLimit(2).multilineTextAlignment(.center).truncationMode(.middle)
             Text(entry.directory ? (folderSize == nil ? " " : folderText(folderSize)) : ByteCountFormatter.string(fromByteCount: entry.size, countStyle: .file))
                 .font(.system(size: 10.5)).foregroundStyle(Palette.muted)

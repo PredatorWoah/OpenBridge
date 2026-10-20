@@ -1018,6 +1018,26 @@ final class BrowserModel: ObservableObject {
 
     func selectAll() { selection = Set(entries.map(\.id)) }
 
+    /// A checkbox: adds or removes one item, keeping the rest of the selection.
+    func toggle(_ entry: Entry) {
+        if selection.contains(entry.id) { selection.remove(entry.id) } else { selection.insert(entry.id) }
+        anchor = entry.id; cursor = entry.id
+    }
+
+    /// The folder's checkbox: on when everything shown is selected, a dash when some are.
+    var allSelectedState: CheckState {
+        let shown: [Entry] = sorted
+        let count: Int = shown.filter { selection.contains($0.id) }.count
+        if count == 0 { return .off }
+        return count == shown.count ? .on : .mixed
+    }
+
+    /// Selects everything shown, or nothing when everything already is.
+    func toggleAll() {
+        if allSelectedState == .on { selection = []; cursor = nil }
+        else { selection.formUnion(sorted.map(\.id)) }
+    }
+
     /// What the arrow keys walk through: search hits when they're shown, else the folder in its order.
     private var keyboardOrder: [Entry.ID] { results != nil ? sortedResults.map(\.id) : sorted.map(\.id) }
 

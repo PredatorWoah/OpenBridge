@@ -96,6 +96,7 @@ private struct Toolbar: View {
 
     private func navigation(compact: Bool) -> some View {
         HStack(spacing: 8) {
+            SelectAllBox(model: model)
             UpButton(model: model)
             ResultsButton(model: model)
             PathBar(model: model, compact: compact)
