@@ -26,7 +26,11 @@ dependencies {
     testImplementation(kotlin("test"))
 }
 
-tasks.test { useJUnitPlatform() }
+tasks.test {
+    useJUnitPlatform()
+    // The previews in another language: PREVIEW_LANG=zh draws them in Simplified Chinese.
+    System.getenv("PREVIEW_LANG")?.let { systemProperty("user.language", it) }
+}
 
 val appVersion = providers.gradleProperty("appVersion").orElse("1.1.1")
 

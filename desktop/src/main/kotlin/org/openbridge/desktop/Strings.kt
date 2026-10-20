@@ -37,6 +37,16 @@ object S {
             "投屏需要 scrcpy。请先安装（例如：sudo apt install scrcpy），或使用自带投屏组件的 OpenBridge 下载版本。")
     fun mirrorStopped(code: Int) = t("Screen mirroring stopped (code $code).", "投屏已停止（代码 $code）。")
     val disconnect = t("Disconnect", "断开连接")
+    val openApp = t("Open OpenBridge", "打开 OpenBridge")
+    val quit = t("Quit", "退出")
+    val cancelTransfer = t("Cancel transfer", "取消传输")
+    val notConnected = t("Not connected", "未连接")
+    val connectedWord = t("Connected", "已连接")
+    fun timeLeft(seconds: Long) = when {
+        seconds < 60 -> t("$seconds s left", "剩余 $seconds 秒")
+        seconds < 3600 -> ((seconds + 59) / 60).let { t("$it min left", "剩余 $it 分钟") }
+        else -> (seconds / 3600).let { hours -> ((seconds % 3600) / 60).let { t("$hours h $it min left", "剩余 $hours 小时 $it 分钟") } }
+    }
     val close = t("Close", "关闭")
     val up = t("Up", "上一级")
     val refresh = t("Refresh", "刷新")

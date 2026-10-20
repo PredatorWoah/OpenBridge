@@ -43,14 +43,25 @@ enum class Kind { FOLDER, IMAGE, VIDEO, AUDIO, DOCUMENT, ARCHIVE, APP, OTHER;
 
 /** One transfer; `at` is the phone folder by name, so it can be found again after pairing anew. */
 sealed class Job(val name: String) {
-    class Download(val entry: Entry, val target: File, val at: List<String>) : Job(entry.name)
-    class Upload(val file: File, val into: String, val at: List<String>, name: String = file.name) : Job(name)
+    /** How many bytes it moves. */
+    abstract val size: Long
+    class Download(val entry: Entry, val target: File, val at: List<String>) : Job(entry.name) { override val size get() = entry.size }
+    class Upload(val file: File, val into: String, val at: List<String>, name: String = file.name) : Job(name) { override val size get() = file.length() }
 }
 
+/** A queue of transfers: the file moving now (`index` of `count`, `fraction` of it), and bytes moved of the whole queue. */
 data class Transfer(
     val name: String, val upload: Boolean, val index: Int = 1, val count: Int = 1, val fraction: Float = 0f,
     val done: Boolean = false, val saved: File? = null, val remaining: List<Job> = emptyList(), val connection: Int = 0,
-)
+    val bytesDone: Long = 0, val bytesTotal: Long = 0,
+) {
+    /** How far the whole queue is, 0 to 1: by bytes when they're known, else by files. */
+    val progress: Float get() = when {
+        done -> 1f
+        bytesTotal > 0 -> (bytesDone.toFloat() / bytesTotal).coerceIn(0f, 1f)
+        else -> overallProgress(this)
+    }
+}
 
 /**
  * The desktop app's state. Work runs on one background thread, one task at a time; the UI reads these values.
@@ -160,6 +171,8 @@ class AppState {
     @Volatile private var hungUp = false
     /** Checks the open phone still answers while idle (Wi‑Fi and Fast USB). */
     private val liveness = Liveness()
+    /** How fast the running transfer moves, over the last two seconds or so. */
+    private val meter = SpeedMeter()
     // Counts connections, on the worker thread, so a transfer planned on an earlier one finds its files again.
     @Volatile private var connection = 0
     private var lastKey: String? = null
@@ -1009,15 +1022,26 @@ class AppState {
         val upload = jobs[0] is Job.Upload
         var last: File? = null
         val folders = HashMap<String, List<Entry>>()
+        val total = jobs.sumOf { it.size }
+        var before = 0L   // bytes of the files finished so far
+        var skipped = 0L  // bytes that were already there (continued files): not counted as speed
+        meter.reset(); meter.add(System.currentTimeMillis(), 0)
         jobs.forEachIndexed { index, job ->
             if (cancelled) throw InterruptedException()
-            ui { transfer = Transfer(job.name, upload, index + 1, jobs.size, 0f, remaining = jobs.drop(index), connection = planned) }
+            val start = before
+            ui { transfer = Transfer(job.name, upload, index + 1, jobs.size, 0f, remaining = jobs.drop(index), connection = planned, bytesDone = start, bytesTotal = total) }
             val current = if (planned == connection) job else relocate(job, phone, folders)
-            val progress = { done: Long, total: Long -> ui { transfer = transfer?.copy(fraction = if (total == 0L) 1f else done.toFloat() / total) } }
+            var first = true
+            val progress = { done: Long, size: Long ->
+                if (first) { skipped += done; first = false }
+                meter.add(System.currentTimeMillis(), start + done - skipped)
+                ui { transfer = transfer?.copy(fraction = if (size == 0L) 1f else done.toFloat() / size, bytesDone = start + done) }
+            }
             when (current) {
                 is Job.Download -> { phone.download(current.entry, current.target, { cancelled }, progress); last = current.target }
                 is Job.Upload -> uploadNamed(phone, current, progress)
             }
+            before += job.size
         }
         val listed = runCatching { phone.list(path.last().first) }.getOrNull()
         ui {
@@ -1067,6 +1091,9 @@ class AppState {
     }
 
     fun dismissTransfer() { transfer = null }
+
+    /** Bytes a second the running transfer moves now, averaged over about two seconds; 0 when none runs. */
+    fun rate(): Double = if (transfer?.let { !it.done && busy } == true) meter.rate(System.currentTimeMillis()) else 0.0
 
     // Updates and settings
 
