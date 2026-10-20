@@ -83,6 +83,8 @@ final class BrowserModel: ObservableObject {
     @Published private(set) var update: AvailableUpdate?
     let updater = Updater()
     let texts = TextHistory()
+    /// Connected over Wi‑Fi to the phone's own hotspot: the phone is this Mac's default gateway.
+    @Published private(set) var viaHotspot = false
     /// Fast USB: the phone's own sharing reached through USB debugging. (`overUSB` means File transfer, MTP.)
     @Published private(set) var fastUSB = false
     /// A phone with USB debugging on is plugged in.
@@ -163,6 +165,16 @@ final class BrowserModel: ObservableObject {
         var connection = 0
         /// The phone the transfer was for, to continue it automatically when that phone comes back.
         var phone = ""
+        /// Bytes in the whole batch (0 when unknown), and in the files already finished.
+        var totalBytes: Int64 = 0
+        var finishedBytes: Int64 = 0
+        /// The running file: bytes so far and its size.
+        var currentBytes: Int64 = 0
+        var currentTotal: Int64 = 0
+
+        /// Bytes moved so far and in all, for "x of y" and the time left: the batch when its size is known, else the file.
+        var bytesSoFar: Int64 { totalBytes > 0 ? finishedBytes + currentBytes : currentBytes }
+        var bytesInAll: Int64 { totalBytes > 0 ? totalBytes : currentTotal }
     }
 
     /// One transfer. `at` is the phone folder by name (from the top), so the job can be found again after
@@ -176,6 +188,44 @@ final class BrowserModel: ObservableObject {
             case .upload(let url, _, _): return url.lastPathComponent
             }
         }
+    }
+
+    /// How fast the transfer moves, in bytes per second: smoothed over about 2 seconds, from the progress reports.
+    @Published private(set) var speed: Double = 0
+    /// When the speed was last measured; an old measurement means the transfer stalled.
+    private(set) var speedMeasured: Date?
+    private var speedSample: (bytes: Int64, at: Date)?
+
+    /// The speed, or 0 when nothing has moved for a few seconds.
+    func currentSpeed(at now: Date = Date()) -> Double {
+        guard let measured = speedMeasured, now.timeIntervalSince(measured) < 4 else { return 0 }
+        return speed
+    }
+
+    /// Seconds until the transfer is done at the current speed, when that can be told.
+    func timeLeft(at now: Date = Date()) -> Double? {
+        guard let transfer, !transfer.done else { return nil }
+        let rate: Double = currentSpeed(at: now)
+        let left: Int64 = transfer.bytesInAll - transfer.bytesSoFar
+        guard rate > 1, transfer.bytesInAll > 0, left >= 0 else { return nil }
+        return Double(left) / rate
+    }
+
+    private func resetSpeed() { speed = 0; speedMeasured = nil; speedSample = nil }
+
+    /// An exponential moving average of the rate between progress reports, with a 2-second time constant.
+    private func measureSpeed(_ done: Int64) {
+        let now = Date()
+        guard let last = speedSample else { speedSample = (done, now); return }
+        let seconds: Double = now.timeIntervalSince(last.at)
+        guard seconds >= 0.15 else { return }
+        // A new file starts again from 0: what it has so far is what moved.
+        let moved: Int64 = done >= last.bytes ? done - last.bytes : done
+        speedSample = (done, now)
+        let rate: Double = Double(moved) / seconds
+        let weight: Double = 1 - exp(-seconds / 2)
+        speed = speedMeasured == nil ? rate : speed + (rate - speed) * weight
+        speedMeasured = now
     }
 
     /// Bumped on every new connection: IDs from an older one must be looked up again by name.
@@ -252,7 +302,7 @@ final class BrowserModel: ObservableObject {
 
     var transportName: String {
         guard connected else { return "not connected" }
-        return fastUSB ? "Fast USB" : overUSB ? "USB File transfer" : "Wi‑Fi"
+        return fastUSB ? "Fast USB" : overUSB ? "USB File transfer" : viaHotspot ? "Wi‑Fi, phone hotspot" : "Wi‑Fi"
     }
 
     func show(_ message: String) {
@@ -447,11 +497,28 @@ final class BrowserModel: ObservableObject {
         phoneInfo = nil; phoneOutdated = false
         saved = [phone] + saved.filter { $0.id != phone.id }
         SavedPhones.save(saved)
-        Diagnostics.log(fastUSB ? "Connected over Fast USB" : "Connected over Wi‑Fi at \(phone.host):\(phone.port)")
+        let gateway: String? = gatewayChecked?.address
+        viaHotspot = !fastUSB && gateway != nil && gateway == phone.host
+        Diagnostics.log(fastUSB ? "Connected over Fast USB" : "Connected over \(transportName) at \(phone.host):\(phone.port)")
+        if !fastUSB { noticeHotspot(phone.host) }
         startReceiving(client)
         watchClipboard()
         didConnect(to: phone.name)
         askInfo(client)   // after didConnect: it belongs to this connection
+    }
+
+    /// Whether the phone is the gateway, checked again when the cached gateway is old or missing.
+    private func noticeHotspot(_ address: String) {
+        let epoch = connection
+        Task {
+            let gateway = await currentGateway()
+            guard connected, !fastUSB, epoch == connection, host == address else { return }
+            let hotspot: Bool = gateway == address
+            if hotspot != viaHotspot {
+                viaHotspot = hotspot
+                if hotspot { Diagnostics.log("The phone is the default gateway: connected over its hotspot") }
+            }
+        }
     }
 
     // MARK: Files sent from the phone
@@ -806,7 +873,8 @@ final class BrowserModel: ObservableObject {
         if connected { Announce.spoken(reason.isEmpty ? "Disconnected" : reason) }
         if !reason.isEmpty { Diagnostics.log("Connection ended: \(reason)") }
         if fastUSB { USBDebugging.shared.closeIfUnused() }
-        tunnel?.stop(); tunnel = nil; fastUSB = false
+        tunnel?.stop(); tunnel = nil; fastUSB = false; viaHotspot = false
+        resetSpeed()
         phoneInfo = nil; phoneOutdated = false
         clipboardTimer?.invalidate(); clipboardTimer = nil
         if let cut = transfer, !cut.done, !cut.remaining.isEmpty { interrupted = cut }
@@ -1203,6 +1271,7 @@ final class BrowserModel: ObservableObject {
         run {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             self.transfer = Transfer(name: entry.name, upload: false)
+            self.resetSpeed()
             try await client.download(entry, to: target) { done, total in self.update(done, total) }
             self.transfer = nil
             self.previewURL = target
@@ -1447,6 +1516,10 @@ final class BrowserModel: ObservableObject {
         if case .upload = jobs[0] { upload = true } else { upload = false }
         let planned = planned ?? connection
         transfer = Transfer(name: jobs[0].name, upload: upload, count: jobs.count, remaining: jobs, connection: planned, phone: deviceName)
+        var batch: Int64 = 0
+        for job in jobs { batch += Self.size(of: job) }
+        transfer?.totalBytes = batch
+        resetSpeed()
         let folders = FolderCache()   // phone folders looked up again by name, for this run
         do {
             var lastSaved: URL?
@@ -1454,6 +1527,8 @@ final class BrowserModel: ObservableObject {
             for (index, job) in jobs.enumerated() {
                 try Task.checkCancellation()
                 self.transfer?.name = job.name; self.transfer?.index = index + 1; self.transfer?.fraction = 0
+                self.transfer?.currentBytes = 0; self.transfer?.currentTotal = Self.size(of: job)
+                speedSample = nil   // a resumed file starts part-way: measure from its first report
                 self.transfer?.remaining = Array(jobs[index...])
                 // IDs from an earlier connection are stale: find the file or folder again by its path.
                 let current = planned == connection ? job : try await relocate(job, client: client, cache: folders)
@@ -1461,8 +1536,10 @@ final class BrowserModel: ObservableObject {
                 case .download(let entry, let target, _):
                     try await client.download(entry, to: target) { done, total in self.update(done, total) }
                     lastSaved = target
+                    self.transfer?.finishedBytes += entry.size
                 case .upload(let url, let directory, _):
                     try await client.upload(url, directoryID: directory) { done, total in self.update(done, total) }
+                    self.transfer?.finishedBytes += self.transfer?.currentTotal ?? 0
                     touchedFolder = touchedFolder || directory == self.path.last?.id
                 }
             }
@@ -1532,6 +1609,7 @@ final class BrowserModel: ObservableObject {
                     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
                     let target = folder.appendingPathComponent(entry.name)
                     self.transfer = Transfer(name: entry.name, upload: false)
+                    self.resetSpeed()
                     try await client.download(entry, to: target) { done, total in self.update(done, total) }
                     self.transfer = nil
                     completion(target, false, nil)
@@ -1548,6 +1626,19 @@ final class BrowserModel: ObservableObject {
 
     private func update(_ done: Int64, _ total: Int64) {
         transfer?.fraction = total == 0 ? 0 : Double(done) / Double(total)
+        transfer?.currentBytes = done
+        transfer?.currentTotal = total
+        measureSpeed(done)
+    }
+
+    /// A job's size in bytes, for the batch total (0 when it can't be told).
+    private static func size(of job: Job) -> Int64 {
+        switch job {
+        case .download(let entry, _, _): return entry.size
+        case .upload(let url, _, _):
+            let size: Int? = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize
+            return Int64(size ?? 0)
+        }
     }
 
     // MARK: Names

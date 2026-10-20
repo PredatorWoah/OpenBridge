@@ -8,7 +8,11 @@ import BridgeCore
 /// What the connect screen says, in every look.
 enum ConnectText {
     @MainActor static func title(_ model: BrowserModel) -> String {
-        if model.connected { return model.fastUSB ? "Connected over Fast USB" : model.overUSB ? "Connected over USB" : "Connected over Wi‑Fi" }
+        if model.connected {
+            if model.fastUSB { return "Connected over Fast USB" }
+            if model.overUSB { return "Connected over USB" }
+            return model.viaHotspot ? "Connected over the phone's hotspot" : "Connected over Wi‑Fi"
+        }
         if model.usbPairable != nil { return "Pair over USB" }
         if model.busy { return model.overUSB ? "Phone found" : "Connecting…" }
         return "Waiting for your phone"
@@ -23,7 +27,16 @@ enum ConnectText {
 
     /// The transport, short: for chips and status lines.
     @MainActor static func transport(_ model: BrowserModel) -> String {
-        model.fastUSB ? "Fast USB" : model.overUSB ? "USB · File transfer" : "Wi‑Fi"
+        if model.fastUSB { return "Fast USB" }
+        if model.overUSB { return "USB · File transfer" }
+        return model.viaHotspot ? "Phone hotspot" : "Wi‑Fi"
+    }
+
+    /// The transport in one or two words, for the menu bar.
+    @MainActor static func shortTransport(_ model: BrowserModel) -> String {
+        if model.fastUSB { return "Fast USB" }
+        if model.overUSB { return "USB" }
+        return model.viaHotspot ? "Phone hotspot" : "Wi‑Fi"
     }
 
     static let allowFastUSB = "USB debugging is on. Allow it for this Mac to use Fast USB: instant search, real folder sizes, resumable copies."

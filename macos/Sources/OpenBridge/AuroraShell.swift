@@ -103,7 +103,7 @@ private struct PhoneTitle: View {
 struct TransportChip: View {
     @ObservedObject var model: BrowserModel
     var body: some View {
-        Label(ConnectText.transport(model), systemImage: model.fastUSB ? "bolt.horizontal" : model.overUSB ? "cable.connector" : "wifi")
+        Label(ConnectText.transport(model), systemImage: model.fastUSB ? "bolt.horizontal" : model.overUSB ? "cable.connector" : model.viaHotspot ? "personalhotspot" : "wifi")
             .font(.system(size: 11, weight: .semibold))
             .padding(.horizontal, 9).padding(.vertical, 3)
             .background(Palette.amber.opacity(0.10), in: Capsule())

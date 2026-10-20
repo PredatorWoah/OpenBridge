@@ -184,7 +184,7 @@ struct DeviceCard: View {
                     Text(model.deviceName).font(.system(size: 18, weight: .bold, design: .rounded)).lineLimit(1)
                     HStack(spacing: 6) {
                         Circle().fill(Palette.ok).frame(width: 7, height: 7).shadow(color: Palette.ok, radius: 4).accessibilityHidden(true)
-                        Text(model.fastUSB ? "Fast USB" : model.overUSB ? "USB · File transfer" : "Wi‑Fi · \(model.host)").foregroundStyle(Palette.muted)
+                        Text(model.fastUSB || model.overUSB ? ConnectText.transport(model) : "\(ConnectText.transport(model)) · \(model.host)").foregroundStyle(Palette.muted)
                     }.font(.system(size: 12.5))
                 }
                 Spacer()
