@@ -24,6 +24,10 @@ public interface Store {
         default long existing() { return 0; }
         /** Publish only after the entire body was received and the output stream closed. */
         void commit() throws IOException;
+        /** After {@link #commit} of a {@link Store#receive}: the name the file was saved under (it may differ from the one sent). */
+        default String savedName() { return null; }
+        /** After {@link #commit} of a {@link Store#receive}: where it was saved, for the platform to open it (a path or URI). */
+        default String savedLocation() { return null; }
         /** Abort deletes partial content. Must also be safe after commit. */
         @Override void close() throws IOException;
     }
@@ -36,6 +40,16 @@ public interface Store {
      * continue later from where it stopped. Stores that can't keep one start over every time.
      */
     default Upload resume(String directoryId, String name, long size, byte[] key) throws IOException { return create(directoryId, name); }
+
+    /**
+     * SEND (23): a file from a computer that didn't choose a folder, into this store's inbox (Download/OpenBridge when
+     * sharing the whole phone, the top of the shared folder otherwise). Like {@link #resume}, but at commit it takes a free
+     * name ("name (1).ext") instead of failing when the name exists, and never replaces a file; the upload then reports
+     * {@link Upload#savedName} and {@link Upload#savedLocation}.
+     */
+    default Upload receive(String name, long size, byte[] key) throws IOException {
+        throw new IOException("This phone can't receive files; update OpenBridge on the phone");
+    }
 
     /** Interrupted uploads nobody continued are removed after this long. */
     long ABANDONED_MILLIS = 7L * 24 * 60 * 60 * 1000;

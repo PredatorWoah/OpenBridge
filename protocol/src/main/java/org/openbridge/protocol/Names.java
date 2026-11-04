@@ -42,6 +42,22 @@ public final class Names {
         } catch (java.security.NoSuchAlgorithmException e) { throw new IllegalStateException(e); }
     }
 
+    /**
+     * The `number`th alternative to `name` when it's taken: "photo (2).jpg" for "photo.jpg" (number 0 is the name
+     * itself). The part before the extension is shortened, at a character boundary, so the result stays within 255
+     * UTF-8 bytes; a result is always a valid filename when `name` is.
+     */
+    public static String numbered(String name, int number) {
+        if (number <= 0) return name;
+        int dot = name.lastIndexOf('.');
+        // An extension is a short tail after a dot that isn't the first character (".bashrc" has none).
+        boolean extension = dot > 0 && name.length() - dot <= 16;
+        String base = extension ? name.substring(0, dot) : name;
+        String tail = " (" + number + ")" + (extension ? name.substring(dot) : "");
+        int room = 255 - tail.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+        return EventLog.cut(base, room).trim() + tail;
+    }
+
     /** Shared storage is case-insensitive, so collisions are compared using this key. */
     public static String collisionKey(String name) { return name.toLowerCase(Locale.ROOT); }
 }

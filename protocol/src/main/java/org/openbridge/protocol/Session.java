@@ -14,11 +14,12 @@ public final class Session {
     private final Pairing.Approver approver;
     private final Clipboard clipboard;
     private final Outbox outbox;
+    private final Companion companion;
     private final SecureRandom random = new SecureRandom();
     private String version = "unknown", device = "Phone";
 
     /** The highest operation number this phone answers, reported by INFO. */
-    public static final int REVISION = 18;
+    public static final int REVISION = 23;
 
     /** A session that only accepts clients that already hold the secret. */
     public Session(Store store, byte[] secret) { this(store, Trust.single(secret), null, null, null); }
@@ -43,7 +44,15 @@ public final class Session {
 
     /** Also hands files sent from the phone to computers that ask (null: OUTBOX requests fail). */
     public Session(Store store, Trust trust, byte[] fingerprint, Pairing.Approver approver, Clipboard clipboard, Outbox outbox) {
-        this.store = store; this.trust = trust; this.approver = approver; this.clipboard = clipboard; this.outbox = outbox;
+        this(store, trust, fingerprint, approver, clipboard, outbox, null);
+    }
+
+    /**
+     * Also answers EVENTS, NOTIFICATION ACTION, RING, OPEN URL and SEND (operations 19 to 23) through `companion`
+     * (null: they answer "Unsupported operation; update OpenBridge on the phone").
+     */
+    public Session(Store store, Trust trust, byte[] fingerprint, Pairing.Approver approver, Clipboard clipboard, Outbox outbox, Companion companion) {
+        this.store = store; this.trust = trust; this.approver = approver; this.clipboard = clipboard; this.outbox = outbox; this.companion = companion;
         this.fingerprint = fingerprint == null ? null : fingerprint.clone();
     }
 
@@ -61,6 +70,11 @@ public final class Session {
     static final int MAX_OUTBOX = 1_000;
     /** How long SEARCH may look before answering with what it found. */
     static final long SEARCH_MILLIS = 8_000;
+    /** The longest notification key NOTIFICATION ACTION takes as its ID (EVENTS keys); other IDs stay at 128 bytes. */
+    static final int MAX_KEY = EventLog.MAX_KEY;
+    static final int MAX_REPLY = 4_096;
+    static final int MAX_URL = 2_048;
+    private static final String UNSUPPORTED = "Unsupported operation; update OpenBridge on the phone";
 
     public void serve(InputStream input, OutputStream output) throws IOException {
         DataInputStream in = new DataInputStream(new BufferedInputStream(input));
@@ -79,9 +93,10 @@ public final class Session {
             }
             byte[] supplied = new byte[32];
             in.readFully(supplied);
-            if (!MessageDigest.isEqual(magic, Wire.MAGIC) || trust.computer(supplied) == null) throw new IOException("Pairing rejected");
+            String computer = MessageDigest.isEqual(magic, Wire.MAGIC) ? trust.computer(supplied) : null;
+            if (computer == null) throw new IOException("Pairing rejected");
             int operation = in.readUnsignedByte();
-            String id = Wire.readString(in, 128);
+            String id = Wire.readString(in, operation == 20 ? MAX_KEY : 128);
             switch (operation) {
                 case 1: {
                     List<Store.Entry> entries = store.list(id);
@@ -281,12 +296,113 @@ public final class Session {
                     Wire.writeString(out, device);
                     break;
                 }
-                default: throw new IOException("Unsupported operation; update OpenBridge on the phone");
+                case 19: {   // EVENTS: what happened after the cursor, waiting up to the given time for something
+                    if (companion == null) throw new IOException(UNSUPPORTED);
+                    if (!id.isEmpty()) throw new IOException("Invalid request");
+                    long cursor = in.readLong();
+                    int wait = in.readInt();
+                    if (wait < 0 || wait > MAX_WAIT_MILLIS) throw new IOException("Invalid wait");
+                    EventLog.Batch batch;
+                    try { batch = companion.events(cursor, wait); }
+                    catch (InterruptedException e) { Thread.currentThread().interrupt(); throw new IOException("Sharing stopped", e); }
+                    if (batch == null || batch.events.size() > EventLog.MAX_EVENTS) throw new IOException("Operation failed");
+                    for (EventLog.Event event : batch.events)
+                        if (event.kind < 0 || event.kind > 255 || event.body.length > EventLog.MAX_BODY) throw new IOException("Operation failed");
+                    out.writeByte(0); responseStarted = true;
+                    out.writeLong(batch.cursor);
+                    out.writeInt(batch.events.size());
+                    for (EventLog.Event event : batch.events) {
+                        out.writeByte(event.kind);
+                        out.writeInt(event.body.length);
+                        out.write(event.body);
+                    }
+                    break;
+                }
+                case 20: {   // NOTIFICATION ACTION: dismiss, or reply with text
+                    if (companion == null) throw new IOException(UNSUPPORTED);
+                    if (id.isEmpty()) throw new IOException("Notification is gone");
+                    int action = in.readUnsignedByte();
+                    if (action == 1) companion.dismiss(id);
+                    else if (action == 2) {
+                        String text = Wire.readString(in, MAX_REPLY);
+                        if (text.isEmpty()) throw new IOException("Type a reply first");
+                        companion.reply(id, text);
+                    } else throw new IOException("Invalid notification action");
+                    out.writeByte(0);
+                    break;
+                }
+                case 21: {   // RING: 1 rings, 0 stops
+                    if (companion == null) throw new IOException(UNSUPPORTED);
+                    if (!id.isEmpty()) throw new IOException("Invalid request");
+                    int ring = in.readUnsignedByte();
+                    if (ring > 1) throw new IOException("Invalid request");
+                    companion.ring(ring == 1);
+                    out.writeByte(0);
+                    break;
+                }
+                case 22: {   // OPEN URL: a notification with the link and the computer's name
+                    if (companion == null) throw new IOException(UNSUPPORTED);
+                    if (!id.isEmpty()) throw new IOException("Invalid request");
+                    String url = Wire.readString(in, MAX_URL);
+                    if (!webLink(url)) throw new IOException("Only http and https links can be opened");
+                    companion.openUrl(url, computer);
+                    out.writeByte(0);
+                    break;
+                }
+                case 23: {   // SEND: like PUT_RESUMABLE into the inbox, under a free name; replies with the name it was saved under
+                    if (companion == null) throw new IOException(UNSUPPORTED);
+                    if (!id.isEmpty()) throw new IOException("Invalid request");
+                    String name = Wire.readString(in, 255);
+                    Wire.validateName(name);
+                    long size = in.readLong();
+                    if (size < 0 || size > Wire.MAX_FILE) throw new IOException("Unsupported file size");
+                    byte[] key = new byte[32];
+                    in.readFully(key);
+                    String saved = null, location = null;
+                    try (Store.Upload upload = store.receive(name, size, key)) {
+                        long have = upload.existing();
+                        if (have < 0 || have > size) throw new IOException("Invalid resume position");
+                        out.writeByte(0); out.writeLong(have); out.flush(); responseStarted = true;
+                        try (OutputStream destination = upload.stream()) {
+                            Wire.copy(in, destination, size - have);
+                        }
+                        try {
+                            upload.commit();
+                            saved = upload.savedName();
+                            location = upload.savedLocation();
+                            if (saved == null) saved = name;
+                            out.writeByte(0);
+                            Wire.writeString(out, EventLog.cut(saved, 255));
+                        } catch (IOException e) { saved = null; error(out, e); }
+                    }
+                    if (saved != null) {
+                        out.flush();
+                        try { companion.received(saved, location, computer); } catch (RuntimeException ignored) { /* the file is saved */ }
+                    }
+                    break;
+                }
+                default: throw new IOException(UNSUPPORTED);
             }
         } catch (IOException | SecurityException e) {
             if (responseStarted) throw new IOException("Transfer interrupted", e);
             error(out, e);
         } finally { out.flush(); }
+    }
+
+    /** An absolute http or https URL with a host, and nothing that could hide what it is (spaces or control characters). */
+    static boolean webLink(String url) {
+        if (url.isEmpty() || url.codePoints().anyMatch(c -> Character.isISOControl(c) || Character.isWhitespace(c) || Character.isSpaceChar(c)
+                || Character.getType(c) == Character.FORMAT)) return false;
+        try {
+            java.net.URI uri = new java.net.URI(url);
+            String scheme = uri.getScheme();
+            if (scheme == null || !(scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https"))) return false;
+            // A name before "@" ("https://bank.com@example.net") is refused: it only serves to disguise the real host.
+            String authority = uri.getRawAuthority();
+            if (authority == null || authority.isEmpty() || authority.indexOf('@') >= 0) return false;
+            // International names (not punycode) leave no host for java.net.URI; the authority is then the host.
+            return uri.getHost() != null ? !uri.getHost().isEmpty() : !authority.startsWith(":");
+        } catch (java.net.URISyntaxException e) { return false; }
     }
 
     private static void error(DataOutputStream out, Exception error) throws IOException {
