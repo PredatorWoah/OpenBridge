@@ -89,6 +89,7 @@ struct RootView: View {
         .preferredColorScheme(.dark)
         .sheet(isPresented: $wifi) { WiFiSheet(model: model, discovery: model.discovery, isPresented: $wifi) }
         .sheet(isPresented: $model.showTexts) { TextsPanel(model: model, history: model.texts) }
+        .sheet(isPresented: $model.showNotifications) { PhoneNotificationsSheet(model: model, feed: model.feed) }
         .overlay(alignment: .topTrailing) {
             if let update = model.update {
                 UpdatePill(update: update, updater: model.updater, busy: model.busy || model.transfer.map { !$0.done } == true)
@@ -96,7 +97,16 @@ struct RootView: View {
             }
         }
         // Toasts show on every screen: texts from the phone arrive whatever is open.
-        .overlay(alignment: .bottom) { Toast(text: model.toast).animation(.easeOut(duration: 0.2), value: model.toast) }
+        .overlay(alignment: .bottom) {
+            VStack(spacing: 8) {
+                Toast(text: model.toast).animation(.easeOut(duration: 0.2), value: model.toast)
+                // The photo backup runs beside everything else; a regular transfer shows its own bar.
+                if model.transfer == nil || model.transfer?.done == true { BackupStrip(model: model).padding(.bottom, 10) }
+            }
+        }
+        // Files opened with OpenBridge (dropped on its Dock icon, Open With) go to the phone, in this window.
+        .onOpenURL { url in if url.isFileURL { PhoneInbox.shared.receive([url]) } }
+        .handlesExternalEvents(preferring: Set(["*"]), allowing: Set(["*"]))
         .onAppear { model.startWatching() }
         .onChange(of: look) { model.grid = BrowserModel.prefersGrid($0) }
         .onChange(of: model.connected) { connected in
@@ -185,6 +195,8 @@ struct DeviceCard: View {
                     HStack(spacing: 6) {
                         Circle().fill(Palette.ok).frame(width: 7, height: 7).shadow(color: Palette.ok, radius: 4).accessibilityHidden(true)
                         Text(model.fastUSB || model.overUSB ? ConnectText.transport(model) : "\(ConnectText.transport(model)) · \(model.host)").foregroundStyle(Palette.muted)
+                            .lineLimit(1)
+                        BatteryBadge(feed: model.feed, size: 12)
                     }.font(.system(size: 12.5))
                 }
                 Spacer()
@@ -201,7 +213,18 @@ struct DeviceCard: View {
                     Button { model.showTexts = true } label: { Label("Texts", systemImage: "text.bubble") }
                         .buttonStyle(GhostButton()).help("Send texts to the phone, and see what it sent")
                 }
+                if model.phoneFeatures {
+                    Button { model.showNotifications = true } label: { Label("Notifications", systemImage: "bell") }
+                        .buttonStyle(GhostButton()).help("The phone's notifications")
+                    Button(action: model.toggleRing) {
+                        Label(model.ringing ? "Stop ringing" : "Ring phone", systemImage: model.ringing ? "bell.slash" : "bell.and.waves.left.and.right")
+                    }
+                    .buttonStyle(GhostButton()).help("Ring the phone at full volume for up to a minute, even on silent")
+                    Button(action: model.chooseFilesToSend) { Label("Send to phone…", systemImage: "arrow.up.doc") }
+                        .buttonStyle(GhostButton()).help("Send files to Download › OpenBridge on the phone")
+                }
             }
+            if !model.phoneOutdated { CompanionHintLine(model: model) }
             if model.overUSB && !model.usbDebugging {
                 Label("Turn on USB debugging for Fast USB: instant search, real folder sizes, resumable copies", systemImage: "bolt.horizontal")
                     .font(.system(size: 12)).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)
@@ -474,6 +497,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+        // Services › Send to Phone with OpenBridge (Info.plist NSServices).
+        NSApp.servicesProvider = PhoneServices.shared
+        NSUpdateDynamicServices()
+    }
+
+    /// Files dropped on the Dock icon, or opened with Open With › OpenBridge: sent to the phone, or kept until one
+    /// is connected.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        let files: [URL] = urls.filter { $0.isFileURL }
+        guard !files.isEmpty else { return }
+        Task { @MainActor in PhoneInbox.shared.receive(files) }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
@@ -503,6 +537,8 @@ struct OpenBridgeApp: App {
         WindowGroup(id: MainWindow.id) { RootView(model: model) }
             .windowStyle(.hiddenTitleBar)
             .defaultSize(width: 980, height: 660)
+            // Files opened with OpenBridge go to the phone; they never open another window.
+            .handlesExternalEvents(matching: Set<String>())
         Window("Phone Screen", id: "mirror") { MirrorView() }
             .windowStyle(.hiddenTitleBar)
             .defaultSize(width: 380, height: 780)

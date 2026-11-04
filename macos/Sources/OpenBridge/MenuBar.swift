@@ -18,8 +18,14 @@ struct MenuBarIcon: View {
 
     /// The ring's progress while a transfer runs, in steps of half a percent so the image isn't redrawn for nothing.
     @MainActor static func ring(_ model: BrowserModel) -> Double? {
-        guard let transfer = model.transfer, !transfer.done, model.busy else { return nil }
-        let overall: Double = TransferProgress.overall(transfer)
+        let overall: Double
+        if let transfer = model.transfer, !transfer.done, model.busy {
+            overall = TransferProgress.overall(transfer)
+        } else if let backup = model.backup {
+            overall = backup.overall   // the photo backup, when no other transfer runs
+        } else {
+            return nil
+        }
         let steps: Double = 200
         return (overall * steps).rounded() / steps
     }
@@ -101,14 +107,14 @@ struct MenuBarPanel: View {
     /// The panel follows the look chosen in Settings.
     @ObservedObject private var looks = LookStore.shared
 
-    static let width: CGFloat = 300
+    static let width: CGFloat = 320
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
         VStack(alignment: .leading, spacing: 12) {
             PhoneLine(model: model)
             if let transfer = model.transfer, !transfer.done {
-                Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1)
+                divider
                 if Screenshots.active {
                     TransferLines(model: model, transfer: transfer, now: Date())
                 } else {
@@ -117,7 +123,18 @@ struct MenuBarPanel: View {
                     }
                 }
             }
-            Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1)
+            if let backup = model.backup {
+                divider
+                if Screenshots.active {
+                    BackupLines(model: model, backup: backup)
+                } else {
+                    TimelineView(.periodic(from: Date(), by: 1)) { timeline in
+                        BackupLines(model: model, backup: backup, now: timeline.date)
+                    }
+                }
+            }
+            phoneFeatures
+            divider
             PanelActions(model: model, open: open)
         }
         .padding(14)
@@ -129,6 +146,28 @@ struct MenuBarPanel: View {
         .foregroundStyle(Palette.look.colors.fg.color())
         .environment(\.colorScheme, .dark)
         .id(looks.look)
+    }
+
+    private var divider: some View { Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1) }
+
+    /// Notifications, Ring phone, Send link and the drop zone for a phone from 1.2.0; the drop zone alone otherwise
+    /// (files wait for the phone), and the update hint once.
+    @ViewBuilder private var phoneFeatures: some View {
+        if model.phoneFeatures {
+            if model.feed.showOnMac {
+                divider
+                PanelNotifications(model: model, feed: model.feed, open: open)
+            }
+            divider
+            PanelPhoneActions(model: model)
+        } else if !model.connected || !model.pendingSends.isEmpty {
+            divider
+            SendDropZone(model: model)
+        }
+        if model.companionHint {
+            divider
+            CompanionHintLine(model: model)
+        }
     }
 }
 
@@ -163,6 +202,7 @@ private struct PhoneLine: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .layoutPriority(1)
+            if model.connected { BatteryBadge(feed: model.feed) }
         }
         .accessibilityElement(children: .combine)
     }
@@ -281,9 +321,11 @@ private struct PanelActions: View {
 }
 
 /// A compact button in the look's colours: the accent gradient for the main one, glass for the others.
-private struct PanelButton: ButtonStyle {
+struct PanelButton: ButtonStyle {
     var prominent = false
     @Environment(\.isEnabled) private var enabled
+
+    init(prominent: Bool = false) { self.prominent = prominent }
 
     func makeBody(configuration: Configuration) -> some View {
         let pressed: Bool = configuration.isPressed

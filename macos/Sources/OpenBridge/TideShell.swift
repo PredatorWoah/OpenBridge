@@ -144,6 +144,7 @@ private struct SurfaceBar: View {
                 ResultsButton(model: model)
                 DepthPath(model: model)
                 Spacer(minLength: 8)
+                if !compact { BatteryBadge(feed: model.feed, size: 11.5) }
                 SearchBox(model: model, searching: searching, width: compact ? 140 : 180, radius: 99)
                 SortMenu(model: model)
                 ViewToggle(model: model)

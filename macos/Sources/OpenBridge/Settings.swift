@@ -25,6 +25,18 @@ struct SettingsView: View {
                 Text("While connected over Wi‑Fi or Fast USB. Passwords copied from password managers are never sent.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            PhoneNotificationSettings(feed: model.feed)
+            Section {
+                if model.saved.isEmpty {
+                    Text("Pair a phone first.").foregroundStyle(.secondary)
+                }
+                ForEach(model.saved) { phone in BackupRow(model: model, phone: phone) }
+            } header: {
+                Text("Photo backup")
+            } footer: {
+                Text("New photos and videos from the camera are copied when the phone connects over Wi‑Fi or Fast USB, then every 10 minutes while it stays connected. Photos imported before are skipped, and nothing is ever replaced.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
             Section("Updates") {
                 HStack {
                     Button(checking ? "Checking…" : "Check for Updates") { check() }.disabled(checking)
@@ -71,6 +83,55 @@ struct SettingsView: View {
             await model.checkForUpdates()
             checking = false; checked = true
         }
+    }
+}
+
+/// Phone notifications: shown on this Mac or not, and with sound.
+private struct PhoneNotificationSettings: View {
+    @ObservedObject var feed: PhoneFeed
+
+    var body: some View {
+        Section("Phone notifications") {
+            Toggle("Show phone notifications on this Mac", isOn: $feed.showOnMac)
+            Toggle("Play sound", isOn: $feed.playSound).disabled(!feed.showOnMac)
+            Text("From phones with OpenBridge 1.2 or later, while connected over Wi‑Fi or Fast USB, once Notifications on computers is on in OpenBridge on the phone.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+/// One saved phone's photo backup: on or off, and the folder.
+private struct BackupRow: View {
+    @ObservedObject var model: BrowserModel
+    let phone: SavedPhone
+    @State private var enabled = false
+    @State private var folder: URL?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle(isOn: $enabled) {
+                Text("Back up new photos from \(phone.name) automatically").lineLimit(1).truncationMode(.middle)
+            }
+            .onChange(of: enabled) { BackupSettings.setEnabled($0, for: phone.id) }
+            HStack(spacing: 8) {
+                Image(systemName: "folder").foregroundStyle(.secondary).accessibilityHidden(true)
+                Text(shownPath).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                Spacer(minLength: 8)
+                Button("Change…") { if let chosen = BackupSettings.choose(for: phone) { folder = chosen } }
+                if model.currentID == phone.id {
+                    Button("Back Up Now", action: model.backUpNow).disabled(model.backup != nil)
+                }
+            }
+        }
+        .onAppear {
+            enabled = BackupSettings.enabled(phone.id)
+            folder = BackupSettings.folder(for: phone)
+        }
+    }
+
+    private var shownPath: String {
+        let path: String = (folder ?? BackupSettings.folder(for: phone)).path
+        return path.replacingOccurrences(of: NSHomeDirectory(), with: "~")
     }
 }
 
