@@ -689,6 +689,9 @@ public final class ProtocolTest {
         phone.post(wide, "App", "T", "", false, "");
         check(serve(session, simple(20, wide, out -> out.writeByte(1))).readByte() == 0 && phone.dismissed.contains(wide), "Keys up to 256 bytes work as the ID");
         check(error(serve(session, simple(20, "w".repeat(257), out -> out.writeByte(1)))).length() > 0, "Longer IDs are refused");
+        for (int op : new int[] {1, 19, 21, 22, 23})
+            check(error(serve(session, simple(op, "w".repeat(129), out -> {}))).equals("Invalid string length"), "Other operations keep the 128-byte ID limit: " + op);
+        check(error(serve(session, simple(20, "w".repeat(129), out -> out.writeByte(1)))).contains("gone"), "A 129-byte key is read as one, then looked up");
         long before = events(session, 0, 0).cursor;
         check(serve(session, simple(20, key, out -> out.writeByte(1))).readByte() == 0 && phone.dismissed.contains(key), "Dismiss");
         check(events(session, before, 0).kinds.equals(List.of(EventLog.REMOVED)), "A dismissed notification is REMOVED");
