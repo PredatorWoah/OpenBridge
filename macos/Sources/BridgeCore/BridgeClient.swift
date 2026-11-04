@@ -71,7 +71,7 @@ public struct BridgeClient {
         self.host = testHost; self.port = port; self.fingerprint = fingerprint; self.secret = secret
     }
 
-    private func open(operation: UInt8, id: String, extra: Data = Data(), connectTimeout: TimeInterval = 30) async throws -> TLSChannel {
+    func open(operation: UInt8, id: String, extra: Data = Data(), connectTimeout: TimeInterval = 30) async throws -> TLSChannel {
         let channel = TLSChannel(host: host, port: port, fingerprint: fingerprint)
         do {
             try await channel.connect(timeout: connectTimeout)
@@ -377,8 +377,11 @@ public struct BridgeClient {
         return Data(hasher.finalize())
     }
 
-    private func send(_ source: URL, operation: UInt8, directoryID: String, header: Data, size: Int64, resumable: Bool,
-                      progress: @MainActor (Int64, Int64) -> Void) async throws {
+    /// Sends a file after `header`. With `named`, the phone follows the final status with the name it saved the file
+    /// under (SEND, 23), which is returned.
+    @discardableResult
+    func send(_ source: URL, operation: UInt8, directoryID: String, header: Data, size: Int64, resumable: Bool,
+              named: Bool = false, progress: @MainActor (Int64, Int64) -> Void) async throws -> String? {
         let file = try FileHandle(forReadingFrom: source)
         defer { try? file.close() }
         let channel = try await open(operation: operation, id: directoryID)
@@ -404,5 +407,9 @@ public struct BridgeClient {
         }
         // A completed send is not success until Android confirms publication.
         try await channel.status()
+        guard named else { return nil }
+        let saved: String = try await channel.string(limit: 255)
+        try Wire.validateName(saved)
+        return saved
     }
 }

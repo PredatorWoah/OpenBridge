@@ -119,6 +119,21 @@ public enum Wire {
         return base + suffix
     }
 
+    /// A Mac file name as the phone accepts it (Send to phone): characters Android's storage refuses
+    /// (`" * : < > ? |`, slashes, control characters) become "_", a leading `.openbridge-part-` loses its dot, and it's
+    /// cut to 255 bytes keeping the extension. The phone then picks a free name; it never renames a refused one.
+    public static func phoneName(_ name: String) -> String {
+        let refused: Set<Character> = ["\"", "*", ":", "<", ">", "?", "|", "/", "\\"]
+        let mapped: [Character] = name.map { (character: Character) -> Character in
+            let control: Bool = character.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) }
+            return refused.contains(character) || control ? "_" : character
+        }
+        var clean: String = String(mapped).trimmingCharacters(in: .whitespaces)
+        if clean.hasPrefix(".openbridge-part-") { clean.removeFirst() }
+        if clean.isEmpty || clean == "." || clean == ".." { clean = "File" }
+        return fitted(clean)
+    }
+
     public static func validateName(_ name: String) throws {
         guard !name.isEmpty, name != ".", name != "..", name.utf8.count <= 255,
               !name.contains("/"), !name.contains("\\"),
