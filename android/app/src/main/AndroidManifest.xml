@@ -18,6 +18,14 @@
         tools:targetApi="33" />
     <!-- Update in the app: Android's installer still asks the user and checks the signing key. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Notifications on computers: the names and icons of apps that show notifications, for the Apps list. Only apps
+         with a launcher entry, never every installed package. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
     <application android:allowBackup="false" android:fullBackupContent="false"
         android:dataExtractionRules="@xml/data_extraction_rules" tools:targetApi="31"
         android:label="OpenBridge"
@@ -50,6 +58,21 @@
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection" />
         <receiver android:name=".UpdateReceiver" android:exported="false" />
         <service android:name=".ShareService" android:exported="false" android:foregroundServiceType="dataSync" />
+        <!-- Notifications on computers (off by default): Android binds it only after the user allows notification access
+             in its settings, and OpenBridge sends nothing unless the switch in Settings is on too. -->
+        <service android:name=".NotificationMirror" android:exported="true" android:label="OpenBridge"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+        <!-- Stop on the "looking for this phone" notification. -->
+        <receiver android:name=".AlertReceiver" android:exported="false" />
+        <!-- Opens a file a computer sent to Download/OpenBridge in another app, with read access to that file only. -->
+        <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.files"
+            android:exported="false" android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/received_files" />
+        </provider>
         <service android:name=".ClipboardTile" android:exported="true" android:label="@string/send_clipboard"
             android:icon="@drawable/ic_tile_clipboard" android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
             <intent-filter>

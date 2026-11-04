@@ -79,6 +79,8 @@ interface Actions {
     fun copy(text: String, sensitive: Boolean = false)
     fun sendClipboard()
     fun copyDiagnostics()
+    /** Android's notification access screen, for Notifications on computers. */
+    fun notificationAccess()
 }
 
 /** The main screen: the hero to share, where computers reach the phone, and cards for computers, sending and texts. */

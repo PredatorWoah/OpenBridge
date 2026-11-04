@@ -89,6 +89,7 @@ object Sharing {
         PhoneOutbox.attach(app)
         Texts.attach(app)
         Hotspot.attach(app)
+        PhoneCompanion.attach(app)
         PhoneOutbox.onCollected = { _ -> main.post {
             if (PhoneOutbox.waiting.isEmpty()) android.widget.Toast.makeText(app, S.sentTo(computer), android.widget.Toast.LENGTH_SHORT).show()
             if (note?.let { it == lastWaitingNote } == true) note = null
@@ -257,7 +258,8 @@ object Sharing {
             try {
                 val store = if (shareAll) {
                     if (!AllFiles.granted(app)) error(S.allFilesOff)
-                    FileStore(AllFiles.roots(app), { file, size -> Thumbs.ofFile(file, size) }, MediaIndex(app))
+                    // Files sent with Send to phone land in Download/OpenBridge.
+                    FileStore(AllFiles.roots(app), { file, size -> Thumbs.ofFile(file, size) }, MediaIndex(app)).inbox("Download", "OpenBridge")
                 } else {
                     val root = DocumentFile.fromTreeUri(app, selected!!) ?: error(S.chooseFolderAgain)
                     SafStore(app.contentResolver, root)

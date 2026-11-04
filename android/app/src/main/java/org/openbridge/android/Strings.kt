@@ -156,6 +156,42 @@ object S {
         else t("Text from $computer copied", "已复制来自 $computer 的文字")
     val channelTexts get() = t("Texts from computers", "来自电脑的文字")
 
+    // Notifications on computers
+    val notificationsOnComputers get() = t("Notifications on computers", "电脑上的通知")
+    val mirrorTitle get() = t("Show this phone's notifications on computers", "在电脑上显示这部手机的通知")
+    val mirrorOff get() = t("Off. Paired computers see only the battery.", "已关闭。已配对的电脑只能看到电量。")
+    val mirrorOn get() = t("Paired computers show new notifications and can answer or dismiss them.", "已配对的电脑会显示新通知，并可以回复或清除。")
+    val mirrorNeedsAccess get() = t("Allow notification access for OpenBridge to turn this on.", "请为 OpenBridge 开启“通知使用权”，才能打开此功能。")
+    val mirrorExplain get() = t("Notifications go only to computers you paired, over the same encrypted connection as your files, and aren't stored on the phone. Ongoing ones (music, navigation) are left out, and so are apps you turn off below.",
+        "通知只会通过与文件相同的加密连接发送到你配对过的电脑，不会保存在手机上。持续显示的通知（音乐、导航）不会发送，下面关闭的应用也不会发送。")
+    val accessAllowed get() = t("Notification access: allowed", "通知使用权：已允许")
+    val accessMissing get() = t("Notification access: not allowed", "通知使用权：未允许")
+    val notificationAccess get() = t("Notification access settings", "通知使用权设置")
+    val mirrorApps get() = t("Apps", "应用")
+    fun mirrorAppsSummary(off: Int, seen: Int) = when {
+        seen == 0 -> t("Apps appear here once they show a notification.", "应用显示过通知后会出现在这里。")
+        off == 0 -> t("All $seen apps are shown on computers", "全部 $seen 个应用都会显示在电脑上")
+        else -> t("$off of $seen apps are left out", "$seen 个应用中有 $off 个不显示")
+    }
+    fun showApp(app: String) = t("Show $app notifications on computers", "在电脑上显示 $app 的通知")
+
+    // Ring, links and files from computers
+    val channelRing get() = t("Find my phone", "查找手机")
+    val ringTitle get() = t("Your computer is looking for this phone", "电脑正在查找这部手机")
+    val ringText get() = t("Tap Stop to silence it.", "点“停止”即可静音。")
+    val stop get() = t("Stop", "停止")
+    val channelLinks get() = t("Links from computers", "来自电脑的链接")
+    fun linkFrom(computer: String?) = if (computer == null || computer == "Computer") t("Link from your computer", "来自电脑的链接")
+        else t("Link from $computer", "来自 $computer 的链接")
+    val channelReceived get() = t("Files from computers", "来自电脑的文件")
+    fun receivedFrom(name: String, computer: String?) = if (computer == null || computer == "Computer") t("Received $name", "已收到 $name")
+        else t("Received $name from $computer", "已收到来自 $computer 的 $name")
+    fun receivedCount(count: Int) = t(if (count == 1) "1 file received" else "$count files received", "已收到 $count 个文件")
+    val tapToOpen get() = t("Tap to open", "点一下打开")
+    val savedInDownloads get() = t("Saved in Download/OpenBridge", "已保存到 Download/OpenBridge")
+    val savedInFolder get() = t("Saved in the shared folder", "已保存到共享的文件夹")
+    val cantOpen get() = t("No app on this phone can open that.", "这部手机上没有能打开它的应用。")
+
     // Shared controls
     val expand get() = t("Expand", "展开")
     val collapse get() = t("Collapse", "收起")

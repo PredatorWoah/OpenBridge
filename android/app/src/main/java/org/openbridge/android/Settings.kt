@@ -1,6 +1,13 @@
 package org.openbridge.android
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.core.graphics.drawable.toBitmap
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -53,6 +60,9 @@ fun ColumnScope.SettingsContent(actions: Actions) {
     }
     if (sharing) Text(S.stopToChange, color = Palette.muted, fontSize = 13.sp)
     ToggleRow(S.keepInBackground, if (Sharing.inBackground) S.backgroundOn else S.backgroundOff, Sharing.inBackground, Sharing::keepInBackground)
+
+    SectionTitle(S.notificationsOnComputers)
+    NotificationsPanel(actions)
 
     SectionTitle(S.phoneHotspot)
     HotspotPanel(actions)
@@ -141,6 +151,57 @@ private fun ChoiceTile(title: String, detail: String, selected: Boolean, enabled
         }
         Spacer(Modifier.height(3.dp))
         Text(detail, color = Palette.muted, fontSize = 12.5.sp, maxLines = 3)
+    }
+}
+
+/**
+ * Notifications on computers: the switch (which asks for Android's notification access when it's missing), whether
+ * access is allowed, and the apps whose notifications computers see.
+ */
+@Composable
+private fun NotificationsPanel(actions: Actions) {
+    var appsOpen by rememberSaveable { mutableStateOf(false) }
+    val on = Mirror.enabled && Mirror.access
+    ToggleRow(S.mirrorTitle, when {
+        Mirror.enabled && !Mirror.access -> S.mirrorNeedsAccess
+        on -> S.mirrorOn
+        else -> S.mirrorOff
+    }, on, { enable ->
+        Mirror.enable(enable)
+        if (enable && !Mirror.access) actions.notificationAccess()
+    })
+    Text(S.mirrorExplain, color = Palette.muted, fontSize = 13.sp)
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(if (Mirror.access) S.accessAllowed else S.accessMissing, color = if (Mirror.access) Palette.ok else Palette.muted, fontSize = 13.sp,
+            modifier = Modifier.weight(1f))
+        SmallAction(S.notificationAccess, actions::notificationAccess)
+    }
+    if (Mirror.enabled) {
+        val apps = Mirror.seen.sortedBy { Mirror.label(it).lowercase() }
+        ExpandableCard(S.mirrorApps, S.mirrorAppsSummary(apps.count { it in Mirror.excluded }, apps.size), appsOpen, { appsOpen = !appsOpen }) {
+            for (app in apps) AppRow(app)
+        }
+    }
+}
+
+/** One app in the Apps list: its icon and name, and whether its notifications go to computers. */
+@Composable
+private fun AppRow(packageName: String) {
+    val label = remember(packageName) { Mirror.label(packageName) }
+    val icon = remember(packageName) {
+        runCatching { Mirror.icon(packageName)?.toBitmap(96, 96)?.asImageBitmap() }.getOrNull()
+    }
+    val shown = packageName !in Mirror.excluded
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp)
+        .toggleable(shown, role = Role.Checkbox) { Mirror.include(packageName, it) }
+        .semantics { contentDescription = S.showApp(label) }
+        .padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (icon != null) Image(icon, contentDescription = null, modifier = Modifier.size(32.dp).clip(RoundedCornerShape(8.dp)))
+        else Box(Modifier.size(32.dp).clip(RoundedCornerShape(8.dp)).background(Palette.fg.copy(alpha = 0.1f)))
+        Spacer(Modifier.width(12.dp))
+        Text(label, color = Palette.fg, fontSize = 14.sp, modifier = Modifier.weight(1f), maxLines = 1)
+        Checkbox(shown, onCheckedChange = null, colors = CheckboxDefaults.colors(checkedColor = Palette.pink, uncheckedColor = Palette.muted,
+            checkmarkColor = Palette.cream))
     }
 }
 

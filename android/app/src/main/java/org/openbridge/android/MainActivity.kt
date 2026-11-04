@@ -69,6 +69,7 @@ class MainActivity : ComponentActivity(), Actions {
         super.onResume()
         model.onScreen = true
         model.wholePhoneResult()
+        Mirror.refreshAccess()
         Updater.resumed(this)
     }
 
@@ -161,6 +162,11 @@ class MainActivity : ComponentActivity(), Actions {
     }
 
     override fun copyDiagnostics() = copy(Log.report(this))
+
+    override fun notificationAccess() {
+        runCatching { startActivity(Mirror.accessSettings()) }
+            .onFailure { runCatching { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) } }
+    }
 
     private fun granted(permission: String) = checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
 }
