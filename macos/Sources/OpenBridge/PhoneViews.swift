@@ -311,19 +311,26 @@ struct SendDropZone: View {
     /// The file URLs in dropped items, delivered on the main actor.
     static func load(_ providers: [NSItemProvider], then deliver: @escaping @MainActor ([URL]) -> Void) {
         let group = DispatchGroup()
-        let lock = NSLock()
-        var urls: [URL] = []
+        let found = Collected()
         for provider in providers {
             group.enter()
             _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                if let url, url.isFileURL { lock.lock(); urls.append(url); lock.unlock() }
+                if let url, url.isFileURL { found.add(url) }
                 group.leave()
             }
         }
         group.notify(queue: .main) {
-            let found: [URL] = urls
-            Task { @MainActor in deliver(found) }
+            let urls: [URL] = found.all
+            Task { @MainActor in deliver(urls) }
         }
+    }
+
+    /// URLs collected from several loading threads.
+    private final class Collected: @unchecked Sendable {
+        private let lock = NSLock()
+        private var urls: [URL] = []
+        func add(_ url: URL) { lock.lock(); urls.append(url); lock.unlock() }
+        var all: [URL] { lock.lock(); defer { lock.unlock() }; return urls }
     }
 }
 
@@ -342,8 +349,10 @@ struct BackupLines: View {
                 Text("\(backup.index) of \(backup.count)").font(.system(size: 11.5)).foregroundStyle(Palette.muted)
                     .monospacedDigit().lineLimit(1).fixedSize()
             }
-            ProgressView(value: backup.overall).tint(Palette.amber)
+            PanelProgressBar(fraction: backup.overall)
+                .accessibilityElement()
                 .accessibilityLabel("Photo backup progress")
+                .accessibilityValue("\(Int(backup.overall * 100)) percent")
             HStack(spacing: 8) {
                 Text(backup.name).lineLimit(1).truncationMode(.middle)
                 Spacer(minLength: 4)

@@ -274,7 +274,7 @@ private struct TransferLines: View {
 }
 
 /// A slim bar in the look's gradient, gliding between progress reports.
-private struct PanelProgressBar: View {
+struct PanelProgressBar: View {
     let fraction: Double
 
     var body: some View {
