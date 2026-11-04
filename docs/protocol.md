@@ -128,7 +128,7 @@ Notifications are sent only while the user has turned on **Notifications on comp
 
 ## NOTIFICATION ACTION (20)
 
-ID is a notification key from EVENTS. After the common header, send an action byte: `1` dismiss, or `2` reply followed by the text (string, 1 to 4,096 bytes). Reply: status. Fails when the notification is gone, can't be answered, or notifications on computers are off.
+ID is a notification key from EVENTS; for this operation only, the Document ID may be up to 256 bytes. After the common header, send an action byte: `1` dismiss, or `2` reply followed by the text (string, 1 to 4,096 bytes). Reply: status. Fails when the notification is gone, can't be answered, or notifications on computers are off.
 
 ## RING (21)
 
