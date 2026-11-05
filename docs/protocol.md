@@ -39,7 +39,7 @@ Scanning is the user's approval, so the phone shows no code to confirm; it says 
 
 Reference vector: with `F`, `Nm` and `Np` filled with the bytes `01`, `02` and `03`, the commitment is `8ef8a25a…9b356` and the code is `520380`.
 
-OBP3 reference vector: with `K` the 16 bytes `04` (`k=BAQEBAQEBAQEBAQEBAQEBA` in the code) and `F`, `Nm` and `Np` filled with the bytes `01`, `02` and `03`, `Ps` is `aa955a6147859395f4e5c691978f1bd5956f86fff65b5b16a308c8ab7cd718e9` and `Pc` is `d0cefd86bda6b8324bfacfe9e84f88d0cac0f0ac1e70cb808b4efa4a549c698e`. The code `openbridge://pair?k=BAQEBAQEBAQEBAQEBAQEBA&n=Maya%27s%20MacBook%20Pro` names "Maya's MacBook Pro".
+OBP3 reference vector: with `K` the 16 bytes `00` to `0f` and `F`, `Nm` and `Np` filled with the bytes `01`, `02` and `03`, `Ps` is `3a0bac9b999778f24e7aee72417ec7de8b211b4a76de2af63c3d4570a9f5585d` and `Pc` is `3d8f513260fbb3245d86903c5e06f23003c55c21f2afbc3988490133bc86819d`; the code for that `K` and "Aditya's MacBook Air" is `openbridge://pair?k=AAECAwQFBgcICQoLDA0ODw&n=Aditya%27s%20MacBook%20Air`.
 
 ## LIST (1)
 

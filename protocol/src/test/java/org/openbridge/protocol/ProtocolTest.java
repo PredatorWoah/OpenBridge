@@ -845,6 +845,14 @@ public final class ProtocolTest {
         byte[] computerNonce = new byte[32]; Arrays.fill(computerNonce, (byte) 2);
         byte[] phoneNonce = new byte[32]; Arrays.fill(phoneNonce, (byte) 3);
         // Reference vector in docs/protocol.md, shared with the computer apps.
+        byte[] counting = new byte[16]; for (int i = 0; i < 16; i++) counting[i] = (byte) i;
+        check(HexFormat.of().formatHex(Pairing.phoneProof(counting, fingerprint, computerNonce, phoneNonce))
+            .equals("3a0bac9b999778f24e7aee72417ec7de8b211b4a76de2af63c3d4570a9f5585d"), "Phone proof vector (docs)");
+        check(HexFormat.of().formatHex(Pairing.computerProof(counting, fingerprint, computerNonce, phoneNonce))
+            .equals("3d8f513260fbb3245d86903c5e06f23003c55c21f2afbc3988490133bc86819d"), "Computer proof vector (docs)");
+        QrPairing.Code documented = QrPairing.parse("openbridge://pair?k=AAECAwQFBgcICQoLDA0ODw&n=Aditya%27s%20MacBook%20Air");
+        check(Arrays.equals(documented.key, counting) && documented.computer.equals("Aditya's MacBook Air"), "Code vector (docs)");
+        // A second vector, with a constant key.
         check(HexFormat.of().formatHex(Pairing.phoneProof(key, fingerprint, computerNonce, phoneNonce))
             .equals("aa955a6147859395f4e5c691978f1bd5956f86fff65b5b16a308c8ab7cd718e9"), "Phone proof vector");
         check(HexFormat.of().formatHex(Pairing.computerProof(key, fingerprint, computerNonce, phoneNonce))
