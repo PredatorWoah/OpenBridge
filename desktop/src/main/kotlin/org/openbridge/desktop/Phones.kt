@@ -17,6 +17,27 @@ data class SavedPhone(val name: String, val fingerprint: ByteArray, val host: St
     override fun hashCode() = fingerprint.contentHashCode()
 }
 
+/** Photo backup: a folder for each saved phone that backs up its new photos by itself (by the phone's ID). */
+object Backups {
+    private val preferences = java.util.prefs.Preferences.userRoot().node("org/openbridge/backups")
+
+    fun load(): Map<String, String> =
+        runCatching { preferences.keys().associateWith { preferences.get(it, "") }.filterValues { it.isNotEmpty() } }.getOrDefault(emptyMap())
+
+    fun save(folders: Map<String, String>) {
+        runCatching {
+            preferences.keys().filter { it !in folders }.forEach(preferences::remove)
+            folders.forEach { (id, path) -> preferences.put(id, path) }
+        }
+    }
+
+    /** Pictures/OpenBridge/<phone>, with characters a folder name can't have replaced. */
+    fun defaultFolder(phone: String): File {
+        val name = phone.replace(Regex("""[\\/:*?"<>|\p{Cntrl}]"""), "_").trim().trim('.').ifEmpty { "Phone" }.take(80)
+        return File(File(Platform.pictures, "OpenBridge"), name)
+    }
+}
+
 /** Where photos are imported to, and which ones were imported from each phone (imported-<id>.txt in the data folder). */
 object Imports {
     private val preferences = java.util.prefs.Preferences.userRoot().node("org/openbridge")

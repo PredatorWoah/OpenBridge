@@ -35,28 +35,44 @@ import java.io.File
 import javax.swing.JOptionPane
 import javax.swing.UIManager
 
-fun main() {
+fun main(args: Array<String>) {
+    // Files on the command line (Send to, Open With) go to the phone. With OpenBridge already running, they're
+    // handed to it and this copy ends.
+    val paths = args.filter { !it.startsWith("-") }
+    var delivered: ((List<File>) -> Unit)? = null
+    val early = java.util.Collections.synchronizedList(ArrayList<File>())
+    val handoff = Handoff()
+    if (!handoff.claim(paths) { files -> javax.swing.SwingUtilities.invokeLater { delivered?.invoke(files) ?: early.addAll(files) } }) return
     runCatching { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()) }
     Palette.look = AppState.rememberedLook()
     val state = AppState()
     state.start()
+    early += paths.map(::File).filter { it.exists() }
     application {
         val window = rememberWindowState(size = DpSize(1060.dp, 700.dp))
         val searchFocus = remember { FocusRequester() }
         var main by remember { mutableStateOf<java.awt.Window?>(null) }
-        // The tray's status and menu; "Open OpenBridge" brings this window back to the front.
-        StatusTray(state) {
+        val front = {
             window.isMinimized = false
             main?.apply { isVisible = true; toFront(); requestFocus() }
         }
+        // Files from a second launch: to the phone, and the window to the front.
+        SideEffect {
+            state.bringToFront = { front() }
+            delivered = { files -> front(); if (files.isNotEmpty()) state.sendToPhone(files) }
+        }
+        LaunchedEffect(Unit) { if (early.isNotEmpty()) { val files = early.toList(); early.clear(); state.sendToPhone(files) } }
+        // The tray's status and menu; "Open OpenBridge" brings this window back to the front.
+        StatusTray(state) { front() }
         Window(onCloseRequest = ::exitApplication, title = "OpenBridge", state = window, icon = painterResource("icon.png"),
             onKeyEvent = { shortcut(state, it, searchFocus) }) {   // after the focused field, so typing in search never triggers these
             SideEffect { main = this.window }
             var dropping by remember { mutableStateOf(false) }
             DisposableEffect(Unit) {
-                // Files dragged from the file manager upload into the open phone folder.
+                // Files dragged from the file manager upload into the open phone folder; over the phone's sheet, or
+                // with no phone open, they're sent to the phone (Download/OpenBridge), waiting for it if need be.
                 this@Window.window.contentPane.dropTarget = DropTarget(this@Window.window.contentPane, DnDConstants.ACTION_COPY, object : DropTargetAdapter() {
-                    override fun dragEnter(event: DropTargetDragEvent) { dropping = state.source != null }
+                    override fun dragEnter(event: DropTargetDragEvent) { dropping = true }
                     override fun dragExit(event: DropTargetEvent) { dropping = false }
                     override fun drop(event: DropTargetDropEvent) {
                         dropping = false
@@ -64,7 +80,8 @@ fun main() {
                         @Suppress("UNCHECKED_CAST")
                         val files = runCatching { event.transferable.getTransferData(DataFlavor.javaFileListFlavor) as List<File> }.getOrNull()
                         event.dropComplete(files != null)
-                        if (files != null && state.source != null) state.upload(files)
+                        if (files == null) return
+                        if (state.source == null || state.panel == Panel.NOTIFICATIONS) state.sendToPhone(files) else state.upload(files)
                     }
                 })
                 onDispose { }
@@ -137,18 +154,21 @@ fun App(state: AppState, dropping: Boolean, searchFocus: FocusRequester) {
     // rises a little to meet files dragged over the window.
     val progress = state.transfer?.takeIf { !it.done }?.let(::overallProgress) ?: 0f
     val level = if (dropping && connected) maxOf(progress, 0.16f) else progress
+    // Files dropped over the phone's sheet go to the phone, not into the open folder.
+    val intoFolder = dropping && state.panel != Panel.NOTIFICATIONS
     Backdrop(Modifier.fillMaxSize(), energy = if (connected || state.pairingCode != null) 1f else 0f, level = level, still = Platform.reduceMotion) {
         Crossfade(look, animationSpec = tween(if (Platform.reduceMotion) 0 else 450)) { shown ->
             when (shown) {
-                Look.DUSK -> DuskShell(state, dropping, searchFocus)
-                Look.AURORA -> AuroraShell(state, dropping, searchFocus)
-                Look.TIDE -> TideShell(state, dropping, searchFocus)
+                Look.DUSK -> DuskShell(state, intoFolder, searchFocus)
+                Look.AURORA -> AuroraShell(state, intoFolder, searchFocus)
+                Look.TIDE -> TideShell(state, intoFolder, searchFocus)
             }
         }
         // Pairing with another phone from a shell's switcher, while one is open: the code to compare.
         if (connected && state.pairingCode != null) PairingCard(state, Modifier.align(Alignment.Center))
         when (state.panel) {
             Panel.TEXTS -> TextsPanel(state)
+            Panel.NOTIFICATIONS -> NotificationsPanel(state, dropping)
             Panel.SETTINGS -> SettingsPanel(state) {
                 SystemClipboard.put(diagnostics(state))
                 state.show(S.diagnosticsCopied)

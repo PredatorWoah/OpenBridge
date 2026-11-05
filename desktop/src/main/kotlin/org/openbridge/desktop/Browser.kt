@@ -464,6 +464,12 @@ fun MoreButton(state: AppState, compact: Boolean = false, withUpload: Boolean = 
                 DropdownMenuItem({ close(); state.openReceived() }) { Text(S.openReceived) }
                 DropdownMenuItem({ close(); state.sendClipboard() }) { Text(S.sendClipboard) }
                 DropdownMenuItem({ close(); state.fetchClipboard() }) { Text(S.getClipboard) }
+                DropdownMenuItem({ close(); state.panel = Panel.NOTIFICATIONS }) { Text(S.phoneNotifications) }
+            }
+            if (state.companion) {
+                DropdownMenuItem({ close(); state.ring() }) { Text(if (state.ringing) S.stopRinging else S.ringPhone) }
+                DropdownMenuItem({ close(); state.sendToPhone(Dialogs.chooseUploads()) }) { Text(S.sendFiles) }
+                DropdownMenuItem({ close(); state.clipboardLink()?.let { state.sendLink(it) } ?: run { state.panel = Panel.NOTIFICATIONS } }) { Text(S.sendLink) }
             }
             DropdownMenuItem({ close(); state.refresh() }, enabled = idle) { Text(S.refresh) }
             if (state.transport == Transport.USB && Platform.windows) DropdownMenuItem({ close(); Platform.openThisPc() }) { Text(S.openExplorer) }
