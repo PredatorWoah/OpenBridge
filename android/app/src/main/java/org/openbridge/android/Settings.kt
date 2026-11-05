@@ -411,7 +411,7 @@ fun HotspotPage(model: AppModel, actions: Actions, padding: PaddingValues, onBac
                 PrimaryButton(S.openHotspotSettings, actions::hotspotSettings, Modifier.fillMaxWidth(), icon = Icons.Rounded.OpenInNew)
             }
             if (hotspot.supported) {
-                SectionLabel(S.temporaryHotspot)
+                SectionLabel(S.temporaryHotspotTitle)
                 Column(Modifier.fillMaxWidth().glass().padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     Text(S.temporaryHotspotExplain, style = Type.body, color = Palette.muted)
                     SecondaryButton(if (hotspot.starting) S.starting else S.temporaryHotspot, { actions.hotspot(true) }, Modifier.fillMaxWidth(),
@@ -451,7 +451,7 @@ fun HelpPage(model: AppModel, actions: Actions, padding: PaddingValues, onBack: 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconBadge(Icons.Rounded.BugReport, Palette.amber)
                 Spacer(Modifier.width(14.dp))
-                Text(S.help, style = Type.headline, color = Palette.fg)
+                Text(S.diagnostics, style = Type.headline, color = Palette.fg)
             }
             Text(S.diagnosticsDetail, style = Type.body, color = Palette.muted)
             SecondaryButton(S.copyDiagnostics, actions::copyDiagnostics, Modifier.fillMaxWidth(), icon = Icons.Rounded.ContentCopy)

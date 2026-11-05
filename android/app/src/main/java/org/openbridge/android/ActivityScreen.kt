@@ -230,3 +230,8 @@ fun ago(time: Long, now: Long): String {
     }
 }
 
+
+/** For a list without day headings (Texts): ago today, otherwise the day and the time. */
+fun stamp(time: Long, now: Long): String =
+    if (startOfDay(time) == startOfDay(now)) ago(time, now)
+    else "${dayLabel(time, now)} · ${DateFormat.getTimeInstance(DateFormat.SHORT, Locale.getDefault()).format(Date(time))}"

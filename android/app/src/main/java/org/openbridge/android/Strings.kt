@@ -301,19 +301,24 @@ object S {
     val open get() = t("Open", "打开")
     val swipeToRemove get() = t("Swipe a row away to remove it", "滑动一行即可移除")
     val remove get() = t("Remove", "移除")
-    private fun who(computer: String?) = computer ?: t("your computer", "电脑")
-    private fun whoFirst(computer: String?) = computer ?: t("Your computer", "电脑")
+    private fun who(computer: String?) = computer ?: "your computer"
+    private fun whoFirst(computer: String?) = computer ?: "Your computer"
+    /** Chinese around a computer's name: a space on each side of a Latin name, none around "电脑". */
+    private fun zh(before: String, computer: String?, after: String) =
+        if (computer == null) "${before}电脑$after" else "$before $computer $after".trim()
     fun eventFileSent(name: String) = t("Sent $name", "已发送 $name")
     fun eventFileReceived(name: String) = t("Received $name", "已收到 $name")
-    fun eventTo(computer: String?) = t("To ${who(computer)}", "发到${who(computer)}")
-    fun eventFrom(computer: String?) = t("From ${who(computer)}", "来自${who(computer)}")
+    fun eventTo(computer: String?) = t("To ${who(computer)}", zh("发到", computer, ""))
+    fun eventFrom(computer: String?) = t("From ${who(computer)}", zh("来自", computer, ""))
     val eventTextSent get() = t("Text sent", "已发送文字")
-    fun eventTextReceived(computer: String?) = t("Text from ${who(computer)}", "来自${who(computer)}的文字")
-    fun eventLink(computer: String?) = t("Link from ${who(computer)}", "来自${who(computer)}的链接")
-    fun eventPaired(computer: String?) = t("Paired with ${who(computer)}", "已与${who(computer)}配对")
+    fun eventTextReceived(computer: String?) = t("Text from ${who(computer)}", zh("来自", computer, "的文字"))
+    fun eventLink(computer: String?) = t("Link from ${who(computer)}", zh("来自", computer, "的链接"))
+    fun eventPaired(computer: String?) = t("Paired with ${who(computer)}", zh("已与", computer, "配对"))
     val eventPairedDetail get() = t("It reconnects without a code from now on.", "以后无需验证码即可重新连接。")
-    fun eventConnected(computer: String?) = t("${whoFirst(computer)} connected", "${whoFirst(computer)}已连接")
-    fun eventRing(computer: String?) = t("${whoFirst(computer)} looked for this phone", "${whoFirst(computer)}查找了这部手机")
+    fun eventConnected(computer: String?) = t("${whoFirst(computer)} connected", zh("", computer, "已连接"))
+    fun eventRing(computer: String?) = t("${whoFirst(computer)} looked for this phone", zh("", computer, "查找了这部手机"))
+    val diagnostics get() = t("Diagnostics", "诊断信息")
+    val temporaryHotspotTitle get() = t("Temporary hotspot", "临时热点")
     val eventRingDetail get() = t("Find my phone", "查找手机")
 
     // Texts

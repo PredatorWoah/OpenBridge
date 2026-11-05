@@ -108,7 +108,7 @@ private fun Bubble(entry: Texts.Entry, now: Long, actions: Actions, modifier: Mo
                         Text(S.copied, style = Type.caption.copy(fontWeight = FontWeight.Bold), color = Palette.ok, modifier = Modifier.padding(start = 3.dp, end = 8.dp))
                     }
                 }
-                Text(ago(entry.time, now), style = Type.caption, color = Palette.muted)
+                Text(stamp(entry.time, now), style = Type.caption, color = Palette.muted)
             }
         }
     }
