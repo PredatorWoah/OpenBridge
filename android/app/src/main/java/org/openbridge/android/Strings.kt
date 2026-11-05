@@ -40,7 +40,7 @@ object S {
     fun waitingItems(files: Int, texts: Int) = when {
         texts == 0 -> t(if (files == 1) "1 file waiting" else "$files files waiting", "$files 个文件等待发送")
         files == 0 -> t(if (texts == 1) "1 text waiting" else "$texts texts waiting", "$texts 段文字等待发送")
-        else -> t("$files files and $texts texts waiting", "$files 个文件和 $texts 段文字等待发送")
+        else -> t("${if (files == 1) "1 file" else "$files files"} and ${if (texts == 1) "1 text" else "$texts texts"} waiting", "$files 个文件和 $texts 段文字等待发送")
     }
     val aText get() = t("Text", "文字")
     fun andMore(count: Int) = t("and $count more", "还有 $count 项")
@@ -261,4 +261,86 @@ object S {
     val hotspotFailed get() = t("Couldn't start the hotspot. Try again in a moment.", "无法开启热点，请稍后再试。")
     val hotspotPermission get() = t("Allow Nearby devices for OpenBridge to start the hotspot (it doesn't use your location).",
         "请允许 OpenBridge 使用“附近的设备”权限来开启热点（不会使用你的位置）。")
+
+    // Navigation
+    val tabHome get() = t("Home", "首页")
+    val tabActivity get() = t("Activity", "动态")
+    val tabTexts get() = t("Texts", "文字")
+    val back get() = t("Back", "返回")
+    fun newItems(count: Int) = t(if (count == 1) "1 new" else "$count new", "$count 条新动态")
+
+    // Home
+    val heroTitle get() = t("Share with your computer", "与电脑共享")
+    val heroDetail get() = t("Your computer finds this phone over Wi‑Fi, a USB cable or the phone's hotspot.",
+        "电脑可以通过 Wi‑Fi、USB 数据线或手机热点找到这部手机。")
+    val whereToFind get() = t("Where your computer finds this phone", "电脑在这里找到这部手机")
+    fun copyAddress(host: String, port: Int) = t("Copy $host port $port", "复制 $host 端口 $port")
+    val quickActions get() = t("Send to computer", "发送到电脑")
+    val sendFiles get() = t("Send files", "发送文件")
+    val writeText get() = t("Write a text", "写文字")
+    val recentActivity get() = t("Recent activity", "最近动态")
+    val seeAll get() = t("See all", "查看全部")
+    val waitingToSend get() = t("Waiting to send", "等待发送")
+    val connectedHeadline get() = t("Connected", "已连接")
+    val sharingHeadline get() = t("Sharing", "正在共享")
+    val shareWhat get() = t("What to share", "共享内容")
+    val sharingStatus get() = t("Sharing status", "共享状态")
+
+    // Activity
+    val activityEmpty get() = t("Nothing here yet", "还没有动态")
+    val activityEmptyDetail get() = t("Files, texts and links that move between this phone and your computers show up here.",
+        "在这部手机和电脑之间传送的文件、文字和链接会显示在这里。")
+    val clearAll get() = t("Clear all", "全部清除")
+    val clearActivity get() = t("Clear all activity", "清除所有动态")
+    val today get() = t("Today", "今天")
+    val yesterday get() = t("Yesterday", "昨天")
+    val justNow get() = t("Just now", "刚刚")
+    fun minutesAgo(minutes: Long) = t("$minutes min ago", "$minutes 分钟前")
+    fun hoursAgo(hours: Long) = t("$hours h ago", "$hours 小时前")
+    val sendingNow get() = t("Sending now", "正在发送")
+    val open get() = t("Open", "打开")
+    val swipeToRemove get() = t("Swipe a row away to remove it", "滑动一行即可移除")
+    val remove get() = t("Remove", "移除")
+    private fun who(computer: String?) = computer ?: t("your computer", "电脑")
+    private fun whoFirst(computer: String?) = computer ?: t("Your computer", "电脑")
+    fun eventFileSent(name: String) = t("Sent $name", "已发送 $name")
+    fun eventFileReceived(name: String) = t("Received $name", "已收到 $name")
+    fun eventTo(computer: String?) = t("To ${who(computer)}", "发到${who(computer)}")
+    fun eventFrom(computer: String?) = t("From ${who(computer)}", "来自${who(computer)}")
+    val eventTextSent get() = t("Text sent", "已发送文字")
+    fun eventTextReceived(computer: String?) = t("Text from ${who(computer)}", "来自${who(computer)}的文字")
+    fun eventLink(computer: String?) = t("Link from ${who(computer)}", "来自${who(computer)}的链接")
+    fun eventPaired(computer: String?) = t("Paired with ${who(computer)}", "已与${who(computer)}配对")
+    val eventPairedDetail get() = t("It reconnects without a code from now on.", "以后无需验证码即可重新连接。")
+    fun eventConnected(computer: String?) = t("${whoFirst(computer)} connected", "${whoFirst(computer)}已连接")
+    fun eventRing(computer: String?) = t("${whoFirst(computer)} looked for this phone", "${whoFirst(computer)}查找了这部手机")
+    val eventRingDetail get() = t("Find my phone", "查找手机")
+
+    // Texts
+    val textsEmpty get() = t("No texts yet", "还没有文字")
+    val tapToCopy get() = t("Tap a text to copy it", "点一下文字即可复制")
+    fun textsWaiting(count: Int) = t(if (count == 1) "1 text is waiting for your computer" else "$count texts are waiting for your computer",
+        "$count 段文字正在等待电脑")
+    val you get() = t("You", "你")
+    fun copyText(text: String) = t("Copy: $text", "复制：$text")
+
+    // Settings
+    val groupSharing get() = t("Sharing", "共享")
+    val groupComputers get() = t("Computers", "电脑")
+    val groupApp get() = t("App", "应用")
+    val helpDiagnostics get() = t("Help & diagnostics", "帮助与诊断")
+    val helpDiagnosticsDetail get() = t("Cables, diagnostics and about", "数据线、诊断信息和关于")
+    val on get() = t("On", "开")
+    val off get() = t("Off", "关")
+    val searchApps get() = t("Search apps", "搜索应用")
+    val noAppsMatch get() = t("No apps match", "没有匹配的应用")
+    val lookHint get() = t("Colours, the background and the share button change together.", "颜色、背景和共享按钮会一起改变。")
+    fun version(version: String) = t("Version $version", "版本 $version")
+    val hotspotSummaryOff get() = t("For Wi‑Fi that keeps devices apart", "适用于隔离设备的 Wi‑Fi")
+    fun hotspotSummaryOn(name: String) = t("On · $name", "已开启 · $name")
+    val notificationsSummaryNeedsAccess get() = t("Needs notification access", "需要通知使用权")
+    val selected get() = t("Selected", "已选择")
+    val pairingRequest get() = t("Pairing request", "配对请求")
+    val inBackground get() = t("In the background too", "后台也共享")
+    fun sharesShort(what: String) = t("Sharing: $what", "正在共享：$what")
 }

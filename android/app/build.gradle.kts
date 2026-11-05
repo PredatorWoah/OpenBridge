@@ -46,7 +46,10 @@ android {
     }
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // R8 shrinks and optimises the app and its libraries; proguard-rules.pro keeps what Android reaches by name.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             if (releaseKeystore != null) signingConfig = signingConfigs.getByName("release")
         }
     }
@@ -58,13 +61,37 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
+    // Screenshot tests draw every screen on the JVM (Robolectric's native graphics), so no device or emulator is needed.
+    // `-PscreenshotsDir=…` puts the pictures somewhere else than build/screenshots.
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+            all { test ->
+                test.systemProperty("robolectric.graphicsMode", "NATIVE")
+                test.systemProperty("roborazzi.test.record", "true")
+                test.systemProperty("screenshots.dir", providers.gradleProperty("screenshotsDir")
+                    .getOrElse(layout.buildDirectory.dir("screenshots").get().asFile.path))
+                test.maxHeapSize = "3g"
+            }
+        }
+    }
 }
 dependencies {
     implementation(project(":protocol"))
     implementation(platform("androidx.compose:compose-bom:2025.04.01"))
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.material:material-icons-core")
+    implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.documentfile:documentfile:1.0.1")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.0")
+    // Installs the baseline profile (src/main/baseline-prof.txt), so the startup path is compiled ahead of time.
+    implementation("androidx.profileinstaller:profileinstaller:1.4.1")
+
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi:1.40.1")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi-compose:1.40.1")
+    testImplementation(platform("androidx.compose:compose-bom:2025.04.01"))
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
