@@ -212,7 +212,7 @@ fun TrayPhone(state: AppState, dropping: Boolean) {
     var link by remember { mutableStateOf("") }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         TrayButton(if (state.ringing) S.stopRinging else S.ringPhone, modifier = Modifier.weight(1f)) { state.ring() }
-        TrayButton(S.sendLink, modifier = Modifier.weight(1f)) {
+        TrayButton(S.sendLinkShort, modifier = Modifier.weight(1f)) {
             val copied = state.clipboardLink()
             if (copied != null) state.sendLink(copied) else editing = !editing
         }

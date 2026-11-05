@@ -272,6 +272,7 @@ object S {
     val stopRinging = t("Stop ringing", "停止响铃")
     val ringingNow = t("The phone rings for up to a minute, even on silent.", "手机会响铃最多一分钟，静音时也会响。")
     val sendLink = t("Send link to phone", "把链接发到手机")
+    val sendLinkShort = t("Send link", "发送链接")
     val pasteLink = t("Paste a web link", "粘贴网页链接")
     val linkSent = t("Sent. Tap the notification on the phone to open it.", "已发送。在手机上点通知即可打开。")
     val notALink = t("Enter a web link that starts with http:// or https://.", "请输入以 http:// 或 https:// 开头的网页链接。")
