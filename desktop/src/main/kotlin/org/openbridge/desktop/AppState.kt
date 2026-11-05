@@ -472,6 +472,7 @@ class AppState {
         ui {
             if (source !== phone) return@ui
             phoneInfo = info; phoneOutdated = outdated
+            info?.name?.let(::adoptPhoneName)
             if (companion) startEvents(phone)
             else if (!preferences.getBoolean("companionHintShown", false)) {
                 // Once: what updating the phone app brings.
@@ -790,6 +791,22 @@ class AppState {
     private fun remember(phone: SavedPhone) {
         saved = listOf(phone) + saved.filter { it != phone }
         runCatching { Phones.save(saved) }
+    }
+
+    /**
+     * A phone saved under a stand-in name (found at the hotspot's gateway, or paired by address) takes the name it
+     * reports, like "vivo X300 Pro". A name the phone gave when pairing stays.
+     */
+    private fun adoptPhoneName(name: String) {
+        val real = name.trim()
+        val phone = current ?: return
+        val placeholder = phone.name == S.hotspotPhone || phone.name == S.phone || phone.name.startsWith("Phone at ")
+        if (real.isEmpty() || !placeholder || phone.name == real) return
+        val renamed = phone.copy(name = real)
+        current = renamed; deviceName = real
+        saved = saved.map { if (it.id == phone.id) renamed else it }
+        runCatching { Phones.save(saved) }
+        Log.add("Saved the phone under its own name")
     }
 
     fun forgetPhone(phone: SavedPhone) {
