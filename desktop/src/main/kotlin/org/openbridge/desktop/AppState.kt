@@ -749,8 +749,9 @@ class AppState {
         flushSends()
     }
 
+    // A dot name is hidden on Linux and macOS but not on Windows, where only the attribute counts: skip both everywhere.
     private fun filesIn(file: File): List<File> = when {
-        file.isHidden -> emptyList()
+        file.isHidden || file.name.startsWith(".") -> emptyList()
         file.isDirectory -> file.listFiles()?.sortedBy { it.name }?.flatMap(::filesIn).orEmpty()
         file.isFile -> listOf(file)
         else -> emptyList()
