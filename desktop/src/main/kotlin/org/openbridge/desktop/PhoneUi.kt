@@ -178,6 +178,7 @@ fun NotificationsPanel(state: AppState, dropping: Boolean) {
                 MiniIcon(Icons.Filled.Link, S.sendLink, 34.dp, tint = Palette.amber) { state.sendLink(link) { link = "" } }
             }
         }
+        NowPlayingCard(state)
         DropZone(S.dropToSend(state.deviceName), dropping) {
             MiniIcon(Icons.Filled.AttachFile, S.sendFiles.trimEnd('…'), 30.dp) { state.sendToPhone(Dialogs.chooseUploads()) }
         }
@@ -210,6 +211,7 @@ fun TrayPhone(state: AppState, dropping: Boolean) {
     }
     var editing by remember { mutableStateOf(false) }
     var link by remember { mutableStateOf("") }
+    NowPlayingCard(state)
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         TrayButton(if (state.ringing) S.stopRinging else S.ringPhone, modifier = Modifier.weight(1f)) { state.ring() }
         TrayButton(S.sendLinkShort, modifier = Modifier.weight(1f)) {

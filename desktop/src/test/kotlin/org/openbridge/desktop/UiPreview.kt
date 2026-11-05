@@ -162,6 +162,43 @@ class UiPreview {
         Palette.look = Look.DUSK
     }
 
+    /** Now playing in the tray's status window, the phone's sheet and the main window, with names long enough to shorten. */
+    @Test fun media() {
+        val out = File(System.getenv("PREVIEW_DIR") ?: return).apply { mkdirs() }
+        val language = java.util.Locale.getDefault().language
+        val client = BridgeClient("127.0.0.1", 1, ByteArray(32), ByteArray(32), Transport.FAST_USB)
+        val now = System.currentTimeMillis()
+        val songs = listOf(
+            "long" to PhoneMedia("YouTube Music", "Symphony No. 9 in D minor, Op. 125 \"Choral\": IV. Presto – Allegro assai (Live at the Royal Albert Hall, 2026 remaster)",
+                "Berliner Philharmoniker, Herbert von Karajan, Wiener Singverein, Gundula Janowitz", 1_472_000, 512_000, PhoneMedia.State.PLAYING, 15, now),
+            "zh" to PhoneMedia("网易云音乐", "晴天（周杰伦 2003 年专辑《叶惠美》中的经典歌曲，现场版完整收录）", "周杰伦", 269_000, 61_000, PhoneMedia.State.PAUSED, 7, now),
+        )
+        for (look in Look.entries) {
+            Palette.look = look
+            for ((name, song) in songs) {
+                val state = AppState().apply {
+                    source = client; transport = Transport.WIFI; deviceName = "vivo X300 Pro"
+                    phoneInfo = PhoneInfo("1.3.0", 24, deviceName)
+                    phoneStatus = NotificationList(emptyList(), Battery(64, true), song)
+                    entries = listOf(Entry("1", "DCIM", true, 0), Entry("2", "Music", true, 0), Entry("3", "VID_20261018_220000.mp4", false, 812_000_000))
+                    grid = false
+                }
+                render(out, "media-$language-${look.id}-$name-browser", state)
+                if (name == "long") render(out, "media-$language-${look.id}-$name-compact", state, width = 740, height = 500)
+                state.panel = Panel.NOTIFICATIONS
+                render(out, "media-$language-${look.id}-$name-sheet", state)
+                val status = trayStatus(state)
+                val scene = ImageComposeScene(360, 520, Density(1f)) {
+                    androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.padding(20.dp)) { StatusCard(status, {}, {}, {}) { TrayPhone(state, false) } }
+                }
+                for (frame in 0 until 10) scene.render(frame * 100_000_000L)
+                File(out, "media-$language-${look.id}-$name-tray.png").writeBytes(scene.render(2_000_000_000).encodeToData(EncodedImageFormat.PNG)!!.bytes)
+                scene.close()
+            }
+        }
+        Palette.look = Look.DUSK
+    }
+
     /** Notifications, battery and the phone's actions, with texts long enough that every row must shorten. */
     @Test fun phone() {
         val out = File(System.getenv("PREVIEW_DIR") ?: return).apply { mkdirs() }

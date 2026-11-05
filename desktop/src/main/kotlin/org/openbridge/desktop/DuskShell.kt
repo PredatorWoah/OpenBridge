@@ -51,6 +51,7 @@ private fun DuskBrowser(state: AppState, dropping: Boolean, searchFocus: FocusRe
             }
         }
         ErrorLine(state, Modifier.padding(horizontal = 18.dp, vertical = 4.dp))
+        NowPlayingBar(state, Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = if (state.transfer == null) 12.dp else 0.dp))
         state.transfer?.let { TransferBar(state, it) }
     }
 }

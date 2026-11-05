@@ -317,6 +317,17 @@ object S {
     val qrNew = t("New code", "换一个")
     val qrDescription = t("QR code for pairing with OpenBridge on your phone", "供手机 OpenBridge 扫描配对的二维码")
     fun qrPaired(name: String) = t("Paired with $name", "已与 $name 配对")
+    // What plays on the phone, and playing the phone's videos and music here (1.3.0)
+    val nowPlaying = t("Now playing", "正在播放")
+    val play = t("Play", "播放")
+    val pause = t("Pause", "暂停")
+    val previousTrack = t("Previous", "上一首")
+    val nextTrack = t("Next", "下一首")
+    val openInVlc = t("Open in VLC", "用 VLC 打开")
+    val playHint = t("Plays in your browser straight from the phone, without saving a copy.", "直接从手机在浏览器中播放，无需先保存副本。")
+    fun playing(name: String) = t("Playing $name in the browser", "正在浏览器中播放 $name")
+    val playFailed = t("Couldn't start playing. Details are in the diagnostics.", "无法开始播放，详情见诊断信息。")
+
     fun qrOld(names: String) = t("$names has an older OpenBridge. Close the code and click it to pair with a 6-digit code.",
         "$names 上的 OpenBridge 版本较旧。请关闭二维码，然后点击它用 6 位数字配对。")
 }

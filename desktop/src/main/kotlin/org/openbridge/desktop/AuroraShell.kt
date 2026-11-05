@@ -79,6 +79,7 @@ private fun AuroraBrowser(state: AppState, dropping: Boolean, searchFocus: Focus
                 }
             }
             ErrorLine(state, Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
+            NowPlayingBar(state, Modifier.padding(start = 14.dp, end = 14.dp, bottom = 12.dp))
         }
     }
 }

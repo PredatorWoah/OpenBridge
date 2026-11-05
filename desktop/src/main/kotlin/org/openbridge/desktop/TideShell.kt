@@ -76,6 +76,7 @@ private fun TideBrowser(state: AppState, dropping: Boolean, searchFocus: FocusRe
             SurfaceBar(state, searchFocus, compact)
             if (state.update != null || state.updating != null) Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 2.dp), horizontalArrangement = Arrangement.End) { UpdatePill(state) }
             state.phoneOutdated?.let { Hint(it, Icons.Filled.SystemUpdate, Modifier.padding(horizontal = 18.dp, vertical = 4.dp)) { state.dismissOutdated() } }
+            NowPlayingBar(state, Modifier.padding(start = 18.dp, end = 18.dp, top = 2.dp))
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 FileArea(state, Look.TIDE, Modifier.fillMaxSize(), PaddingValues(start = 18.dp, end = 18.dp, top = 12.dp, bottom = if (docked) 112.dp else 24.dp))
             }
