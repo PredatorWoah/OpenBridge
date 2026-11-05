@@ -25,6 +25,11 @@ dependencies {
     implementation("net.java.dev.jna:jna-platform:5.14.0")
     // The QR code for pairing (pure Java).
     implementation("com.google.zxing:core:3.5.3")
+    // Linux: the phone's player on D-Bus (MPRIS), for the desktop's media keys and widgets. Pure Java, over the JDK's
+    // own Unix sockets; about half a megabyte. Its logging goes nowhere.
+    implementation("com.github.hypfvieh:dbus-java-core:5.1.1")
+    implementation("com.github.hypfvieh:dbus-java-transport-native-unixsocket:5.1.1")
+    runtimeOnly("org.slf4j:slf4j-nop:2.0.16")
     testImplementation(kotlin("test"))
 }
 

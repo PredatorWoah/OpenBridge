@@ -259,6 +259,8 @@ class AppState {
                 }
             }
         }
+        // Linux: the phone's player on the session bus, for the desktop's media keys and sound menu.
+        Mpris({ media }, { action, at -> ui { mediaAction(action, at) } }, { ui { bringToFront() } }).start()
         // Forwards to the phone end with the app; so does the adb server, if this app started it.
         Runtime.getRuntime().addShutdownHook(Thread {
             quitting = true
