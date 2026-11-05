@@ -108,13 +108,15 @@ fun NotificationRow(n: PhoneNotification, compact: Boolean, onCopy: (String) -> 
     val body = n.text.replace('\n', ' ').trim()
     Column(modifier.fillMaxWidth().rowSurface().padding(horizontal = if (compact) 10.dp else 12.dp, vertical = if (compact) 6.dp else 8.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            val line = buildAnnotatedString {
-                withStyle(SpanStyle(color = Palette.fg, fontWeight = FontWeight.SemiBold)) { append(heading) }
-                if (body.isNotEmpty()) withStyle(SpanStyle(color = Palette.muted)) { append("  "); append(body) }
+        Row(Modifier.heightIn(min = if (compact) 24.dp else 28.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            // The app and title take at most part of the line, so some of the text always shows.
+            val size = if (compact) 12.5.sp else 13.sp
+            Row(Modifier.weight(1f).semantics(mergeDescendants = true) { contentDescription = "$heading. $body" }, verticalAlignment = Alignment.CenterVertically) {
+                Text(heading, color = Palette.fg, fontWeight = FontWeight.SemiBold, fontSize = size, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(max = if (compact) 120.dp else 170.dp))
+                if (body.isNotEmpty()) Text(body, color = Palette.muted, fontSize = size, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(start = 8.dp).weight(1f))
             }
-            Text(line, fontSize = if (compact) 12.5.sp else 13.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f).semantics { contentDescription = "$heading. $body" })
             if (!compact) Text(DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(n.time)), color = Palette.muted, fontSize = 11.sp, maxLines = 1, softWrap = false)
             if (n.code.isNotEmpty()) {
                 Row(Modifier.clip(CircleShape).background(Palette.amber.copy(alpha = 0.2f)).pressable(CircleShape, label = S.copyCode) { onCopy(n.code) }
