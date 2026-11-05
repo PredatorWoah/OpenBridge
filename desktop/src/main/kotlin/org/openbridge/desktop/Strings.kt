@@ -305,4 +305,18 @@ object S {
     val chooseBackupFolder = t("Choose where to back up photos", "选择照片的备份位置")
     fun backedUp(count: Int, name: String) = t(if (count == 1) "Backed up 1 new photo or video from $name" else "Backed up $count new photos and videos from $name",
         "已从 $name 备份 $count 个新照片和视频")
+
+    // Pairing by QR code (1.3.0)
+    val pairWithQr = t("Pair with QR code", "扫码配对")
+    val qrTitle = t("Scan with your phone", "用手机扫一扫")
+    val qrHint = t("Open OpenBridge on your phone and scan this code. It pairs at once: there's no code to compare.",
+        "在手机上打开 OpenBridge 扫描此二维码，即可直接配对，无需核对数字。")
+    val qrWaiting = t("Waiting for your phone to scan…", "等待手机扫码…")
+    fun qrExpiresIn(seconds: Long) = "%d:%02d".format(seconds / 60, seconds % 60).let { t("Expires in $it", "$it 后失效") }
+    val qrExpired = t("This code has expired.", "此二维码已失效。")
+    val qrNew = t("New code", "换一个")
+    val qrDescription = t("QR code for pairing with OpenBridge on your phone", "供手机 OpenBridge 扫描配对的二维码")
+    fun qrPaired(name: String) = t("Paired with $name", "已与 $name 配对")
+    fun qrOld(names: String) = t("$names has an older OpenBridge. Close the code and click it to pair with a 6-digit code.",
+        "$names 上的 OpenBridge 版本较旧。请关闭二维码，然后点击它用 6 位数字配对。")
 }

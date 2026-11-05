@@ -63,9 +63,14 @@ fun ConnectScreen(state: AppState) {
             Column(Modifier.weight(1f).fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("OpenBridge", color = Palette.fg, fontSize = 30.sp, fontWeight = FontWeight.Bold, modifier = Modifier.semantics { heading() })
                 Text(S.tagline, color = Palette.muted, fontSize = 14.sp, textAlign = TextAlign.Center)
-                Hero(active = true, connected = state.pairingCode != null, modifier = Modifier.weight(1f).fillMaxWidth())
-                Text(S.waiting, color = Palette.fg, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                Text(S.waitingHint, color = Palette.muted, fontSize = 13.5.sp, textAlign = TextAlign.Center)
+                if (state.qr != null) BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    QrCard(state, minOf(maxHeight - 190.dp, maxWidth - 80.dp))
+                } else {
+                    Hero(active = true, connected = state.pairingCode != null, modifier = Modifier.weight(1f).fillMaxWidth())
+                    Text(S.waiting, color = Palette.fg, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                    Text(S.waitingHint, color = Palette.muted, fontSize = 13.5.sp, textAlign = TextAlign.Center)
+                    QrButton(state, Modifier.padding(top = 10.dp))
+                }
             }
             Column(Modifier.width(430.dp).fillMaxHeight().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 if (state.saved.isNotEmpty()) SavedPhones(state)

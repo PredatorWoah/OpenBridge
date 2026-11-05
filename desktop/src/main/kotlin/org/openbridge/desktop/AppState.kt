@@ -345,6 +345,7 @@ class AppState {
     // Connecting
 
     fun pair(name: String? = null) {
+        closeQr()
         // Accept "192.168.1.23:41987" pasted into the address field.
         val typed = host.trim()
         if (typed.count { it == ':' } == 1 && port.isBlank()) { host = typed.substringBefore(':'); port = typed.substringAfter(':') }
@@ -365,6 +366,7 @@ class AppState {
     /** Pairs with a phone on the cable through its Fast USB tunnel: the same 6-digit comparison as over Wi‑Fi. */
     fun pairOverUsb(link: UsbLink) {
         if (busy) return
+        closeQr()
         pairingOver = link.serial
         run {
             ui { status = S.pairing }
@@ -379,6 +381,83 @@ class AppState {
                 seen?.port?.toIntOrNull() ?: 41987, paired.secret)
             ui { remember(phone) }
             opened(paired, Transport.FAST_USB, phone.name, phone.id, phone, top, link.serial)
+        }
+    }
+
+    // Pairing by QR code (1.3.0)
+
+    /** The QR code on screen, while pairing that way. */
+    var qr by mutableStateOf<QrCode?>(null); internal set
+    /** The phone that just paired by QR code, while the success plays before it opens. */
+    var qrPaired by mutableStateOf<String?>(null); internal set
+    /** Phones that answered the code like a phone before 1.3.0: they pair with the 6-digit code. */
+    var qrOld by mutableStateOf(emptyList<String>()); internal set
+    /** Changes whenever the code goes or is replaced, so an earlier search stops. */
+    @Volatile private var qrToken = 0
+
+    /**
+     * Shows a fresh QR code (a new key each time) and looks for the phone that scans it, until it pairs, the code
+     * expires or it's closed. Old phones still pair by clicking them (the 6-digit code).
+     */
+    fun showQr() {
+        if (busy || source != null) return
+        val code = QrCode.fresh()
+        val token = ++qrToken
+        qr = code; qrPaired = null; qrOld = emptyList(); error = null
+        Log.add("Showing a QR code for pairing")
+        daemon("openbridge-qr") { lookForScanner(code, token) }
+    }
+
+    fun closeQr() { qrToken++; qr = null; qrPaired = null; qrOld = emptyList() }
+
+    /**
+     * Tries every place a phone may answer (announced, the gateway, Fast USB) with the code's key, about every two
+     * seconds, until one pairs. A phone that hasn't scanned says so at once; one whose proof is wrong (it scanned
+     * another computer's code) is skipped quietly.
+     */
+    private fun lookForScanner(code: QrCode, token: Int) {
+        while (qrToken == token && !code.expired(System.currentTimeMillis())) {
+            if (busy || source != null) { Thread.sleep(500); continue }
+            for (target in qrTargets(nearby, Network.gateway(), usbLinks)) {
+                if (qrToken != token || code.expired(System.currentTimeMillis())) return
+                if (target.transport == Transport.WIFI && !BridgeClient.reachable(target.host, target.port, 800)) continue
+                val answer = try { BridgeClient.pairByQr(target.host, target.port, code.key, target.transport, timeout = 3_000) }
+                    catch (e: Exception) { if (e.message == S.pairingTampered) Log.add("QR pairing: a phone at ${target.transport.english} proved another key"); continue }
+                when (answer) {
+                    is QrAnswer.NotYet -> if (answer.old) {
+                        val name = target.name ?: S.phone
+                        ui { if (qrToken == token && name !in qrOld) qrOld = qrOld + name }
+                    }
+                    is QrAnswer.Paired -> { Log.add("Paired by QR code over ${target.transport.english}"); ui { qrSucceeded(answer.client, target, token) }; return }
+                }
+            }
+            Thread.sleep(1_500)
+        }
+    }
+
+    /** The phone that scanned the code paired: it's saved like any other, the success shows a moment, then it opens. */
+    private fun qrSucceeded(client: BridgeClient, target: QrTarget, token: Int) {
+        if (qrToken != token) return
+        qrToken++   // nothing else is tried with this code: the phone has forgotten its key
+        val id = client.fingerprint.take(8).joinToString("") { "%02x".format(it) }
+        val seen = nearby.firstOrNull { it.id == id }
+        // Over the cable, its Wi‑Fi address (if it's announcing one) for when the cable comes out.
+        val wifi = target.transport == Transport.WIFI
+        val first = SavedPhone(target.name ?: seen?.name ?: "${S.phone} ${client.host}", client.fingerprint, if (wifi) client.host else seen?.host ?: "",
+            if (wifi) client.port else seen?.port?.toIntOrNull() ?: 41987, client.secret)
+        // Saved at once, so it's kept (and reconnects by itself) whatever happens next.
+        remember(first)
+        qrPaired = first.name
+        if (busy) { qr = null; qrPaired = null; return }
+        run {
+            try {
+                val top = client.list()
+                val name = runCatching { client.info() }.getOrNull()?.name?.takeIf { it.isNotBlank() } ?: first.name
+                val phone = first.copy(name = name)
+                ui { remember(phone); qrPaired = name }
+                Thread.sleep(if (Platform.reduceMotion) 400 else 1_600)   // the success shows, then the files take its place
+                opened(client, target.transport, name, phone.id, phone, top, target.serial)
+            } catch (e: Exception) { ui { qrPaired = null; qr = null }; throw e }
         }
     }
 
@@ -416,6 +495,7 @@ class AppState {
         ui {
             if (hungUp) { (phone as? BridgeClient)?.close(); return@ui }
             source = phone; transport = via; current = saved; usbSerial = serial; openKey = key; deviceName = name
+            closeQr()
             path = listOf("" to S.phone); entries = top; selection = emptySet(); cursor = null; anchor = null; status = ""; thumbnails = emptyMap(); sizes = emptyMap()
             pendingSizes.clear(); pendingPreviews.clear(); query = ""; results = null; phoneInfo = null; phoneOutdated = null
             isolated = false; isolation.clear()

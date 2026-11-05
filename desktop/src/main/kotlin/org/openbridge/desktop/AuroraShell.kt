@@ -345,7 +345,8 @@ private fun AuroraConnect(state: AppState, compact: Boolean) {
             val stars = phoneStars(state)
             val time = animationTime()
             val hero = minOf(maxWidth * 0.46f, maxHeight * 0.92f)
-            Hero(active = true, connected = state.pairingCode != null, modifier = Modifier.size(hero).align(Alignment.Center))
+            if (state.qr != null) QrCard(state, minOf(maxHeight - 150.dp, maxWidth * 0.5f), Modifier.align(Alignment.Center))
+            else Hero(active = true, connected = state.pairingCode != null, modifier = Modifier.size(hero).align(Alignment.Center))
             state.pairingCode?.let { CodeDigits(it, if (compact) 28.sp else 36.sp, Modifier.align(Alignment.Center)) }
             // Stars in a loose ring: first to the sides, then above and below, never on the halo.
             val rx = minOf(maxWidth / 2 - 84.dp, hero * 1.0f)
@@ -359,9 +360,10 @@ private fun AuroraConnect(state: AppState, compact: Boolean) {
         }
         Column(Modifier.fillMaxWidth().padding(horizontal = 48.dp, vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            if (state.pairingCode == null) {
+            if (state.pairingCode == null && state.qr == null) {
                 Text(S.waiting, color = Palette.fg, fontSize = 20.sp, fontWeight = FontWeight.Light, letterSpacing = 1.5.sp)
                 Text(S.waitingHint, color = Palette.muted, fontSize = 13.sp, textAlign = TextAlign.Center)
+                QrButton(state, Modifier.padding(top = 6.dp))
             }
             ConnectNotes(state, Modifier.padding(top = 4.dp).widthIn(max = 720.dp))
         }

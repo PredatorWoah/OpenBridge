@@ -101,7 +101,10 @@ private fun shortcut(state: AppState, event: KeyEvent, searchFocus: FocusRequest
         if (event.key == Key.Escape) { state.panel = null; return true }
         return false
     }
-    if (state.source == null) return false
+    if (state.source == null) {
+        if (state.qr != null && event.key == Key.Escape) { state.closeQr(); return true }
+        return false
+    }
     val shift = event.isShiftPressed
     val grid = state.showGrid && state.results == null
     return when {

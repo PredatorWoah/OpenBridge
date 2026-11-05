@@ -136,6 +136,32 @@ class UiPreview {
         Palette.look = Look.DUSK
     }
 
+    /** Pairing by QR code in every look: counting down, with an old phone's note, expired, and paired; also narrow. */
+    @Test fun qr() {
+        val out = File(System.getenv("PREVIEW_DIR") ?: return).apply { mkdirs() }
+        val language = java.util.Locale.getDefault().language
+        val now = System.currentTimeMillis()
+        for (look in Look.entries) {
+            Palette.look = look
+            val state = AppState().apply {
+                nearby = listOf(NearbyPhone("Pixel 8", "192.168.1.40", "41987", "aa"))
+                saved = listOf(SavedPhone("vivo X300 Pro", ByteArray(32) { it.toByte() }, "192.168.1.23", 41987, ByteArray(32)))
+                qr = QrCode.fresh("Alexandra's ThinkPad X1 Carbon (work)", now - 35_000)
+            }
+            render(out, "qr-$language-${look.id}-connect", state)
+            render(out, "qr-$language-${look.id}-connect-compact", state, width = 740, height = 500)
+            state.qrOld = listOf("Galaxy S21")
+            render(out, "qr-$language-${look.id}-old", state)
+            state.qrOld = emptyList()
+            state.qr = QrCode.fresh("PC", now - 125_000)
+            render(out, "qr-$language-${look.id}-expired", state)
+            state.qr = QrCode.fresh("PC", now)
+            state.qrPaired = "Galaxy S24 Ultra of Alexandra Konstantinopoulou-Papadimitriou"
+            render(out, "qr-$language-${look.id}-paired", state)
+        }
+        Palette.look = Look.DUSK
+    }
+
     /** Notifications, battery and the phone's actions, with texts long enough that every row must shorten. */
     @Test fun phone() {
         val out = File(System.getenv("PREVIEW_DIR") ?: return).apply { mkdirs() }

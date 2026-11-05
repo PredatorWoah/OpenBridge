@@ -298,7 +298,8 @@ private fun TideConnect(state: AppState, compact: Boolean) {
         }
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
             val hero = minOf(maxWidth * 0.42f, maxHeight * 0.95f)
-            Hero(active = true, connected = state.pairingCode != null, modifier = Modifier.size(hero).align(Alignment.Center))
+            if (state.qr != null) QrCard(state, minOf(maxHeight - 175.dp, maxWidth * 0.5f), Modifier.align(Alignment.Center))
+            else Hero(active = true, connected = state.pairingCode != null, modifier = Modifier.size(hero).align(Alignment.Center))
             state.pairingCode?.let { code ->
                 val bob = 3f * sin(time * 1.3f)
                 CodeDigits(code, if (compact) 26.sp else 34.sp, Modifier.align(Alignment.TopCenter).graphicsLayer { translationY = bob * density }
@@ -307,9 +308,10 @@ private fun TideConnect(state: AppState, compact: Boolean) {
         }
         Column(Modifier.fillMaxWidth().padding(horizontal = 48.dp, vertical = 6.dp), horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            if (state.pairingCode == null) {
+            if (state.pairingCode == null && state.qr == null) {
                 Text(S.waiting, color = Palette.fg, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                 Text(S.waitingHint, color = Palette.muted, fontSize = 13.sp, textAlign = TextAlign.Center)
+                QrButton(state, Modifier.padding(top = 6.dp))
             }
             ConnectNotes(state, Modifier.padding(top = 2.dp).widthIn(max = 720.dp))
         }
