@@ -183,15 +183,18 @@ final class PlayerSession: ObservableObject {
     private func watch(_ item: AVPlayerItem, _ player: AVPlayer) {
         let status: NSKeyValueObservation = item.observe(\.status, options: [.new]) { [weak self] item, _ in
             let failed: Bool = item.status == .failed
-            Task { @MainActor in if failed { self?.fail() } }
+            guard failed, let self else { return }
+            Task { @MainActor in self.fail() }
         }
         let waiting: NSKeyValueObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
-            let state: AVPlayer.TimeControlStatus = player.timeControlStatus
-            Task { @MainActor in self?.buffering = state == .waitingToPlayAtSpecifiedRate }
+            let waiting: Bool = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+            guard let self else { return }
+            Task { @MainActor in self.buffering = waiting }
         }
         let ready: NSKeyValueObservation = item.observe(\.isPlaybackLikelyToKeepUp, options: [.new]) { [weak self] item, _ in
             let keepsUp: Bool = item.isPlaybackLikelyToKeepUp
-            Task { @MainActor in if keepsUp { self?.buffering = false } }
+            guard keepsUp, let self else { return }
+            Task { @MainActor in self.buffering = false }
         }
         observations = [status, waiting, ready]
     }
