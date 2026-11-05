@@ -528,6 +528,20 @@ final class BrowserModel: ObservableObject {
         }
     }
 
+    /// A phone saved under a stand-in name (found at the hotspot's gateway, or paired by address) takes the name it
+    /// reports, like "vivo X300 Pro". A name the phone gave when pairing stays.
+    private func adoptPhoneName(_ name: String) {
+        let real: String = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !real.isEmpty, var phone = current else { return }
+        let placeholder: Bool = phone.name == "Phone (this hotspot)" || phone.name == "Phone" || phone.name.hasPrefix("Phone at ")
+        guard placeholder, phone.name != real else { return }
+        phone.name = real
+        current = phone; deviceName = real
+        saved = saved.map { $0.id == phone.id ? phone : $0 }
+        SavedPhones.save(saved)
+        Diagnostics.log("Saved the phone under its own name")
+    }
+
     func forget(_ phone: SavedPhone) {
         saved.removeAll { $0.id == phone.id }
         SavedPhones.save(saved)
@@ -650,6 +664,7 @@ final class BrowserModel: ObservableObject {
                 guard epoch == connection else { return }
                 phoneInfo = info
                 Diagnostics.log("Phone app \(info.version), revision \(info.revision)")
+                adoptPhoneName(info.name)
                 companionReady(client, revision: info.revision)
             } catch {
                 guard epoch == connection else { return }
