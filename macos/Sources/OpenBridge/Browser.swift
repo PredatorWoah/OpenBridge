@@ -358,7 +358,12 @@ struct Hit: ViewModifier {
             .accessibilityAction { model.openFound(hit) }
             .accessibilityAction(named: "Show in Folder") { model.reveal(hit) }
             .contextMenu {
-                Button(hit.entry.directory ? "Open" : "Download…") { model.openFound(hit) }
+                if PlayableMedia.isPlayable(hit.entry) && model.canStream {
+                    Button("Play") { model.play(hit.entry) }
+                    Button("Download…") { model.download([hit.entry]) }
+                } else {
+                    Button(hit.entry.directory ? "Open" : "Download…") { model.openFound(hit) }
+                }
                 Button("Show in Folder") { model.reveal(hit) }
             }
     }
@@ -373,6 +378,9 @@ struct Item: ViewModifier {
         if Screenshots.active { content } else { interactive(content) }
     }
 
+    /// Double-click plays a video instead of downloading it.
+    private var opensPlayer: Bool { PlayableMedia.isVideo(entry) && model.canStream }
+
     private func interactive(_ content: Content) -> some View {
         content
             .onTapGesture(count: 2) { model.open(entry) }
@@ -381,7 +389,7 @@ struct Item: ViewModifier {
             .onDrag { model.dragItem(entry) }
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(model.selection.contains(entry.id) ? AccessibilityTraits.isSelected : AccessibilityTraits())
-            .accessibilityHint(entry.directory ? "Opens the folder" : "Downloads the file")
+            .accessibilityHint(entry.directory ? "Opens the folder" : opensPlayer ? "Plays the video from the phone" : "Downloads the file")
             .accessibilityAction { model.open(entry) }
             .accessibilityAction(named: Text(verbatim: model.selection.contains(entry.id) ? "Deselect \(entry.name)" : "Select \(entry.name)")) {
                 model.toggle(entry)
@@ -389,7 +397,12 @@ struct Item: ViewModifier {
             .accessibilityAction(named: "Rename") { model.renaming = entry }
             .accessibilityAction(named: "Delete") { model.confirmDelete([entry]) }
             .contextMenu {
-                Button(entry.directory ? "Open" : "Download…") { model.open(entry) }
+                if PlayableMedia.isPlayable(entry) && model.canStream {
+                    Button("Play") { model.play(entry) }
+                    Button("Download…") { model.download([entry]) }
+                } else {
+                    Button(entry.directory ? "Open" : "Download…") { model.open(entry) }
+                }
                 if !entry.directory {
                     Button("Quick Look") { model.selection = [entry.id]; model.preview() }
                 }

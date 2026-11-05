@@ -1126,8 +1126,12 @@ final class BrowserModel: ObservableObject {
         run { self.entries = try await client.list(id: self.path.last!.id) }
     }
 
+    /// Double-click: a folder opens, a video plays from the phone when the connection can stream, anything else
+    /// downloads.
     func open(_ entry: Entry) {
-        if entry.directory { enter(entry) } else { download([entry]) }
+        if entry.directory { enter(entry) }
+        else if PlayableMedia.isVideo(entry) && canStream { play(entry) }
+        else { download([entry]) }
     }
 
     func enter(_ entry: Entry) {
@@ -1293,7 +1297,9 @@ final class BrowserModel: ObservableObject {
 
     /// Opens a search hit: a folder opens, a file downloads.
     func openFound(_ hit: Found) {
-        if hit.entry.directory { reveal(hit, inside: true) } else { download([hit.entry]) }
+        if hit.entry.directory { reveal(hit, inside: true) }
+        else if PlayableMedia.isVideo(hit.entry) && canStream { play(hit.entry) }
+        else { download([hit.entry]) }
     }
 
     /// Where search results came from, so "Back to results" can return after opening one.
