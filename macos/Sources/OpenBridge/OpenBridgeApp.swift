@@ -226,6 +226,7 @@ struct DeviceCard: View {
                         .buttonStyle(GhostButton()).help("Send files to Download › OpenBridge on the phone")
                 }
             }
+            NowPlayingSlot(model: model, feed: model.feed)
             if !model.phoneOutdated { CompanionHintLine(model: model) }
             if model.overUSB && !model.usbDebugging {
                 Label("Turn on USB debugging for Fast USB: instant search, real folder sizes, resumable copies", systemImage: "bolt.horizontal")

@@ -368,6 +368,7 @@ final class BrowserModel: ObservableObject {
         PhoneNotifier.shared.model = self
         PhoneNotifier.shared.setUp()
         PhoneInbox.shared.model = self
+        NowPlayingBridge.shared.model = self
         if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String {
             Task { await self.checkForUpdates(current: version) }
         }

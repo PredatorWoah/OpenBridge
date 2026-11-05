@@ -153,6 +153,7 @@ struct MenuBarPanel: View {
     /// Notifications, Ring phone, Send link and the drop zone for a phone from 1.2.0; the drop zone alone otherwise
     /// (files wait for the phone), and the update hint once.
     @ViewBuilder private var phoneFeatures: some View {
+        NowPlayingSlot(model: model, feed: model.feed, compact: true, divided: true)
         if model.phoneFeatures {
             if model.feed.showOnMac {
                 divider

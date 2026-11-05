@@ -94,6 +94,11 @@ private struct PhoneNotificationSettings: View {
             Text("From phones with OpenBridge 1.2 or later, while connected over Wi‑Fi, the phone's hotspot or Fast USB, once Notifications on computers is on in OpenBridge on the phone.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
+        Section("Phone media") {
+            Toggle("Control the phone's music with the media keys", isOn: $feed.mediaKeys)
+            Text("While the phone plays or pauses music, the play, next and previous keys, AirPods and Control Center control it instead of this Mac. From phones with OpenBridge 1.3 or later, once Media controls on computers is on there.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
     }
 }
 

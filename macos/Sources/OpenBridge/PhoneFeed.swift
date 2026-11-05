@@ -11,6 +11,10 @@ final class PhoneFeed: ObservableObject {
     /// The open phone's notifications, newest first.
     @Published private(set) var notifications: [PhoneNotification] = []
     @Published private(set) var battery: BatteryState?
+    /// What's playing on the open phone (from phone app 1.3.0), and when the phone said so: the position advances
+    /// from there while it plays.
+    @Published private(set) var media: MediaState?
+    @Published private(set) var mediaAt = Date()
     /// Events are coming from the open phone.
     @Published private(set) var live = false
     @Published private(set) var phoneName = ""
@@ -28,15 +32,26 @@ final class PhoneFeed: ObservableObject {
         didSet { PhoneFeed.defaults?.set(playSound, forKey: Keys.sound) }
     }
 
+    /// The Mac's media keys and Control Center control the phone's music while it plays. On by default.
+    @Published var mediaKeys: Bool = PhoneFeed.stored(Keys.mediaKeys, default: true) {
+        didSet {
+            PhoneFeed.defaults?.set(mediaKeys, forKey: Keys.mediaKeys)
+            NowPlayingBridge.shared.update(media: mediaKeys ? media : nil, at: mediaAt)
+        }
+    }
+
     private enum Keys {
         static let show = "phoneNotifications"
         static let sound = "phoneNotificationSound"
+        static let mediaKeys = "phoneMediaKeys"
     }
 
     private struct State {
         var cursor: Int64 = 0
         var notifications: [PhoneNotification] = []
         var battery: BatteryState?
+        var media: MediaState?
+        var mediaAt = Date()
         /// The low-battery notice was shown for this discharge; cleared when charging or above 20%.
         var lowWarned = false
     }
@@ -70,6 +85,8 @@ final class PhoneFeed: ObservableObject {
         phoneID = nil
         notifications = []
         battery = nil
+        media = nil
+        NowPlayingBridge.shared.update(media: nil, at: Date())
     }
 
     var cursor: Int64 { phoneID.flatMap { states[$0]?.cursor } ?? 0 }
@@ -87,6 +104,7 @@ final class PhoneFeed: ObservableObject {
                 snapshot = true
                 snapshotKeys = []
                 state.notifications = []
+                state.media = nil
             case .notification(let note):
                 let old: PhoneNotification? = state.notifications.first { $0.key == note.key }
                 state.notifications.removeAll { $0.key == note.key }
@@ -106,6 +124,9 @@ final class PhoneFeed: ObservableObject {
             case .battery(let level):
                 state.battery = level
                 warnIfLow(level, state: &state)
+            case .media(let playing):
+                state.media = playing.active ? playing : nil
+                state.mediaAt = Date()
             }
         }
         if snapshot {
@@ -147,6 +168,18 @@ final class PhoneFeed: ObservableObject {
         let state: State? = phoneID.flatMap { states[$0] }
         notifications = state?.notifications ?? []
         battery = state?.battery
+        media = state?.media
+        mediaAt = state?.mediaAt ?? Date()
+        NowPlayingBridge.shared.update(media: mediaKeys ? media : nil, at: mediaAt)
+    }
+
+    /// What this Mac just asked the phone to do, shown at once; the phone's next MEDIA event corrects it.
+    func expect(_ playing: MediaState) {
+        guard let phone = phoneID, var state = states[phone], state.media != nil else { return }
+        state.media = playing
+        state.mediaAt = Date()
+        states[phone] = state
+        publish()
     }
 
     /// Sample content for screenshots only.
@@ -154,6 +187,12 @@ final class PhoneFeed: ObservableObject {
         phoneID = "sample"; phoneName = phone; live = true
         self.notifications = notifications
         self.battery = battery
+    }
+
+    /// Sample media for screenshots only.
+    func showSampleMedia(_ playing: MediaState) {
+        media = playing
+        mediaAt = Date()
     }
 }
 
