@@ -832,6 +832,24 @@ class AppState {
         }
     }
 
+    // Playing the phone's videos and music here (1.3.0)
+
+    private val mediaServer = MediaServer()
+
+    /** The one video or song selected on a phone open over Wi‑Fi or Fast USB, to offer playing it. */
+    val playableSelected: Entry? get() = selected.singleOrNull()?.takeIf { bridge != null && playable(it) }
+
+    /** Plays a video or song straight from the phone, in the browser (or in VLC), without saving a copy. */
+    fun play(entry: Entry, inVlc: Boolean = false) {
+        val client = bridge ?: return
+        if (!playable(entry)) return
+        val address = try { mediaServer.address({ file, offset, body -> client.read(file, offset, body) }, entry) }
+            catch (e: Exception) { Log.add("Couldn't serve ${entry.name}: ${e.message}"); show(S.playFailed); return }
+        Log.add("Playing ${Kind.of(entry).name.lowercase()} from the phone" + if (inVlc) " in VLC" else " in the browser")
+        if (inVlc) { if (!Vlc.open(address)) show(S.playFailed) }
+        else { openPage(address); show(S.playing(entry.name)) }
+    }
+
     /** Offers a web link on the phone. */
     fun sendLink(url: String, done: () -> Unit = {}) {
         val client = bridge ?: return

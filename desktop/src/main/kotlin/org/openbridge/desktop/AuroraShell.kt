@@ -322,6 +322,7 @@ private fun SheetToolbar(state: AppState, searchFocus: FocusRequester, compact: 
             NewFolderButton(state)
         }
         MoreButton(state, withUpload = compact)
+        PlayButton(state)
         if (state.selection.isNotEmpty()) DownloadButton(state)
     }
 }

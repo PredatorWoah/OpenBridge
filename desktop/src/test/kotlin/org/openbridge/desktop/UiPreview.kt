@@ -181,6 +181,7 @@ class UiPreview {
                     phoneInfo = PhoneInfo("1.3.0", 24, deviceName)
                     phoneStatus = NotificationList(emptyList(), Battery(64, true), song)
                     entries = listOf(Entry("1", "DCIM", true, 0), Entry("2", "Music", true, 0), Entry("3", "VID_20261018_220000.mp4", false, 812_000_000))
+                    selection = setOf("3"); cursor = "3"
                     grid = false
                 }
                 render(out, "media-$language-${look.id}-$name-browser", state)

@@ -426,6 +426,21 @@ fun promptNewFolder(state: AppState) {
     javax.swing.JOptionPane.showInputDialog(null, S.folderName, S.newFolder, javax.swing.JOptionPane.PLAIN_MESSAGE)?.takeIf { it.isNotBlank() }?.let(state::newFolder)
 }
 
+/** Play, when one video or song is selected: in the browser, straight from the phone; VLC too when it's installed. */
+@Composable
+fun PlayButton(state: AppState) {
+    val media = state.playableSelected ?: return
+    Tip(S.playHint) {
+        Row(Modifier.clip(CircleShape).background(Palette.fg.copy(alpha = 0.08f)).border(1.dp, Palette.amber.copy(alpha = 0.5f), CircleShape)
+            .pressable(CircleShape, label = S.play) { state.play(media) }.padding(start = 10.dp, end = 14.dp, top = 7.dp, bottom = 7.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Icon(Icons.Filled.PlayArrow, null, tint = Palette.amber, modifier = Modifier.size(18.dp))
+            Text(S.play, color = Palette.fg, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
+        }
+    }
+    if (Vlc.program != null) IconButton(Icons.Filled.OndemandVideo, S.openInVlc) { state.play(media, inVlc = true) }
+}
+
 @Composable
 fun DownloadButton(state: AppState) = SunsetButton(if (state.selection.size > 1) S.downloadCount(state.selection.size) else S.download,
     enabled = !state.busy && state.selected.isNotEmpty()) { state.download(state.selected) }
@@ -454,6 +469,10 @@ fun MoreButton(state: AppState, compact: Boolean = false, withUpload: Boolean = 
             if (withUpload || compact) {
                 DropdownMenuItem({ close(); promptNewFolder(state) }, enabled = idle) { Text(S.newFolder) }
                 DropdownMenuItem({ close(); state.upload(Dialogs.chooseUploads()) }, enabled = idle) { Text(S.upload) }
+            }
+            state.playableSelected?.let { media ->
+                DropdownMenuItem({ close(); state.play(media) }) { Text(S.play) }
+                if (Vlc.program != null) DropdownMenuItem({ close(); state.play(media, inVlc = true) }) { Text(S.openInVlc) }
             }
             DropdownMenuItem({ close(); promptRename(state) }, enabled = idle && state.selection.size == 1) { Text(S.rename) }
             val deletable = idle && state.selection.isNotEmpty()

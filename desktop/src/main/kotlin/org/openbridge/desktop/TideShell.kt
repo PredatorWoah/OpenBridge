@@ -187,6 +187,7 @@ private fun SurfaceBar(state: AppState, searchFocus: FocusRequester, compact: Bo
             MediaToggle(state)
             if (!compact) UploadButton(state)
             MoreButton(state)
+            PlayButton(state)
             if (state.selection.isNotEmpty()) DownloadButton(state)
         }
         if (compact || (state.query.isNotBlank() && state.results == null)) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {

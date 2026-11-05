@@ -77,6 +77,7 @@ private fun Toolbar(state: AppState) {
         if (state.bridge != null) NotificationsButton(state)
         SortButton(state)
         MoreButton(state)
+        PlayButton(state)
         DownloadButton(state)
         IconButton(Icons.Filled.Settings, S.settings) { state.panel = Panel.SETTINGS }
     }
