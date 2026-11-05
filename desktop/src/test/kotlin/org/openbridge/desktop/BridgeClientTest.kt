@@ -224,7 +224,7 @@ class BridgeClientTest {
         assertEquals("Hello from the phone ✓", client.readText(text.entry))
         client.collected(text.entry)
         assertTrue(texts.isEmpty())
-        assertEquals(PhoneInfo("0.13.0", 18, "vivo X300 Pro"), client.info())
+        assertEquals(PhoneInfo("0.13.0", Session.REVISION, "vivo X300 Pro"), client.info())
     }
 
     @Test
