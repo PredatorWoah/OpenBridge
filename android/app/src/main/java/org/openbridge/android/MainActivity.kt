@@ -6,21 +6,36 @@ import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.media.ThumbnailUtils
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.PersistableBundle
 import android.provider.Settings
+import android.util.LruCache
+import android.util.Size
 import android.view.WindowManager
+import android.webkit.MimeTypeMap
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.core.content.FileProvider
+import androidx.core.graphics.drawable.toBitmap
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.openbridge.ui.Look
+import java.io.File
 
-/** Hosts the main screen and does what it asks: permissions, pickers, other apps, the clipboard. */
+/** Hosts the app's screens and does what they ask: permissions, pickers, other apps, the clipboard. */
 class MainActivity : ComponentActivity(), Actions {
     private val model = Sharing
     private val notifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
@@ -32,11 +47,15 @@ class MainActivity : ComponentActivity(), Actions {
     private val nearby = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted && Build.VERSION.SDK_INT >= 33) Hotspot.start(this) else Hotspot.denied()
     }
+    /** Send files: the system picker, then the same path as Share › OpenBridge. */
+    private val files = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris -> if (uris.isNotEmpty()) queue(uris) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Every look is dark: light status and navigation bar icons over a transparent bar.
         enableEdgeToEdge(statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
+        if (Build.VERSION.SDK_INT >= 29) window.isNavigationBarContrastEnforced = false
         Sharing.attach(this)
         Updater.attach(this)
         if (savedInstanceState == null) handle(intent)
@@ -49,7 +68,9 @@ class MainActivity : ComponentActivity(), Actions {
             }
             // One quiet check per launch for a newer release (see Updates).
             LaunchedEffect(Unit) { Updater.check() }
-            OpenBridgeTheme { Home(this) }
+            CompositionLocalProvider(LocalMotion provides systemMotion()) {
+                OpenBridgeTheme { App(LiveModel, this) }
+            }
         }
     }
 
@@ -69,11 +90,14 @@ class MainActivity : ComponentActivity(), Actions {
         super.onResume()
         model.onScreen = true
         model.wholePhoneResult()
+        Mirror.refreshAccess()
         Updater.resumed(this)
+        LiveModel.resume()
     }
 
     override fun onPause() {
         model.onScreen = false
+        LiveModel.pause()
         super.onPause()
     }
 
@@ -123,6 +147,8 @@ class MainActivity : ComponentActivity(), Actions {
         } else storagePermission.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
     }
 
+    override fun keepInBackground(on: Boolean) = model.keepInBackground(on)
+
     override fun hotspot(on: Boolean) {
         when {
             !on -> Hotspot.stop()
@@ -136,8 +162,11 @@ class MainActivity : ComponentActivity(), Actions {
 
     override fun update() = Updater.update(this)
 
+    override fun checkForUpdates() = Updater.check(manual = true)
+
     override fun open(url: String) {
         runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+            .onFailure { Toast.makeText(this, S.cantOpen, Toast.LENGTH_SHORT).show() }
     }
 
     override fun copy(text: String, sensitive: Boolean) {
@@ -160,7 +189,92 @@ class MainActivity : ComponentActivity(), Actions {
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
 
+    override fun sendText(text: String): Boolean = model.sendText(text)
+
+    override fun sendFiles() {
+        runCatching { files.launch(arrayOf("*/*")) }.onFailure { Toast.makeText(this, S.cantOpen, Toast.LENGTH_SHORT).show() }
+    }
+
+    /** Copies the picked files into the outbox off the main thread, then hands over as Share › OpenBridge does. */
+    private fun queue(uris: List<Uri>) {
+        Thread {
+            val added = PhoneOutbox.add(this, uris) { _, _ -> }
+            runOnUiThread {
+                if (added == 0) { Toast.makeText(this, S.couldNotRead, Toast.LENGTH_LONG).show(); return@runOnUiThread }
+                Sharing.handOver { sharing ->
+                    if (sharing) Toast.makeText(this, S.queued(added, if (Sharing.paired) Sharing.computer else null), Toast.LENGTH_SHORT).show()
+                    else Sharing.waitingNote(S.tapToSend(added))
+                }
+            }
+        }.start()
+    }
+
+    override fun clearOutbox() = PhoneOutbox.clear()
+    override fun clearTexts() = Texts.clear()
     override fun copyDiagnostics() = copy(Log.report(this))
+
+    override fun notificationAccess() {
+        runCatching { startActivity(Mirror.accessSettings()) }
+            .onFailure { runCatching { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) } }
+    }
+
+    override fun mirror(on: Boolean) = Mirror.enable(on)
+    override fun showApp(packageName: String, shown: Boolean) = Mirror.include(packageName, shown)
+    override fun forget(id: String) = Trusted.forget(id)
+    override fun decidePairing(approve: Boolean) = model.decidePairing(approve)
+    override fun dismissNote() = model.dismissNote()
+    override fun chooseLook(look: Look) = model.chooseLook(look)
+    override fun removeEvent(id: Long) = Feed.remove(id)
+    override fun clearEvents() = Feed.clear()
+
+    /** A received file opens in an app that can, with read access to just that file; a link opens in the browser. */
+    override fun openEvent(event: Feed.Event) {
+        if (event.kind == Feed.Kind.LINK) { open(event.name); return }
+        val place = event.location ?: return
+        val uri = if (place.startsWith("content://")) Uri.parse(place)
+            else runCatching { FileProvider.getUriForFile(this, "$packageName.files", File(place)) }.getOrNull()
+        val type = MimeTypeMap.getSingleton().getMimeTypeFromExtension(event.name.substringAfterLast('.', "").lowercase()) ?: "application/octet-stream"
+        if (uri == null) { Toast.makeText(this, S.cantOpen, Toast.LENGTH_SHORT).show(); return }
+        val view = Intent(Intent.ACTION_VIEW).setDataAndType(uri, type).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        runCatching { startActivity(Intent.createChooser(view, null).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)) }
+            .onFailure { Toast.makeText(this, S.cantOpen, Toast.LENGTH_SHORT).show() }
+    }
+
+    private val icons = LruCache<String, ImageBitmap>(64)
+    private val thumbnails = LruCache<String, ImageBitmap>(48)
+
+    override fun appIcon(packageName: String): ImageBitmap? = icons.get(packageName)
+        ?: runCatching { Mirror.icon(packageName)?.toBitmap(96, 96)?.asImageBitmap() }.getOrNull()?.also { icons.put(packageName, it) }
+
+    override suspend fun thumbnail(location: String): ImageBitmap? {
+        thumbnails.get(location)?.let { return it }
+        val bitmap = withContext(Dispatchers.IO) {
+            runCatching {
+                val size = Size(192, 192)
+                if (location.startsWith("content://")) {
+                    if (Build.VERSION.SDK_INT >= 29) contentResolver.loadThumbnail(Uri.parse(location), size, null) else null
+                } else {
+                    val file = File(location)
+                    val video = file.extension.lowercase() in setOf("mp4", "mov", "mkv", "3gp", "webm", "m4v")
+                    when {
+                        !file.isFile -> null
+                        Build.VERSION.SDK_INT >= 29 -> if (video) ThumbnailUtils.createVideoThumbnail(file, size, null) else ThumbnailUtils.createImageThumbnail(file, size, null)
+                        video -> null
+                        else -> sampled(file, 192)
+                    }
+                }
+            }.getOrNull()
+        } ?: return null
+        return bitmap.asImageBitmap().also { thumbnails.put(location, it) }
+    }
+
+    private fun sampled(file: File, size: Int): Bitmap? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.path, bounds)
+        var sample = 1
+        while (bounds.outWidth / (sample * 2) >= size && bounds.outHeight / (sample * 2) >= size) sample *= 2
+        return BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = sample })
+    }
 
     private fun granted(permission: String) = checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
 }

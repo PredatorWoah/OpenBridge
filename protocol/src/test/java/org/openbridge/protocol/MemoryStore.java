@@ -47,6 +47,28 @@ public final class MemoryStore implements Store {
         files.put(name, files.remove(id.substring(5)));
         return "file:" + name;
     }
+    /** SEND: files land at the top, under a free name. */
+    @Override public synchronized Upload receive(String name, long size, byte[] key) throws IOException {
+        Names.requireStorable(name);
+        return new Upload() {
+            private final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+            private String saved;
+            public OutputStream stream() { return buffer; }
+            public void commit() throws IOException {
+                synchronized (MemoryStore.this) {
+                    if (failCommit) throw new IOException("Storage full");
+                    for (int number = 0; saved == null; number++) {
+                        String candidate = Names.numbered(name, number);
+                        if (!files.containsKey(candidate) && !folders.contains(candidate) && !candidate.equals("Nested")) saved = candidate;
+                    }
+                    files.put(saved, buffer.toByteArray());
+                }
+            }
+            public String savedName() { return saved; }
+            public String savedLocation() { return saved == null ? null : "memory:" + saved; }
+            public void close() { if (saved == null) aborted++; }
+        };
+    }
     @Override public synchronized Upload create(String id, String name) throws IOException {
         if (!id.isEmpty()) throw new IOException("Unknown directory");
         if (files.containsKey(name)) throw new IOException("Filename already exists");

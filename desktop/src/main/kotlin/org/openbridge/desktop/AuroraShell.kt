@@ -105,6 +105,7 @@ private fun SkyHeader(state: AppState, compact: Boolean) {
                 Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     TransportChip(state)
+                    PhoneBattery(state)
                     val line = when {
                         moving && transfer != null -> (if (transfer.count > 1) S.ofCount(transfer.index, transfer.count) + " · " else "") + transfer.name
                         state.busy && state.status.isNotEmpty() -> state.status
@@ -120,6 +121,7 @@ private fun SkyHeader(state: AppState, compact: Boolean) {
                 Constellation(state, compact)
                 Spacer(Modifier.width(8.dp))
                 if (state.bridge != null) IconButton(Icons.Filled.ChatBubbleOutline, S.texts) { state.panel = Panel.TEXTS }
+                if (state.bridge != null) NotificationsButton(state)
                 IconButton(Icons.Filled.ScreenShare, S.mirror, enabled = !state.mirroring) { state.mirror() }
                 IconButton(Icons.Filled.Settings, S.settings) { state.panel = Panel.SETTINGS }
             }

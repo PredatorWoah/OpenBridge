@@ -144,16 +144,7 @@ class SafStore(private val resolver: ContentResolver, private val root: Document
         val reservation = parent.uri to Names.collisionKey(name)
         if (reservation in reserved || exists(parent, name)) throw IOException("Filename already exists")
         if (!parent.canWrite()) throw IOException("Folder is read-only")
-        val partName = Names.resumable(name, size, key)
-        val cutoff = System.currentTimeMillis() - Store.ABANDONED_MILLIS
-        val kept = parent.listFiles().filter { it.name?.startsWith(Names.RESUMABLE_PREFIX) == true }
-        // Interrupted uploads nobody continued for a week go.
-        kept.filter { it.name != partName && it.lastModified() in 1 until cutoff }.forEach { it.delete() }
-        var found = kept.firstOrNull { it.name == partName && it.isFile }
-        var have = found?.length() ?: 0L
-        if (found != null && have > size) { found.delete(); found = null; have = 0 }
-        val part = found ?: parent.createFile("application/octet-stream", partName) ?: throw IOException("Cannot create upload")
-        if (part.name != partName) { part.delete(); throw IOException("Cannot create upload") }
+        val (part, have) = keptPart(parent, Names.resumable(name, size, key), size)
         val partUri = part.uri
         reserved.add(reservation)
         temporary.add(partUri)
@@ -179,6 +170,82 @@ class SafStore(private val resolver: ContentResolver, private val root: Document
                     synchronized(this@SafStore) {
                         try { output.close() } finally {
                             // Not committed: keep what arrived, for the next attempt.
+                            temporary.remove(partUri)
+                            reserved.remove(reservation)
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            temporary.remove(partUri); reserved.remove(reservation)
+            throw e
+        }
+    }
+
+    /** The hidden file an upload collects into, with what it already holds; abandoned ones in [parent] go. */
+    private fun keptPart(parent: DocumentFile, partName: String, size: Long): Pair<DocumentFile, Long> {
+        val cutoff = System.currentTimeMillis() - Store.ABANDONED_MILLIS
+        val kept = parent.listFiles().filter { it.name?.startsWith(Names.RESUMABLE_PREFIX) == true }
+        // Interrupted uploads nobody continued for a week go.
+        kept.filter { it.name != partName && it.lastModified() in 1 until cutoff }.forEach { it.delete() }
+        var found = kept.firstOrNull { it.name == partName && it.isFile }
+        var have = found?.length() ?: 0L
+        if (found != null && have > size) { found.delete(); found = null; have = 0 }
+        val part = found ?: parent.createFile("application/octet-stream", partName) ?: throw IOException("Cannot create upload")
+        if (part.name != partName) { part.delete(); throw IOException("Cannot create upload") }
+        return part to have
+    }
+
+    /**
+     * SEND: a file from a computer into the top of the shared folder, under a free name ("name (1).ext"), never replacing
+     * a file; an interrupted one continues like [resume].
+     */
+    @Synchronized
+    override fun receive(name: String, size: Long, key: ByteArray): Store.Upload = storage {
+        Names.requireStorable(name)
+        val parent = root
+        if (!parent.canWrite()) throw IOException("Folder is read-only")
+        val partName = Names.resumable(name, size, key)
+        // Two computers sending the same file at once would write the same part: one waits for the other.
+        val reservation = parent.uri to partName
+        if (reservation in reserved) throw IOException("This file is already being received")
+        val (part, have) = keptPart(parent, partName, size)
+        val partUri = part.uri
+        reserved.add(reservation)
+        temporary.add(partUri)
+        try {
+            val output = resolver.openOutputStream(partUri, if (have > 0) "wa" else "w") ?: throw IOException("Cannot open upload")
+            object : Store.Upload {
+                var saved: String? = null
+                var location: String? = null
+                override fun stream(): OutputStream = output
+                override fun existing() = have
+                override fun commit() {
+                    synchronized(this@SafStore) {
+                        storage {
+                            for (number in 0 until 1_000) {
+                                val candidate = Names.numbered(name, number)
+                                val key = Names.collisionKey(candidate)
+                                if (exists(parent, candidate) || reserved.any { it.first == parent.uri && it.second == key }) continue
+                                // The provider may pick a free name itself; whatever it published is the saved name.
+                                if (!part.renameTo(candidate)) throw IOException("Provider could not publish filename")
+                                val published = part.name ?: throw IOException("Provider could not publish filename")
+                                if (Names.isTemporary(published)) throw IOException("Provider could not publish filename")
+                                temporary.remove(partUri)
+                                saved = published
+                                location = part.uri.toString()
+                                return@storage
+                            }
+                            throw IOException("Filename already exists")
+                        }
+                    }
+                }
+                override fun savedName() = saved
+                override fun savedLocation() = location
+                override fun close() {
+                    synchronized(this@SafStore) {
+                        try { output.close() } finally {
+                            // Not saved: keep what arrived, for the next attempt.
                             temporary.remove(partUri)
                             reserved.remove(reservation)
                         }

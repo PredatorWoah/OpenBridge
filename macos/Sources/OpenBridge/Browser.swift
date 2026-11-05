@@ -560,6 +560,14 @@ struct MoreMenu: View {
             if !model.clipboardAvailable {
                 Text("Texts and the clipboard work over Wi‑Fi and Fast USB, or while mirroring the screen.")
             }
+            if model.phoneFeatures {
+                Divider()
+                Button("Phone Notifications…") { model.showNotifications = true }
+                Button(model.ringing ? "Stop Ringing" : "Ring Phone", action: model.toggleRing)
+                Button("Send to Phone…", action: model.chooseFilesToSend)
+                Button("Send Link from Clipboard to Phone") { if let link = model.clipboardLink() { model.sendLink(link) } }
+                    .disabled(model.clipboardLink() == nil)
+            }
             Divider()
             Button("Refresh", action: model.refresh).disabled(busy)
             if devices {

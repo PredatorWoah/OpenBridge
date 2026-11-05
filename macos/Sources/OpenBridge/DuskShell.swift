@@ -40,7 +40,11 @@ private struct Sidebar: View {
                 ArchMark(size: 26)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(model.deviceName).font(.system(size: 13.5, weight: .semibold)).lineLimit(1)
-                    Text(ConnectText.transport(model)).font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.75))
+                    HStack(spacing: 6) {
+                        Text(ConnectText.transport(model)).font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.75))
+                            .lineLimit(1)
+                        BatteryBadge(feed: model.feed, size: 11)
+                    }
                 }
             }
             .padding(10).frame(maxWidth: .infinity, alignment: .leading)

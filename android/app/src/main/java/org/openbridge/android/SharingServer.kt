@@ -112,9 +112,10 @@ class SharingServer(private val context: Context, private val store: Store, priv
         ?: "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}"
     private val closed = AtomicBoolean(false)
     private val sockets = ConcurrentHashMap.newKeySet<SSLSocket>()
-    // Four requests at a time (a transfer, browsing and previews together), and a few more wait their turn instead of
-    // being dropped. Anything beyond that is refused, so a misbehaving client can't pile up threads.
-    private val workers = ThreadPoolExecutor(4, 4, 10, TimeUnit.SECONDS, ArrayBlockingQueue(8)).apply { allowCoreThreadTimeOut(true) }
+    // Eight requests at a time (each computer keeps up to two waiting for files and events, beside a transfer, browsing
+    // and previews), and a few more wait their turn instead of being dropped. Anything beyond that is refused, so a
+    // misbehaving client can't pile up threads.
+    private val workers = ThreadPoolExecutor(8, 8, 10, TimeUnit.SECONDS, ArrayBlockingQueue(8)).apply { allowCoreThreadTimeOut(true) }
     // Tethering and hotspot interfaces are not ConnectivityManager networks, so addresses are also checked every two seconds.
     private val watcher = Executors.newSingleThreadScheduledExecutor { Thread(it, "openbridge-watch").apply { isDaemon = true } }
     private val doors = CopyOnWriteArrayList<Door>()
@@ -305,7 +306,7 @@ class SharingServer(private val context: Context, private val store: Store, priv
     private fun session(via: Via) = Session(store, object : Trust {
         override fun computer(secret: ByteArray): String? = trust.computer(secret)?.also { seen(it, via) }
         override fun admit(computer: String): ByteArray = trust.admit(computer).also { seen(computer, via) }
-    }, fingerprint, approver, clipboard, PhoneOutbox).describe(BuildConfig.VERSION_NAME, deviceName)
+    }, fingerprint, approver, clipboard, PhoneOutbox, PhoneCompanion).describe(BuildConfig.VERSION_NAME, deviceName)
 
     private fun seen(computer: String, via: Via) = events.seen(computer, via)
 

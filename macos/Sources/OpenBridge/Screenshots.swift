@@ -38,6 +38,10 @@ enum Screenshots {
             }
             let panel = folder.appendingPathComponent("\(look.rawValue)-menubar.png")
             if !renderMenuBar(to: panel) { failed = true }
+            let phonePanel = folder.appendingPathComponent("\(look.rawValue)-menubar-notifications.png")
+            if !renderPhoneMenuBar(to: phonePanel) { failed = true }
+            let sheet = folder.appendingPathComponent("\(look.rawValue)-notifications.png")
+            if !renderNotificationsSheet(to: sheet) { failed = true }
         }
         exit(failed ? 1 : 0)
     }
@@ -73,6 +77,34 @@ enum Screenshots {
         .environment(\.colorScheme, .dark)
         let renderer = ImageRenderer(content: shot)
         renderer.scale = 2
+        return write(renderer.cgImage, to: file)
+    }
+
+    /// The menu bar panel of a phone from 1.2.0: battery in the header, its newest notifications with long app names,
+    /// titles and texts (each a single line, cut with "…"), Ring phone, Send link and the drop zone.
+    @MainActor private static func renderPhoneMenuBar(to file: URL) -> Bool {
+        let model = SampleData.phoneFeaturesModel()
+        let icon: NSImage = MenuBarGlyph.image(connected: true, progress: nil)
+        let shot = VStack(alignment: .trailing, spacing: 4) {
+            Image(nsImage: icon).renderingMode(.template).foregroundStyle(Color.white).padding(.trailing, 24)
+            MenuBarPanel(model: model)
+        }
+        .padding(12)
+        .background(Palette.background)
+        .environment(\.colorScheme, .dark)
+        let renderer = ImageRenderer(content: shot)
+        renderer.scale = 2
+        return write(renderer.cgImage, to: file)
+    }
+
+    /// The Phone notifications sheet with the same notifications, texts up to three lines.
+    @MainActor private static func renderNotificationsSheet(to file: URL) -> Bool {
+        let model = SampleData.phoneFeaturesModel()
+        let sheet = PhoneNotificationsSheet(model: model, feed: model.feed)
+            .environment(\.colorScheme, .dark)
+        let renderer = ImageRenderer(content: sheet)
+        renderer.scale = 2
+        renderer.proposedSize = ProposedViewSize(width: 480, height: nil)
         return write(renderer.cgImage, to: file)
     }
 
@@ -141,6 +173,36 @@ private enum SampleData {
         transfer.currentTotal = long.size
         model.transfer = transfer
         model.busy = true
+        return model
+    }
+
+    /// Connected over Wi‑Fi to a phone from 1.2.0 that is charging, with notifications whose names and texts are far
+    /// too long for one line.
+    static func phoneFeaturesModel() -> BrowserModel {
+        let model = BrowserModel()
+        let name = "vivo X300 Pro (the family phone in the kitchen drawer)"
+        model.showSamplePhoneFeatures(phone: name)
+        let now = Date()
+        func note(_ key: String, _ app: String, _ title: String, _ text: String, minutes: Double, flags: (Bool, Bool), code: String = "") -> PhoneNotification {
+            PhoneNotification(key: key, app: app, package: "com.example." + key, title: title, text: text,
+                              time: now.addingTimeInterval(-minutes * 60), canReply: flags.0, canDismiss: flags.1, code: code)
+        }
+        let notes: [PhoneNotification] = [
+            note("w1", "WhatsApp", "Mum (Family group: Sunday lunch planning and everything else)",
+                 "Are you bringing the dessert on Sunday? Grandma asked twice already and says the lemon tart from last time was the best thing she has eaten all year",
+                 minutes: 1, flags: (true, true)),
+            note("b1", "HDFC Bank Mobile Banking and Payments", "Your one-time password",
+                 "482913 is your OTP for a transaction of Rs 12,499.00 at AMAZON PAY INDIA. Valid for 10 minutes. Never share it with anyone.",
+                 minutes: 3, flags: (false, true), code: "482913"),
+            note("g1", "Gmail", "Quarterly report – final numbers, charts and the appendix nobody reads",
+                 "Hi all,\nattached are the final numbers for the third quarter, with the charts we discussed on Tuesday.",
+                 minutes: 12, flags: (true, true)),
+            note("c1", "Calendar", "Dentist", "Tomorrow at 9:30 · Dr. Iyer, 2nd floor", minutes: 40, flags: (false, true)),
+            note("s1", "Swiggy", "Your order is on its way", "Ravi is 4 minutes away with your order from Meghana Foods",
+                 minutes: 55, flags: (false, false)),
+            note("m1", "Messages", "+91 98450 12345", "Parcel delivered to the front desk", minutes: 90, flags: (true, true))
+        ]
+        model.feed.showSample(phone: name, notifications: notes, battery: BatteryState(level: 82, charging: true))
         return model
     }
 

@@ -29,8 +29,10 @@ services = manifest.find("application").findall("service")
 assert [(s.attrib[ns + "name"], s.attrib[ns + "exported"], s.attrib.get(ns + "foregroundServiceType"), s.attrib.get(ns + "permission"))
         for s in services] == \
     [(".ShareService", "false", "dataSync", None),
+     (".NotificationMirror", "true", None, "android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"),
      (".ClipboardTile", "true", None, "android.permission.BIND_QUICK_SETTINGS_TILE")], \
-    "only the private background-sharing service, and the Send clipboard tile that only the system can bind"
+    "only the private background-sharing service, and the notification listener and Send clipboard tile that only the system can bind"
+assert all(p.attrib[ns + "exported"] == "false" for p in manifest.find("application").findall("provider")), "providers stay private"
 # The legacy storage permissions are only for Android 9 and 10.
 assert all(p.attrib.get(ns + "maxSdkVersion") == "29" for p in manifest.findall("uses-permission")
            if p.attrib[ns + "name"].split(".")[-1] in ("READ_EXTERNAL_STORAGE", "WRITE_EXTERNAL_STORAGE")), "storage permissions must stop at API 29"

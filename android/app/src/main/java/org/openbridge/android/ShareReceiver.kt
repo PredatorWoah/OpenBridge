@@ -7,15 +7,19 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.layout.*
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.UploadFile
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import org.openbridge.ui.Palette
 
 /**
@@ -35,14 +39,7 @@ class ShareReceiver : ComponentActivity() {
         }
         var done by mutableIntStateOf(0)
         setContent {
-            Box(Modifier.fillMaxSize().systemBarsPadding().padding(20.dp), contentAlignment = Alignment.BottomCenter) {
-                Column(Modifier.fillMaxWidth().glass(sheetShape, solid = true).padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(S.sendingToComputer, color = Palette.fg, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                    Text(S.ofCount(minOf(done + 1, uris.size), uris.size), color = Palette.muted, fontSize = 13.sp)
-                    LinearProgressIndicator(progress = { done.toFloat() / uris.size }, Modifier.fillMaxWidth(),
-                        color = Palette.amber, trackColor = Palette.fg.copy(alpha = 0.12f))
-                }
-            }
+            CompositionLocalProvider(LocalMotion provides systemMotion()) { SendingSheet(done, uris.size) }
         }
         // The copy runs while this screen is open: the share grants read access to it.
         Thread {
@@ -84,5 +81,25 @@ class ShareReceiver : ComponentActivity() {
         Intent.ACTION_SEND_MULTIPLE -> (if (Build.VERSION.SDK_INT >= 33) intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
             else @Suppress("DEPRECATION") intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM)).orEmpty()
         else -> emptyList()
+    }
+}
+
+/** Share › OpenBridge while the files are copied: a glass card rising from the bottom, with a springy progress line. */
+@Composable
+fun SendingSheet(done: Int, total: Int) {
+    val still = LocalMotion.current.still
+    val shown = remember { MutableTransitionState(still) }.apply { targetState = true }
+    Box(Modifier.fillMaxSize().systemBarsPadding().padding(16.dp), contentAlignment = Alignment.BottomCenter) {
+        AnimatedVisibility(shown, enter = slideInVertically(motion()) { it } + fadeIn(motion())) {
+            Row(Modifier.fillMaxWidth().glass(RoundedCornerShape(28.dp), strong = true).padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconBadge(Icons.Rounded.UploadFile, Palette.amber, 48.dp)
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(S.sendingToComputer, style = Type.headline, color = Palette.fg)
+                    Text(S.ofCount(minOf(done + 1, total), total), style = Type.label, color = Palette.muted)
+                    ProgressLine(if (total == 0) 0f else done.toFloat() / total)
+                }
+            }
+        }
     }
 }

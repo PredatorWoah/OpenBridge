@@ -92,6 +92,8 @@ data class TrayStatus(
     /** Bytes a second, smoothed. */
     val rate: Double = 0.0,
     val secondsLeft: Long? = null,
+    /** The phone's battery, when it says (from 1.2.0). */
+    val battery: Battery? = null,
 ) {
     /** One line for the tray icon's tooltip, like "OpenBridge · Pixel 8 · 42% · 18.3 MB/s". */
     fun tooltip(): String {
@@ -99,6 +101,7 @@ data class TrayStatus(
         if (!connected) parts += S.notConnected
         else {
             parts += shorten(phone, 40)
+            battery?.let { parts += "${it.level}%" + if (it.charging) " ↑" else "" }
             if (moving) {
                 parts += "${(fraction * 100).toInt()}%"
                 if (rate >= 1) parts += speed(rate)
@@ -120,11 +123,12 @@ fun trayStatus(state: AppState): TrayStatus {
     val transfer = state.transfer
     val connected = state.source != null
     val moving = connected && transfer != null && !transfer.done && state.busy
-    if (!moving || transfer == null) return TrayStatus(connected, state.deviceName, state.transport.label)
+    val battery = state.battery.takeIf { connected }
+    if (!moving || transfer == null) return TrayStatus(connected, state.deviceName, state.transport.label, battery = battery)
     val rate = state.rate()
     return TrayStatus(true, state.deviceName, state.transport.label, moving = true, upload = transfer.upload, file = transfer.name,
         fraction = transfer.progress, index = transfer.index, count = transfer.count, rate = rate,
-        secondsLeft = if (transfer.bytesTotal > 0) secondsLeft(transfer.bytesTotal - transfer.bytesDone, rate) else null)
+        secondsLeft = if (transfer.bytesTotal > 0) secondsLeft(transfer.bytesTotal - transfer.bytesDone, rate) else null, battery = battery)
 }
 
 /** The tray icon, its menu, and the status window; nothing where there's no tray. */
@@ -152,8 +156,9 @@ fun ApplicationScope.StatusTray(state: AppState, openMain: () -> Unit) {
                 addSeparator()
                 add(java.awt.MenuItem(S.quit).apply { addActionListener { quit.value() } })
             }
-            // Windows reports a double click as an action: open the app then.
-            addActionListener { anchor = null; open.value() }
+            // Windows reports a double click as an action: open the app then. A click on a notification it showed
+            // does what the notification offered.
+            addActionListener { if (!DesktopNotify.trayClicked()) { anchor = null; open.value() } }
             addMouseListener(object : MouseAdapter() {
                 override fun mouseClicked(e: MouseEvent) {
                     if (e.button == MouseEvent.BUTTON1 && e.clickCount == 1) toggle.value(e.point)
@@ -163,8 +168,8 @@ fun ApplicationScope.StatusTray(state: AppState, openMain: () -> Unit) {
     }
     DisposableEffect(icon) {
         val added = runCatching { SystemTray.getSystemTray().add(icon) }.isSuccess
-        if (!added) Log.add("No system tray here")
-        onDispose { runCatching { SystemTray.getSystemTray().remove(icon) } }
+        if (!added) Log.add("No system tray here") else DesktopNotify.tray = icon
+        onDispose { DesktopNotify.tray = null; runCatching { SystemTray.getSystemTray().remove(icon) } }
     }
     // A few times a second: the icon's picture (only when it looks different) and the tooltip.
     LaunchedEffect(icon) {
@@ -258,19 +263,42 @@ private fun StatusWindow(state: AppState, at: Point, onClose: () -> Unit, openMa
         alwaysOnTop = true, focusable = true,
         onKeyEvent = { if (it.type == KeyEventType.KeyDown && it.key == Key.Escape) { onClose(); true } else false }) {
         val awt = window
+        var dropping by remember { mutableStateOf(false) }
+        // Closes a moment after losing focus, so files can still be dragged onto it from a file manager.
+        var closing by remember { mutableStateOf<javax.swing.Timer?>(null) }
+        val scheduleClose = { delay: Int ->
+            closing?.stop()
+            closing = javax.swing.Timer(delay) { onClose() }.apply { isRepeats = false; start() }
+        }
         DisposableEffect(awt) {
-            val listener = object : WindowAdapter() { override fun windowLostFocus(e: WindowEvent) { onClose() } }
+            val listener = object : WindowAdapter() {
+                override fun windowLostFocus(e: WindowEvent) { scheduleClose(1_200) }
+                override fun windowGainedFocus(e: WindowEvent) { closing?.stop() }
+            }
+            awt.contentPane.dropTarget = java.awt.dnd.DropTarget(awt.contentPane, java.awt.dnd.DnDConstants.ACTION_COPY, object : java.awt.dnd.DropTargetAdapter() {
+                override fun dragEnter(event: java.awt.dnd.DropTargetDragEvent) { closing?.stop(); dropping = true }
+                override fun dragExit(event: java.awt.dnd.DropTargetEvent) { dropping = false; if (!awt.isFocused) scheduleClose(1_200) }
+                override fun drop(event: java.awt.dnd.DropTargetDropEvent) {
+                    dropping = false
+                    event.acceptDrop(java.awt.dnd.DnDConstants.ACTION_COPY)
+                    @Suppress("UNCHECKED_CAST")
+                    val files = runCatching { event.transferable.getTransferData(java.awt.datatransfer.DataFlavor.javaFileListFlavor) as List<java.io.File> }.getOrNull()
+                    event.dropComplete(files != null)
+                    if (files != null) state.sendToPhone(files)
+                    if (!awt.isFocused) scheduleClose(4_000)
+                }
+            })
             val sized = object : ComponentAdapter() { override fun componentResized(e: ComponentEvent) { place(awt, at) } }
             awt.addWindowFocusListener(listener)
             awt.addComponentListener(sized)
             place(awt, at)
             awt.isAutoRequestFocus = true
             awt.toFront(); awt.requestFocus()
-            onDispose { awt.removeWindowFocusListener(listener); awt.removeComponentListener(sized) }
+            onDispose { closing?.stop(); awt.removeWindowFocusListener(listener); awt.removeComponentListener(sized) }
         }
         var status by remember { mutableStateOf(trayStatus(state)) }
         LaunchedEffect(Unit) { while (true) { status = trayStatus(state); delay(250) } }
-        StatusCard(status, onOpen = openMain, onDisconnect = { state.disconnect() }, onCancel = { state.cancel() })
+        StatusCard(status, onOpen = openMain, onDisconnect = { state.disconnect() }, onCancel = { state.cancel() }) { TrayPhone(state, dropping) }
     }
 }
 
@@ -297,7 +325,8 @@ private fun guessPlace(at: Point, width: Int, height: Int): Point {
 
 /** What the status window shows: the phone, how it's connected, the transfer moving now, and the buttons. */
 @Composable
-fun StatusCard(status: TrayStatus, onOpen: () -> Unit, onDisconnect: () -> Unit, onCancel: () -> Unit, modifier: Modifier = Modifier) {
+fun StatusCard(status: TrayStatus, onOpen: () -> Unit, onDisconnect: () -> Unit, onCancel: () -> Unit, modifier: Modifier = Modifier,
+               phone: @Composable ColumnScope.() -> Unit = {}) {
     val shape = RoundedCornerShape(16.dp)
     Column(modifier.width(320.dp).clip(shape).background(Brush.verticalGradient(listOf(Palette.dusk, Palette.night)))
         .border(1.dp, Palette.amber.copy(alpha = 0.32f), shape).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -314,6 +343,7 @@ fun StatusCard(status: TrayStatus, onOpen: () -> Unit, onDisconnect: () -> Unit,
                 Text(if (status.connected) "${status.transport} · ${S.connectedWord}" else S.notConnected, color = Palette.muted, fontSize = 12.sp,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
+            status.battery?.let { Spacer(Modifier.width(8.dp)); BatteryChip(it) }
         }
         if (status.moving) {
             Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
@@ -342,6 +372,7 @@ fun StatusCard(status: TrayStatus, onOpen: () -> Unit, onDisconnect: () -> Unit,
                 }
             }
         }
+        phone()
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TrayButton(S.openApp, primary = true, modifier = Modifier.weight(1f), onClick = onOpen)
         }
@@ -354,7 +385,7 @@ fun StatusCard(status: TrayStatus, onOpen: () -> Unit, onDisconnect: () -> Unit,
 
 /** A button that never wraps: its label shortens with an ellipsis instead. */
 @Composable
-private fun TrayButton(text: String, primary: Boolean = false, modifier: Modifier = Modifier, onClick: () -> Unit) {
+fun TrayButton(text: String, primary: Boolean = false, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val base = modifier.clip(CircleShape)
         .then(if (primary) Modifier.background(Palette.sunset) else Modifier.background(Palette.fg.copy(alpha = 0.08f)).border(1.dp, Palette.fg.copy(alpha = 0.14f), CircleShape))
     Box(base.pressable(CircleShape, label = text, onClick = onClick).padding(horizontal = 12.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {

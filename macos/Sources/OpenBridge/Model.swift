@@ -118,7 +118,27 @@ final class BrowserModel: ObservableObject {
     private var fromPhone = -1
     private var lastShared: String?
     /// The saved phone connected now, when the connection came from one.
-    private var current: SavedPhone?
+    private(set) var current: SavedPhone?
+
+    // Phone features from 1.2.0 (notifications, battery, Ring, Open on phone, Send to phone, photo backup): the
+    // state lives here, the work in Companion.swift.
+    /// Notifications and battery from the phones, kept per phone while the app runs.
+    let feed = PhoneFeed()
+    @Published var showNotifications = false
+    /// The phone is ringing (Ring phone), until Stop or 60 seconds.
+    @Published var ringing = false
+    /// Files to send to the phone once one is connected and free (dropped on the Dock icon, the menu bar or Services).
+    @Published var pendingSends: [URL] = []
+    /// The connected phone's app is too old for notifications, Ring and Send: say so once per phone.
+    @Published var companionHint = false
+    /// Photo backup running in the background (not a `transfer`: browsing and transfers carry on beside it).
+    @Published var backup: BackupProgress?
+    var eventsTask: Task<Void, Never>?
+    var ringTask: Task<Void, Never>?
+    var backupTask: Task<Void, Never>?
+    /// When each saved phone was last backed up in this session, so it runs on connect and then every 10 minutes.
+    var lastBackup: [String: Date] = [:]
+    var backupSpeed = SpeedMeter()
     /// Which saved phone is open, so the looks' phone switchers can mark it.
     var currentID: String? { connected ? current?.id : nil }
     /// Off after Disconnect, so a saved phone doesn't reconnect straight away.
@@ -182,10 +202,13 @@ final class BrowserModel: ObservableObject {
     enum Job {
         case download(Entry, to: URL, at: [String])
         case upload(URL, into: String, at: [String])
+        /// Send to phone (SEND): no folder; the phone picks a free name in Download/OpenBridge.
+        case send(URL)
         var name: String {
             switch self {
             case .download(let entry, _, _): return entry.name
             case .upload(let url, _, _): return url.lastPathComponent
+            case .send(let url): return url.lastPathComponent
             }
         }
     }
@@ -229,13 +252,13 @@ final class BrowserModel: ObservableObject {
     }
 
     /// Bumped on every new connection: IDs from an older one must be looked up again by name.
-    private var connection = 0
+    private(set) var connection = 0
     /// A transfer cut off by unplugging or disconnecting, continued when the same phone reconnects.
     private var interrupted: Transfer?
     /// The open folder by name, from the top (without the phone itself).
     private var trail: [String] { path.dropFirst().map(\.name) }
 
-    private func run(_ work: @escaping () async throws -> Void) {
+    func run(_ work: @escaping () async throws -> Void) {
         guard !busy else { return }
         busy = true; error = nil
         runEpoch += 1
@@ -303,6 +326,18 @@ final class BrowserModel: ObservableObject {
         self.speed = speed; speedMeasured = Date()
     }
 
+    /// Sample state for screenshots of the phone features (1.2.0): a connected saved phone over Wi‑Fi that answers
+    /// them. Never used otherwise.
+    func showSamplePhoneFeatures(phone: String) {
+        deviceName = phone
+        fastUSB = false; overUSB = false; viaHotspot = false
+        connected = true
+        host = "192.168.1.23"
+        client = try? BridgeClient(saved: "192.168.1.23", port: 41987, fingerprint: Data(repeating: 1, count: 32),
+                                   secret: Data(count: 32))
+        phoneInfo = PhoneInfo(version: "1.2.0", revision: BridgeClient.phoneFeaturesRevision, name: phone)
+    }
+
     /// An error message for the diagnostics log: names in quotes (files, folders) left out.
     static func redacted(_ message: String) -> String {
         if message.contains("already exists") { return "a file or folder with that name already exists" }
@@ -326,6 +361,10 @@ final class BrowserModel: ObservableObject {
     func startWatching() {
         guard watcher == nil else { return }
         discovery.start()
+        // Banner actions, Services and files dropped on the Dock icon come to this model.
+        PhoneNotifier.shared.model = self
+        PhoneNotifier.shared.setUp()
+        PhoneInbox.shared.model = self
         if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String {
             Task { await self.checkForUpdates(current: version) }
         }
@@ -357,6 +396,7 @@ final class BrowserModel: ObservableObject {
             else if fastUSB && debugging == nil { drop("The phone was unplugged.") }
             else if !overUSB && !fastUSB, let debugging, debugging != fastSkipped { upgradeToFastUSB(debugging) }
             else if !overUSB && Date().timeIntervalSince(lastAliveCheck) >= 5 { checkAlive() }
+            if connected { companionTick() }   // queued sends and photo backup, while nothing else runs
             return
         }
         if usbPairable != nil { return }   // waiting for "Pair over USB"
@@ -594,11 +634,14 @@ final class BrowserModel: ObservableObject {
         let message = "Text from \(phone) copied"
         show(message)
         Announce.spoken(message)
-        Announce.notification(message)
+        // A single web link gets an Open action that opens it in the default browser.
+        let link: String = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        Announce.notification(message, link: EventCodec.isWebLink(link) ? link : nil)
         Diagnostics.log("Received a text from the phone")
     }
 
     /// The phone's app version, for diagnostics and to suggest updating it. Phones before 0.13.0 don't know INFO.
+    /// Then starts what the phone's app supports (notifications and battery from 1.2.0).
     private func askInfo(_ client: BridgeClient) {
         let epoch = connection
         Task {
@@ -607,11 +650,13 @@ final class BrowserModel: ObservableObject {
                 guard epoch == connection else { return }
                 phoneInfo = info
                 Diagnostics.log("Phone app \(info.version), revision \(info.revision)")
+                companionReady(client, revision: info.revision)
             } catch {
                 guard epoch == connection else { return }
                 if BridgeError.isUnsupported(error) {
                     phoneOutdated = true
                     Diagnostics.log("Phone app is older than 0.13 (no INFO)")
+                    companionReady(client, revision: 0)
                 }
             }
         }
@@ -894,6 +939,7 @@ final class BrowserModel: ObservableObject {
         thumbnailQueue = []; thumbnailsRunning = 0; thumbnailEpoch += 1
         sizes = [:]; sizeQueue = []; sizing = false; sizesPending = []; current = nil; query = ""
         receiver?.cancel(); receiver = nil
+        companionStopped()
         searchReturn = nil; canReturnToResults = false
         try? FileManager.default.removeItem(at: previews)
     }
@@ -912,7 +958,7 @@ final class BrowserModel: ObservableObject {
     /// Asks the phone whether it's still there: every 5 seconds while connected over Wi‑Fi or Fast USB and idle,
     /// and at once after a network error. Two missed answers in a row end the connection, so the app goes back to
     /// the connect screen (where saved phones reconnect by themselves) instead of staying on a folder that's gone.
-    private func checkAlive(reason: String? = nil) {
+    func checkAlive(reason: String? = nil) {
         guard connected, liveness == nil, let bridge = client as? BridgeClient else { return }
         lastAliveCheck = Date()
         let epoch = connection
@@ -1057,7 +1103,7 @@ final class BrowserModel: ObservableObject {
         }
     }
 
-    private func resolve(_ names: [String], _ client: any FileSource) async throws -> ([(id: String, name: String)], [Entry])? {
+    func resolve(_ names: [String], _ client: any FileSource) async throws -> ([(id: String, name: String)], [Entry])? {
         func find(_ name: String, in entries: [Entry]) -> Entry? {
             entries.first { $0.directory && $0.name.caseInsensitiveCompare(name) == .orderedSame }
         }
@@ -1523,8 +1569,11 @@ final class BrowserModel: ObservableObject {
         guard !jobs.isEmpty else { transfer = nil; show("Nothing to transfer."); return }
         let upload: Bool
         if case .upload = jobs[0] { upload = true } else { upload = false }
+        let sending: Bool
+        if case .send = jobs[0] { sending = true } else { sending = false }
         let planned = planned ?? connection
-        transfer = Transfer(name: jobs[0].name, upload: upload, count: jobs.count, remaining: jobs, connection: planned, phone: deviceName)
+        transfer = Transfer(name: jobs[0].name, upload: upload || sending, count: jobs.count, remaining: jobs,
+                            connection: planned, phone: deviceName)
         var batch: Int64 = 0
         for job in jobs { batch += Self.size(of: job) }
         transfer?.totalBytes = batch
@@ -1533,6 +1582,8 @@ final class BrowserModel: ObservableObject {
         do {
             var lastSaved: URL?
             var touchedFolder = false
+            /// What each sent file is called on the phone (it picks a free name).
+            var sent: [(name: String, saved: String)] = []
             for (index, job) in jobs.enumerated() {
                 try Task.checkCancellation()
                 self.transfer?.name = job.name; self.transfer?.index = index + 1; self.transfer?.fraction = 0
@@ -1550,11 +1601,19 @@ final class BrowserModel: ObservableObject {
                     try await client.upload(url, directoryID: directory) { done, total in self.update(done, total) }
                     self.transfer?.finishedBytes += self.transfer?.currentTotal ?? 0
                     touchedFolder = touchedFolder || directory == self.path.last?.id
+                case .send(let url):
+                    guard let bridge = client as? BridgeClient else {
+                        throw BridgeError.message("Send to phone works over Wi‑Fi and Fast USB.")
+                    }
+                    let saved: String = try await bridge.sendFile(url) { done, total in self.update(done, total) }
+                    self.transfer?.finishedBytes += self.transfer?.currentTotal ?? 0
+                    sent.append((url.lastPathComponent, saved))
                 }
             }
             self.transfer?.remaining = []
             self.transfer?.fraction = 1; self.transfer?.done = true; self.transfer?.saved = lastSaved
             try? FileManager.default.removeItem(at: FileManager.default.temporaryDirectory.appendingPathComponent("OpenBridge Uploads"))
+            if !sent.isEmpty { didSend(sent) }
             if touchedFolder || upload {
                 // Publication succeeded even if a subsequent folder refresh fails.
                 do { self.entries = try await client.list(id: self.path.last!.id) }
@@ -1600,6 +1659,8 @@ final class BrowserModel: ObservableObject {
             return .download(file, to: target, at: location)
         case .upload(let url, _, let location):
             return .upload(url, into: try await folder(location).id, at: location)
+        case .send:
+            return job   // no folder: nothing to look up again
         }
     }
 
@@ -1644,7 +1705,7 @@ final class BrowserModel: ObservableObject {
     private static func size(of job: Job) -> Int64 {
         switch job {
         case .download(let entry, _, _): return entry.size
-        case .upload(let url, _, _):
+        case .upload(let url, _, _), .send(let url):
             let size: Int? = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize
             return Int64(size ?? 0)
         }

@@ -26,13 +26,21 @@ dependencies {
     testImplementation(kotlin("test"))
 }
 
+// The phone's in-memory notifications, ring and links (from the protocol's tests), to test this client against the
+// real server for operations 19 to 23.
+val companionFixture = tasks.register<Sync>("companionFixture") {
+    from("../protocol/src/test/java") { include("org/openbridge/protocol/MemoryCompanion.java") }
+    into(layout.buildDirectory.dir("generated/companion-fixture"))
+}
+sourceSets["test"].java.srcDir(companionFixture)
+
 tasks.test {
     useJUnitPlatform()
     // The previews in another language: PREVIEW_LANG=zh draws them in Simplified Chinese.
     System.getenv("PREVIEW_LANG")?.let { systemProperty("user.language", it) }
 }
 
-val appVersion = providers.gradleProperty("appVersion").orElse("1.1.1")
+val appVersion = providers.gradleProperty("appVersion").orElse("1.2.0")
 
 // The version for development runs (the installed app gets it from its launcher): diagnostics, the phone-app check.
 val versionResource = tasks.register("versionResource") {

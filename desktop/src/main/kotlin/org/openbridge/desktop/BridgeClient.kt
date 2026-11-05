@@ -308,15 +308,15 @@ class BridgeClient internal constructor(
         if (size > Wire.MAX_FILE) throw BridgeException(S.tooBig)
         val key = contentKey(source)
         try {
-            send(12, source, directoryId, { Wire.writeString(it, name); it.writeLong(size); it.write(key) }, resumable = true, cancelled, progress)
+            transmit(12, source, directoryId, { Wire.writeString(it, name); it.writeLong(size); it.write(key) }, resumable = true, cancelled, progress)
         } catch (e: BridgeException) {
             if (e.message?.contains("Unsupported operation") != true) throw e
-            send(3, source, directoryId, { Wire.writeString(it, name); it.writeLong(size) }, resumable = false, cancelled, progress)
+            transmit(3, source, directoryId, { Wire.writeString(it, name); it.writeLong(size) }, resumable = false, cancelled, progress)
         }
     }
 
-    private fun send(operation: Int, source: File, directoryId: String, header: (DataOutputStream) -> Unit, resumable: Boolean,
-                     cancelled: () -> Boolean, progress: (Long, Long) -> Unit) {
+    private fun transmit(operation: Int, source: File, directoryId: String, header: (DataOutputStream) -> Unit, resumable: Boolean,
+                         cancelled: () -> Boolean, progress: (Long, Long) -> Unit, after: (DataInputStream) -> Unit = {}) {
         val name = source.name
         val size = source.length()
         request(operation, directoryId, header) { input, output ->
@@ -339,6 +339,7 @@ class BridgeClient internal constructor(
             }
             output.flush()
             status(input)   // published: a completed send is not success until the phone confirms
+            after(input)
         }
     }
 
@@ -479,6 +480,48 @@ class BridgeClient internal constructor(
             }
             SearchResult(found, input.readUnsignedByte() == 1)
         }
+    }
+
+    /**
+     * What happened on the phone after `cursor` (0 the first time), waiting up to `wait` milliseconds for something
+     * (EVENTS, from 1.2.0). Kinds this computer doesn't know are skipped.
+     */
+    fun events(cursor: Long, wait: Int): EventBatch = request(19, "", { it.writeLong(cursor); it.writeInt(wait.coerceIn(0, 25_000)) }) { input, _ ->
+        status(input)
+        PhoneEvents.read(input)
+    }
+
+    /** Dismisses a notification on the phone (`reply` null), or answers it with `reply`. */
+    fun notificationAction(key: String, reply: String? = null) {
+        if (reply != null && reply.toByteArray().size !in 1..4_096) throw BridgeException(S.replyTooLong)
+        request(20, key, { if (reply == null) it.writeByte(1) else { it.writeByte(2); Wire.writeString(it, reply) } }) { input, _ -> status(input) }
+    }
+
+    /** Rings the phone at full alarm volume (for at most a minute), or stops it. */
+    fun ring(on: Boolean) = request(21, "", { it.writeByte(if (on) 1 else 0) }) { input, _ -> status(input) }
+
+    /** Offers a web link on the phone: a notification that opens it when tapped. */
+    fun openUrl(url: String) {
+        val link = singleUrl(url) ?: throw BridgeException(S.notALink)
+        if (link.toByteArray().size > 2_048) throw BridgeException(S.notALink)
+        request(22, "", { Wire.writeString(it, link) }) { input, _ -> status(input) }
+    }
+
+    /**
+     * Sends a file to the phone without choosing a folder (SEND): it lands in Download/OpenBridge, or the top of the
+     * shared folder, under a free name, which is returned. An interrupted send continues like a resumable upload.
+     */
+    fun sendFile(source: File, name: String = source.name, cancelled: () -> Boolean = { false }, progress: (Long, Long) -> Unit = { _, _ -> }): String {
+        Wire.validateName(name)
+        if (!source.isFile) throw BridgeException(S.regularFile)
+        val size = source.length()
+        if (size > Wire.MAX_FILE) throw BridgeException(S.tooBig)
+        val key = contentKey(source)
+        var saved = name
+        transmit(23, source, "", { Wire.writeString(it, name); it.writeLong(size); it.write(key) }, resumable = true, cancelled, progress) { input ->
+            saved = Wire.readString(input, 255)
+        }
+        return saved
     }
 
     fun clipboard(): String = request(7, "") { input, _ -> status(input); Wire.readString(input, Wire.MAX_CLIPBOARD) }

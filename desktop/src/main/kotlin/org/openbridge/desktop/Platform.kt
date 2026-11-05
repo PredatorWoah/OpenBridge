@@ -24,14 +24,16 @@ object Platform {
     private fun xdg(variable: String, fallback: String) = System.getenv(variable)?.takeIf { it.startsWith("/") }?.let(::File) ?: File(home, fallback)
 
     /** Downloads. On Linux, the folder named in user-dirs.dirs: many desktops translate it ("下载"). */
-    val downloads: File by lazy {
-        val named = if (windows) null else runCatching {
-            File(xdg("XDG_CONFIG_HOME", ".config"), "user-dirs.dirs").readLines()
-                .firstNotNullOfOrNull { Regex("""^XDG_DOWNLOAD_DIR="(.+)"$""").find(it.trim())?.groupValues?.get(1) }
-                ?.replace("\$HOME", home.path)?.let(::File)?.takeIf { it.isAbsolute && it.absoluteFile != home.absoluteFile }
-        }.getOrNull()
-        named ?: File(home, "Downloads")
-    }
+    val downloads: File by lazy { userDir("DOWNLOAD") ?: File(home, "Downloads") }
+
+    /** Pictures, found the same way. */
+    val pictures: File by lazy { userDir("PICTURES") ?: File(home, "Pictures") }
+
+    private fun userDir(name: String): File? = if (windows) null else runCatching {
+        File(xdg("XDG_CONFIG_HOME", ".config"), "user-dirs.dirs").readLines()
+            .firstNotNullOfOrNull { Regex("""^XDG_${name}_DIR="(.+)"$""").find(it.trim())?.groupValues?.get(1) }
+            ?.replace("\$HOME", home.path)?.let(::File)?.takeIf { it.isAbsolute && it.absoluteFile != home.absoluteFile }
+    }.getOrNull()
 
     /** Writes a file only this user can read (mode 0600 on Linux), replacing the old one in one step. */
     fun writePrivate(file: File, bytes: ByteArray) {

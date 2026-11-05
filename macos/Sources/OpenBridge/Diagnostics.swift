@@ -59,6 +59,8 @@ final class Diagnostics: @unchecked Sendable {
         text.append("USB debugging seen: \(model.usbDebugging ? "yes" : "no")")
         text.append("Look: \(Palette.look.label)")
         text.append("Send copied text automatically: \(model.autoSendTexts ? "on" : "off")")
+        text.append("Phone notifications on this Mac: \(model.feed.showOnMac ? "on" : "off")")
+        text.append("Phone features (notifications, Ring, Send): \(model.phoneFeatures ? "yes" : "no")")
         text.append("")
         text.append("Recent events:")
         text += shared.recent
@@ -75,17 +77,11 @@ enum Announce {
                              userInfo: [.announcement: message, .priority: NSAccessibilityPriorityLevel.high.rawValue])
     }
 
-    /// A notification, only while OpenBridge isn't the active app (the window shows its own toast otherwise).
-    @MainActor static func notification(_ message: String) {
+    /// A notification, only while OpenBridge isn't the active app (the window shows its own toast otherwise). With a
+    /// web `link`, it has an Open action that opens it in the default browser.
+    @MainActor static func notification(_ message: String, link: String? = nil) {
         // Notifications need a real app bundle; a development build run from the terminal has none.
         guard !NSApp.isActive, Bundle.main.bundleIdentifier != nil, Bundle.main.bundleURL.pathExtension == "app" else { return }
-        let center = UNUserNotificationCenter.current()
-        center.requestAuthorization(options: [.alert]) { granted, _ in
-            guard granted else { return }
-            let content = UNMutableNotificationContent()
-            content.title = "OpenBridge"
-            content.body = message
-            center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil), withCompletionHandler: nil)
-        }
+        PhoneNotifier.shared.notice(title: "OpenBridge", body: link.map { message + "\n" + $0 } ?? message, link: link)
     }
 }

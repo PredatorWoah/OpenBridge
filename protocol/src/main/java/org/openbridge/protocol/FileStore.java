@@ -103,7 +103,7 @@ public final class FileStore implements Store {
         Path part = directory.resolve(Names.TEMPORARY_PREFIX + UUID.randomUUID());
         OutputStream output = Files.newOutputStream(part, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
         reserved.add(reservation);
-        return upload(directory, name, part, output, reservation, 0, false);
+        return upload(directory, name, part, output, reservation, 0, false, false);
     }
 
     @Override public synchronized Upload resume(String directoryId, String name, long size, byte[] key) throws IOException {
@@ -122,7 +122,56 @@ public final class FileStore implements Store {
         OutputStream output = Files.newOutputStream(part, StandardOpenOption.CREATE, StandardOpenOption.WRITE,
             StandardOpenOption.APPEND, LinkOption.NOFOLLOW_LINKS);
         reserved.add(reservation);
-        return upload(directory, name, part, output, reservation, have, true);
+        return upload(directory, name, part, output, reservation, have, true, false);
+    }
+
+    /** Where SEND saves files, as folder names below the first storage area; empty: at its top. */
+    private List<String> inbox = List.of();
+
+    /**
+     * Makes SEND (23) save files in this folder below the first storage area, made when it's missing: for the whole
+     * phone, `inbox("Download", "OpenBridge")`. Returns this store.
+     */
+    public synchronized FileStore inbox(String... folders) throws IOException {
+        for (String folder : folders) Names.requireStorable(folder);
+        inbox = List.of(folders);
+        return this;
+    }
+
+    /** The inbox folder, made when it's missing; never through a link. */
+    private Path inboxDirectory() throws IOException {
+        Path directory = rootPaths.get(0);
+        for (String folder : inbox) {
+            Path next = directory.resolve(folder);
+            if (Files.isSymbolicLink(next)) throw new IOException("Can't save received files");
+            if (!Files.exists(next, LinkOption.NOFOLLOW_LINKS)) {
+                try { Files.createDirectory(next); } catch (FileAlreadyExistsException raced) { /* made meanwhile */ }
+            }
+            if (!Files.isDirectory(next, LinkOption.NOFOLLOW_LINKS)) throw new IOException("Can't save received files");
+            directory = next;
+        }
+        if (!directory.toRealPath().startsWith(rootPaths.get(0))) throw new IOException("Can't save received files");
+        return directory;
+    }
+
+    @Override public synchronized Upload receive(String name, long size, byte[] key) throws IOException {
+        Names.requireStorable(name);
+        Path directory = inboxDirectory();
+        if (!Files.isWritable(directory)) throw new IOException("Folder is read-only");
+        String partName = Names.resumable(name, size, key);
+        // Two computers sending the same file at once would write the same part: one waits for the other.
+        String reservation = directory + "/" + partName;
+        if (reserved.contains(reservation)) throw new IOException("This file is already being received");
+        removeAbandoned(directory);
+        Path part = directory.resolve(partName);
+        if (Files.exists(part, LinkOption.NOFOLLOW_LINKS) && !Files.isRegularFile(part, LinkOption.NOFOLLOW_LINKS))
+            throw new IOException("Upload is unavailable");
+        long have = Files.exists(part, LinkOption.NOFOLLOW_LINKS) ? Files.size(part) : 0;
+        if (have > size) { Files.delete(part); have = 0; }
+        OutputStream output = Files.newOutputStream(part, StandardOpenOption.CREATE, StandardOpenOption.WRITE,
+            StandardOpenOption.APPEND, LinkOption.NOFOLLOW_LINKS);
+        reserved.add(reservation);
+        return upload(directory, name, part, output, reservation, have, true, true);
     }
 
     /** Interrupted uploads in this folder that nobody continued for a week. */
@@ -136,21 +185,33 @@ public final class FileStore implements Store {
         } catch (IOException ignored) {}
     }
 
-    /** Collects into `part`, then publishes it as `name` without ever replacing a file. `keep`: an interrupted part stays. */
-    private Upload upload(Path directory, String name, Path part, OutputStream output, String reservation, long existing, boolean keep) {
-        Path target = directory.resolve(name);
+    /**
+     * Collects into `part`, then publishes it as `name` without ever replacing a file. `keep`: an interrupted part stays.
+     * `free`: a taken name becomes "name (1).ext" and so on, instead of failing.
+     */
+    private Upload upload(Path directory, String name, Path part, OutputStream output, String reservation, long existing, boolean keep, boolean free) {
         return new Upload() {
             private boolean committed;
+            private Path saved;
             public OutputStream stream() { return output; }
             public long existing() { return existing; }
             public void commit() throws IOException {
                 synchronized (FileStore.this) {
-                    if (exists(directory, name)) throw new IOException("Filename already exists");
-                    try { Files.move(part, target); }   // without REPLACE_EXISTING: never overwrites
-                    catch (FileAlreadyExistsException e) { throw new IOException("Filename already exists"); }
-                    committed = true;
+                    for (int number = 0; number < (free ? 10_000 : 1); number++) {
+                        String candidate = Names.numbered(name, number);
+                        if (exists(directory, candidate) || (free && reserved.contains(directory + "/" + Names.collisionKey(candidate)))) continue;
+                        Path target = directory.resolve(candidate);
+                        try { Files.move(part, target); }   // without REPLACE_EXISTING: never overwrites
+                        catch (FileAlreadyExistsException e) { continue; }
+                        committed = true;
+                        saved = target;
+                        return;
+                    }
+                    throw new IOException("Filename already exists");
                 }
             }
+            public String savedName() { return saved == null ? null : saved.getFileName().toString(); }
+            public String savedLocation() { return saved == null ? null : saved.toAbsolutePath().toString(); }
             public void close() throws IOException {
                 synchronized (FileStore.this) {
                     try { output.close(); } finally {

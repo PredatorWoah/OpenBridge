@@ -111,6 +111,14 @@ private fun PortholeRail(state: AppState, compact: Boolean) {
                         Text(state.transport.label, color = Palette.sun, fontSize = if (compact) 9.5.sp else 10.5.sp, fontWeight = FontWeight.SemiBold,
                             textAlign = TextAlign.Center, maxLines = 2, modifier = Modifier.padding(top = 4.dp)
                                 .semantics { contentDescription = announcement; liveRegion = LiveRegionMode.Polite })
+                        state.battery?.let { battery ->
+                            val described = S.batteryLevel(battery.level, battery.charging)
+                            Row(Modifier.padding(top = 3.dp).semantics(mergeDescendants = true) { contentDescription = described }, verticalAlignment = Alignment.CenterVertically) {
+                                Icon(batteryIcon(battery), null, tint = if (battery.level <= 15 && !battery.charging) Palette.pink else Palette.cream,
+                                    modifier = Modifier.size(if (compact) 11.dp else 13.dp))
+                                Text("${battery.level}%", color = Palette.fg, fontSize = if (compact) 9.5.sp else 10.5.sp, maxLines = 1, softWrap = false)
+                            }
+                        }
                     }
                 }
             }
@@ -118,6 +126,10 @@ private fun PortholeRail(state: AppState, compact: Boolean) {
         Spacer(Modifier.height(12.dp))
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (state.bridge != null) RailButton(Icons.Filled.ChatBubbleOutline, S.texts, port) { state.panel = Panel.TEXTS }
+            if (state.bridge != null) Box {
+                RailButton(Icons.Filled.Notifications, S.phoneNotifications, port) { state.panel = Panel.NOTIFICATIONS }
+                NotificationBadge(state.phoneStatus.items.size, Modifier.align(Alignment.TopEnd))
+            }
             RailButton(Icons.Filled.Settings, S.settings, port) { state.panel = Panel.SETTINGS }
         }
     }

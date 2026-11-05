@@ -36,6 +36,7 @@ class PhoneClipboard(private val context: Context) : Clipboard {
         onMain {
             manager.setPrimaryClip(ClipData.newPlainText("From your computer", text))
             Texts.received(text, computer)
+            Feed.textReceived(text, computer)
             if (!Sharing.onScreen) ShareService.textReceived(context, computer)
         }
     }

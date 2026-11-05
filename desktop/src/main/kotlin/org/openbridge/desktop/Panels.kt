@@ -110,6 +110,14 @@ fun SettingsPanel(state: AppState, copyDiagnostics: () -> Unit) {
             }
             Label(S.textsSection)
             Toggle(S.autoSend, state.autoSendTexts, S.autoSendHint) { state.changeAutoSend(it) }
+            Label(S.phoneSection)
+            Toggle(S.showNotifications, state.showNotifications, S.showNotificationsHint) { state.changeShowNotifications(it) }
+            Toggle(S.playSound, state.notificationSound) { state.changeNotificationSound(it) }
+            Label(S.sendToSection)
+            SendToSetting()
+            Label(S.backupSection)
+            if (state.saved.isEmpty()) Text(S.backupNoPhones, color = Palette.muted, fontSize = 12.5.sp)
+            state.saved.forEach { phone -> BackupSetting(state, phone) }
             Label(S.updatesSection)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 GhostButton(if (state.updating == S.checking) S.checking else S.checkUpdates, enabled = state.updating == null) { state.checkForUpdates(manual = true) }
@@ -124,6 +132,40 @@ fun SettingsPanel(state: AppState, copyDiagnostics: () -> Unit) {
             Text("OpenBridge · ${S.version(AppVersion.current)}", color = Palette.fg, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
             Text(S.aboutLine, color = Palette.muted, fontSize = 12.5.sp)
             GhostButton(S.github) { openPage("https://github.com/PredatorWoah/OpenBridge") }
+        }
+    }
+}
+
+/** "Add OpenBridge to Send to" (Windows) or "Open With" (Linux), for the installed app. */
+@Composable
+private fun SendToSetting() {
+    var added by remember { mutableStateOf(Integration.installed) }
+    var note by remember { mutableStateOf<String?>(null) }
+    val available = Integration.launcher != null
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+        GhostButton(if (added) S.removeSendTo else S.addSendTo, enabled = available) {
+            val worked = if (added) Integration.remove() else Integration.add()
+            if (worked) added = Integration.installed
+            note = if (!worked) S.sendToFailed else if (added) S.sendToAdded else S.sendToRemoved
+        }
+        note?.let { Text(it, color = Palette.muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false)) }
+    }
+    Text(if (available) S.sendToHint else S.sendToInstalled, color = Palette.muted, fontSize = 12.sp)
+}
+
+/** One saved phone's photo backup: on or off, and where to. */
+@Composable
+private fun BackupSetting(state: AppState, phone: SavedPhone) {
+    val folder = state.backupFolder(phone)
+    Column(Modifier.fillMaxWidth().glass(RoundedCornerShape(12.dp)).padding(horizontal = 10.dp, vertical = 6.dp)) {
+        Row(Modifier.padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            androidx.compose.material.Icon(Icons.Filled.Smartphone, null, tint = Palette.amber, modifier = Modifier.size(15.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(phone.name, color = Palette.fg, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Toggle(S.backupAuto, folder != null, S.backupHint((folder ?: Backups.defaultFolder(phone.name)).path)) { state.changeBackup(phone, it) }
+        if (folder != null) Row(Modifier.padding(start = 4.dp, bottom = 6.dp)) {
+            GhostButton(S.changeFolder) { Dialogs.chooseFolder(S.chooseBackupFolder)?.let { state.changeBackup(phone, true, it) } }
         }
     }
 }

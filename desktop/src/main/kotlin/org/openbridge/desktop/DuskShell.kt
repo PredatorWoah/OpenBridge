@@ -71,7 +71,9 @@ private fun Toolbar(state: AppState) {
             }
         }
         TransportChip(state)
+        PhoneBattery(state)
         if (state.bridge != null) IconButton(Icons.Filled.ChatBubbleOutline, S.texts) { state.panel = Panel.TEXTS }
+        if (state.bridge != null) NotificationsButton(state)
         SortButton(state)
         MoreButton(state)
         DownloadButton(state)

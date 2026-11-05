@@ -1,0 +1,7 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <application>
+        <!-- The empty host activity the screenshot tests draw in (from ui-test-manifest): never reachable from other apps. -->
+        <activity android:name="androidx.activity.ComponentActivity" android:exported="false" tools:replace="android:exported" />
+    </application>
+</manifest>

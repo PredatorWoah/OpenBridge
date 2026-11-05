@@ -106,6 +106,7 @@ public final class ProtocolTest {
         trustTests();
         editingTests();
         resumeAndOutboxTests();
+        companionTests();
         fuzzTests();
         System.out.println("Protocol tests passed: " + checks + " assertions");
     }
@@ -539,7 +540,253 @@ public final class ProtocolTest {
         check(info.readByte() == 0 && Wire.readString(info, 64).equals("1.0.0") && info.readInt() == Session.REVISION
             && Wire.readString(info, 128).equals("vivo X300 Pro") && info.available() == 0, "INFO reports version, revision and name");
         DataInputStream unnamed = serve(new Session(memory, SECRET).describe("x".repeat(100), "y".repeat(300)), simple(18, "", out -> {}));
-        check(unnamed.readByte() == 0 && Wire.readString(unnamed, 64).length() == 64 && unnamed.readInt() == 18 && Wire.readString(unnamed, 128).length() == 128, "INFO strings are bounded");
+        check(unnamed.readByte() == 0 && Wire.readString(unnamed, 64).length() == 64 && unnamed.readInt() == Session.REVISION && Wire.readString(unnamed, 128).length() == 128, "INFO strings are bounded");
+    }
+
+    /** One EVENTS reply, parsed: the cursor, then each event as its kind and body. */
+    private static final class Reply {
+        long cursor;
+        final List<Integer> kinds = new ArrayList<>();
+        final List<byte[]> bodies = new ArrayList<>();
+    }
+    private static Reply events(Session session, long cursor, int wait) throws IOException {
+        DataInputStream in = serve(session, simple(19, "", out -> { out.writeLong(cursor); out.writeInt(wait); }));
+        check(in.readByte() == 0, "EVENTS succeeds");
+        Reply reply = new Reply();
+        reply.cursor = in.readLong();
+        int count = in.readInt();
+        check(count >= 0 && count <= 200, "At most 200 events");
+        for (int i = 0; i < count; i++) {
+            reply.kinds.add(in.readUnsignedByte());
+            int length = in.readInt();
+            check(length >= 0 && length <= 65_536, "Event bodies are bounded");
+            byte[] body = new byte[length]; in.readFully(body);
+            reply.bodies.add(body);
+        }
+        check(in.available() == 0, "Nothing after the events");
+        return reply;
+    }
+    private static String[] notificationFields(byte[] body) throws IOException {
+        DataInputStream in = new DataInputStream(new ByteArrayInputStream(body));
+        String key = Wire.readString(in, 256), app = Wire.readString(in, 128), pkg = Wire.readString(in, 128);
+        String title = Wire.readString(in, 512), text = Wire.readString(in, 4096);
+        long time = in.readLong();
+        int flags = in.readUnsignedByte();
+        String code = Wire.readString(in, 16);
+        check(in.available() == 0, "Nothing after the notification's fields");
+        return new String[] {key, app, pkg, title, text, Long.toString(time), Integer.toString(flags), code};
+    }
+    private static String error(DataInputStream reply) throws IOException {
+        check(reply.readByte() == 1, "Expected an error status");
+        String message = Wire.readString(reply, 512);
+        check(!message.isEmpty() && reply.available() == 0, "An error has a message and nothing after it");
+        return message;
+    }
+
+    /** EVENTS, NOTIFICATION ACTION, RING, OPEN URL and SEND (operations 19 to 23). */
+    private static void companionTests() throws Exception {
+        // A phone without them (the desktop test server) answers each with the update error.
+        Session old = new Session(new MemoryStore(), SECRET);
+        byte[][] requests = {
+            simple(19, "", out -> { out.writeLong(0); out.writeInt(0); }),
+            simple(20, "k", out -> out.writeByte(1)),
+            simple(21, "", out -> out.writeByte(1)),
+            simple(22, "", out -> Wire.writeString(out, "https://example.com")),
+            simple(23, "", out -> { Wire.writeString(out, "a.txt"); out.writeLong(1); out.write(new byte[32]); out.write(1); }),
+        };
+        for (byte[] request : requests)
+            check(error(serve(old, request)).equals("Unsupported operation; update OpenBridge on the phone"), "Older phones ask for an update");
+
+        MemoryCompanion phone = new MemoryCompanion();
+        Trust named = new Trust() {
+            public String computer(byte[] secret) { return Arrays.equals(secret, SECRET) ? "Aditya's MacBook Air" : null; }
+            public byte[] admit(String computer) { return SECRET.clone(); }
+        };
+        MemoryStore memory = new MemoryStore();
+        Session session = new Session(memory, named, null, null, null, null, phone);
+        for (byte[] request : requests) { byte[] bad = request.clone(); bad[4] ^= 1; check(error(serve(session, bad)).equals("Pairing rejected"), "Companion operations need the secret"); }
+
+        // EVENTS: the first request starts over with RESET and the current state.
+        check(phone.log.battery(80, true) && !phone.log.battery(80, true), "Only a battery change is an event");
+        phone.post("0|com.whatsapp|1|null|10", "WhatsApp", "Mum", "Dinner at 7?", true, "");
+        phone.post("0|com.bank|2|null|10", "Bank", "Your code", "Your verification code is 123456", false, "123456");
+        Reply first = events(session, 0, 0);
+        check(first.kinds.equals(List.of(EventLog.RESET, EventLog.BATTERY, EventLog.NOTIFICATION, EventLog.NOTIFICATION)), "RESET, battery, then notifications");
+        check(first.bodies.get(0).length == 0 && Arrays.equals(first.bodies.get(1), new byte[] {80, 1}), "RESET is empty; battery is level and charging");
+        String[] mum = notificationFields(first.bodies.get(2));
+        check(mum[0].equals("0|com.whatsapp|1|null|10") && mum[1].equals("WhatsApp") && mum[2].equals("com.example.whatsapp")
+            && mum[3].equals("Mum") && mum[4].equals("Dinner at 7?") && mum[6].equals("3") && mum[7].isEmpty(), "Notification fields");
+        check(notificationFields(first.bodies.get(3))[7].equals("123456") && notificationFields(first.bodies.get(3))[6].equals("2"), "Code and flags");
+        check(first.cursor != 0, "A cursor to send next time");
+        // Nothing new: the same cursor comes back with no events.
+        Reply idle = events(session, first.cursor, 0);
+        check(idle.kinds.isEmpty() && idle.cursor == first.cursor, "No events after the cursor");
+        // A long poll answers as soon as something happens.
+        Thread later = new Thread(() -> { try { Thread.sleep(150); } catch (InterruptedException ignored) {} phone.log.battery(79, true); });
+        long started = System.nanoTime();
+        later.start();
+        Reply woke = events(session, first.cursor, 20_000);
+        later.join();
+        check((System.nanoTime() - started) < 5_000_000_000L && woke.kinds.equals(List.of(EventLog.BATTERY)) && woke.bodies.get(0)[0] == 79, "EVENTS wakes for a new event");
+        // An update replaces, a removal says so, and the cursor moves on.
+        phone.post("0|com.whatsapp|1|null|10", "WhatsApp", "Mum", "Dinner at 8!", true, "");
+        phone.log.removed("0|com.bank|2|null|10");
+        phone.log.removed("never-sent");
+        Reply next = events(session, woke.cursor, 0);
+        check(next.kinds.equals(List.of(EventLog.NOTIFICATION, EventLog.REMOVED)), "Update, then removal");
+        check(notificationFields(next.bodies.get(0))[4].equals("Dinner at 8!"), "The same key again replaces it");
+        check(Wire.readString(new DataInputStream(new ByteArrayInputStream(next.bodies.get(1))), 256).equals("0|com.bank|2|null|10"), "REMOVED carries the key");
+        // A restart (another log), a made-up cursor, a negative one or 0 all start over with the state now.
+        Reply restarted = events(new Session(memory, named, null, null, null, null, new MemoryCompanion()), next.cursor, 0);
+        check(restarted.kinds.equals(List.of(EventLog.RESET)), "A cursor from before a restart starts over");
+        for (long cursor : new long[] {0, -1, next.cursor + 1, next.cursor ^ (1L << 40), Long.MAX_VALUE, Long.MIN_VALUE}) {
+            Reply reset = events(session, cursor, 1_000);
+            check(reset.kinds.equals(List.of(EventLog.RESET, EventLog.BATTERY, EventLog.NOTIFICATION)), "Unknown cursor " + cursor + " gets RESET and the state");
+            check(reset.cursor == next.cursor, "After a reset, the cursor is the newest event");
+        }
+        // Falling more than 500 events behind starts over too.
+        for (int i = 0; i < 300; i++) phone.log.battery(i % 2, false);
+        Reply behind = events(session, next.cursor, 0);
+        check(behind.kinds.size() == 200 && behind.kinds.stream().allMatch(k -> k == EventLog.BATTERY), "200 events at most per reply");
+        Reply rest = events(session, behind.cursor, 0);
+        check(rest.kinds.size() == 100 && events(session, rest.cursor, 0).kinds.isEmpty(), "Then the rest");
+        for (int i = 0; i < 501; i++) phone.log.battery(i % 2 == 0 ? 50 : 51, false);
+        check(events(session, rest.cursor, 0).kinds.get(0) == EventLog.RESET, "Too far behind starts over");
+        // A snapshot with more notifications than fit keeps the newest.
+        MemoryCompanion busy = new MemoryCompanion();
+        for (int i = 0; i < 250; i++) busy.post("k" + i, "App", "T" + i, "", false, "");
+        Reply crowded = events(new Session(memory, named, null, null, null, null, busy), 0, 0);
+        check(crowded.kinds.size() == 200 && notificationFields(crowded.bodies.get(199))[0].equals("k249")
+            && notificationFields(crowded.bodies.get(1))[0].equals("k51"), "A crowded RESET keeps the newest notifications");
+        // Limits: waits from 0 to 25 seconds, an empty ID, a whole request.
+        phone.maxWaitMillis = 0;
+        check(events(session, 0, 25_000).kinds.get(0) == EventLog.RESET, "A 25-second wait is allowed");
+        check(error(serve(session, simple(19, "", out -> { out.writeLong(0); out.writeInt(25_001); }))).equals("Invalid wait"), "Longer waits are refused");
+        check(error(serve(session, simple(19, "", out -> { out.writeLong(0); out.writeInt(-1); }))).equals("Invalid wait"), "Negative waits are refused");
+        check(error(serve(session, simple(19, "x", out -> { out.writeLong(0); out.writeInt(0); }))).length() > 0, "EVENTS takes an empty ID");
+        check(error(serve(session, simple(19, "", out -> out.writeInt(0)))).length() > 0, "A cut EVENTS request fails");
+        phone.maxWaitMillis = Long.MAX_VALUE;
+        // Strings longer than their limit are cut at a character boundary; keys never are.
+        phone.post("long", "Ä".repeat(100), "é".repeat(300), "x" + "😀".repeat(2_000), false, "12345678901234567890");
+        String[] cut = notificationFields(events(session, 0, 0).bodies.get(3));
+        check(cut[1].equals("Ä".repeat(64)) && cut[3].equals("é".repeat(256)), "Two-byte characters cut whole");
+        check(cut[2].equals("com.example.") && cut[4].equals("x" + "😀".repeat(1_023)) && cut[7].equals("1234567890123456"), "Four-byte characters cut whole");
+        check(EventLog.cut("ab😀", 5).equals("ab") && EventLog.cut(null, 5).isEmpty() && EventLog.cut("abc", 3).equals("abc"), "cut");
+        try { phone.log.notification("k".repeat(257), "", "", "", "", 0, 0, ""); check(false, "Over-long keys are refused"); }
+        catch (IllegalArgumentException expected) { check(true, "Over-long keys are refused"); }
+
+        // NOTIFICATION ACTION
+        String key = "0|com.whatsapp|1|null|10";
+        check(error(serve(session, simple(20, key, out -> out.writeByte(3)))).equals("Invalid notification action"), "Unknown actions are refused");
+        check(error(serve(session, simple(20, key, out -> { out.writeByte(2); Wire.writeString(out, ""); }))).length() > 0, "Empty replies are refused");
+        check(error(serve(session, simple(20, key, out -> { out.writeByte(2); Wire.writeString(out, "x".repeat(4_097)); }))).length() > 0, "Replies are at most 4,096 bytes");
+        check(serve(session, simple(20, key, out -> { out.writeByte(2); Wire.writeString(out, "y".repeat(4_096)); })).readByte() == 0, "A 4,096-byte reply");
+        check(serve(session, simple(20, key, out -> { out.writeByte(2); Wire.writeString(out, "On my way ✓"); })).readByte() == 0
+            && phone.replies.get(phone.replies.size() - 1)[1].equals("On my way ✓"), "Reply reaches the phone");
+        check(error(serve(session, simple(20, "long", out -> { out.writeByte(2); Wire.writeString(out, "hi"); }))).contains("can't be answered"), "Only answerable notifications take replies");
+        check(error(serve(session, simple(20, "", out -> out.writeByte(1)))).length() > 0, "A key is needed");
+        String wide = "w".repeat(256);
+        phone.post(wide, "App", "T", "", false, "");
+        check(serve(session, simple(20, wide, out -> out.writeByte(1))).readByte() == 0 && phone.dismissed.contains(wide), "Keys up to 256 bytes work as the ID");
+        check(error(serve(session, simple(20, "w".repeat(257), out -> out.writeByte(1)))).length() > 0, "Longer IDs are refused");
+        for (int op : new int[] {1, 19, 21, 22, 23})
+            check(error(serve(session, simple(op, "w".repeat(129), out -> {}))).equals("Invalid string length"), "Other operations keep the 128-byte ID limit: " + op);
+        check(error(serve(session, simple(20, "w".repeat(129), out -> out.writeByte(1)))).contains("gone"), "A 129-byte key is read as one, then looked up");
+        long before = events(session, 0, 0).cursor;
+        check(serve(session, simple(20, key, out -> out.writeByte(1))).readByte() == 0 && phone.dismissed.contains(key), "Dismiss");
+        check(events(session, before, 0).kinds.equals(List.of(EventLog.REMOVED)), "A dismissed notification is REMOVED");
+        check(error(serve(session, simple(20, key, out -> out.writeByte(1)))).contains("gone"), "A gone notification can't be dismissed");
+        phone.notificationsOn = false;
+        check(error(serve(session, simple(20, "long", out -> out.writeByte(1)))).contains("off"), "Nothing while notifications on computers are off");
+        phone.notificationsOn = true;
+
+        // RING
+        check(serve(session, simple(21, "", out -> out.writeByte(1))).readByte() == 0 && phone.ringing, "Ring");
+        check(serve(session, simple(21, "", out -> out.writeByte(0))).readByte() == 0 && !phone.ringing, "Stop ringing");
+        for (int value : new int[] {2, 255}) check(error(serve(session, simple(21, "", out -> out.writeByte(value)))).length() > 0, "RING takes 0 or 1");
+        check(error(serve(session, simple(21, "", out -> {}))).length() > 0, "RING needs its byte");
+        check(phone.rings.equals(List.of(true, false)), "Only valid requests ring");
+
+        // OPEN URL
+        String longest = "https://example.com/" + "a".repeat(2_048 - 20);
+        for (String url : new String[] {"https://example.com/a?b=c#d", "http://192.168.1.2:8080/", "HTTPS://EXAMPLE.COM", "https://例子.测试/路径", longest}) {
+            check(serve(session, simple(22, "", out -> Wire.writeString(out, url))).readByte() == 0, "Opens " + url);
+            String[] shown = phone.links.get(phone.links.size() - 1);
+            check(shown[0].equals(url) && shown[1].equals("Aditya's MacBook Air"), "The link and the computer's name reach the phone");
+        }
+        int shown = phone.links.size();
+        for (String url : new String[] {"", "javascript:alert(1)", "file:///etc/passwd", "ftp://example.com", "intent://x#Intent;end", "content://x/y",
+                "https://", "https:///path", "example.com", "//example.com", "https://exa mple.com", "https://example.com/\n", "https://bank.com@evil.example",
+                "https://example.com/‮gnp.exe", "https://:80/", "data:text/html,hi", "https://exa%mple.com/%zz"})
+            check(error(serve(session, simple(22, "", out -> Wire.writeString(out, url)))).length() > 0, "Refuses " + url);
+        check(error(serve(session, simple(22, "", out -> Wire.writeString(out, longest + "a")))).length() > 0, "URLs are at most 2,048 bytes");
+        check(error(serve(session, simple(22, "x", out -> Wire.writeString(out, "https://example.com")))).length() > 0, "OPEN URL takes an empty ID");
+        check(phone.links.size() == shown, "Refused links never reach the phone");
+
+        // SEND
+        check(Names.numbered("photo.jpg", 0).equals("photo.jpg") && Names.numbered("photo.jpg", 2).equals("photo (2).jpg")
+            && Names.numbered(".bashrc", 1).equals(".bashrc (1)") && Names.numbered("archive.tar.gz", 1).equals("archive.tar (1).gz"), "Numbered names");
+        String huge = "名".repeat(80) + ".txt";   // 244 bytes
+        Wire.validateName(Names.numbered(huge, 12_345));
+        check(Names.numbered(huge, 12_345).getBytes(StandardCharsets.UTF_8).length <= 255 && Names.numbered(huge, 12_345).endsWith(" (12345).txt"), "Numbered names stay within 255 bytes");
+        DataInputStream sent = serve(session, simple(23, "", out -> { Wire.writeString(out, "hello.txt"); out.writeLong(3); out.write(new byte[32]); out.write(new byte[] {7, 8, 9}); }));
+        check(sent.readByte() == 0 && sent.readLong() == 0 && sent.readByte() == 0 && Wire.readString(sent, 255).equals("hello (1).txt") && sent.available() == 0, "SEND replies with the free name");
+        check(Arrays.equals(memory.files.get("hello (1).txt"), new byte[] {7, 8, 9}) && new String(memory.files.get("hello.txt"), StandardCharsets.UTF_8).startsWith("Hello"), "SEND never replaces a file");
+        String[] got = phone.received.get(0);
+        check(got[0].equals("hello (1).txt") && got[1].equals("memory:hello (1).txt") && got[2].equals("Aditya's MacBook Air"), "The phone hears of the file and who sent it");
+        memory.failCommit = true;
+        DataInputStream full = serve(session, simple(23, "", out -> { Wire.writeString(out, "x.bin"); out.writeLong(1); out.write(new byte[32]); out.write(1); }));
+        check(full.readByte() == 0 && full.readLong() == 0 && full.readByte() == 1 && Wire.readString(full, 512).equals("Storage full") && phone.received.size() == 1, "A failed SEND is not announced");
+        memory.failCommit = false;
+        for (String name : new String[] {"", "..", "a/b", "a:b", ".openbridge-part-x", "x".repeat(256)})
+            check(error(serve(session, simple(23, "", out -> { Wire.writeString(out, name); out.writeLong(0); out.write(new byte[32]); }))).length() > 0, "SEND refuses the name " + name);
+        for (long size : new long[] {-1, Wire.MAX_FILE + 1})
+            check(error(serve(session, simple(23, "", out -> { Wire.writeString(out, "a"); out.writeLong(size); out.write(new byte[32]); }))).length() > 0, "SEND refuses the size " + size);
+        check(error(serve(session, simple(23, "folder-id", out -> { Wire.writeString(out, "a"); out.writeLong(0); out.write(new byte[32]); }))).length() > 0, "SEND takes an empty ID");
+        check(error(serve(new Session(new Store() {
+            public List<Entry> list(String id) { return List.of(); }
+            public Read open(String id) throws IOException { throw new IOException("No"); }
+            public Upload create(String id, String name) throws IOException { throw new IOException("No"); }
+        }, named, null, null, null, null, phone), simple(23, "", out -> { Wire.writeString(out, "a"); out.writeLong(0); out.write(new byte[32]); }))).contains("update"), "A store without an inbox says so");
+
+        java.nio.file.Path base = java.nio.file.Files.createTempDirectory("openbridge-send");
+        try {
+            java.nio.file.Path internal = java.nio.file.Files.createDirectories(base.resolve("internal"));
+            FileStore files = new FileStore(List.of(new FileStore.Root("Internal storage", internal.toFile()), new FileStore.Root("SD card",
+                java.nio.file.Files.createDirectories(base.resolve("sd")).toFile()))).inbox("Download", "OpenBridge");
+            Session whole = new Session(files, named, null, null, null, null, phone);
+            byte[] body = new byte[120_000]; new Random(23).nextBytes(body);
+            byte[] content = new byte[32]; Arrays.fill(content, (byte) 4);
+            try { serve(whole, simple(23, "", out -> { Wire.writeString(out, "IMG 1.jpg"); out.writeLong(body.length); out.write(content); out.write(body, 0, 50_000); })); check(false, "A cut SEND fails"); }
+            catch (IOException expected) { check(true, "A cut SEND fails"); }
+            java.nio.file.Path inbox = internal.resolve("Download/OpenBridge");
+            check(java.nio.file.Files.isDirectory(inbox) && !java.nio.file.Files.exists(inbox.resolve("IMG 1.jpg")), "Nothing published from a cut SEND");
+            DataInputStream resumed = serve(whole, simple(23, "", out -> { Wire.writeString(out, "IMG 1.jpg"); out.writeLong(body.length); out.write(content); out.write(body, 50_000, body.length - 50_000); }));
+            check(resumed.readByte() == 0 && resumed.readLong() == 50_000 && resumed.readByte() == 0 && Wire.readString(resumed, 255).equals("IMG 1.jpg"), "SEND continues where it stopped");
+            check(Arrays.equals(java.nio.file.Files.readAllBytes(inbox.resolve("IMG 1.jpg")), body), "SEND lands in Download/OpenBridge, exact");
+            String[] last = phone.received.get(phone.received.size() - 1);
+            check(last[0].equals("IMG 1.jpg") && java.nio.file.Paths.get(last[1]).equals(inbox.resolve("IMG 1.jpg").toRealPath()), "The location is the saved file");
+            for (String expected : new String[] {"img 1 (1).jpg", "img 1 (2).jpg"}) {
+                DataInputStream again = serve(whole, simple(23, "", out -> { Wire.writeString(out, "img 1.jpg"); out.writeLong(2); out.write(new byte[32]); out.write(new byte[] {1, 2}); }));
+                check(again.readByte() == 0 && again.readLong() == 0 && again.readByte() == 0 && Wire.readString(again, 255).equals(expected), "Taken names (ignoring case) get a number: " + expected);
+            }
+            check(Arrays.equals(java.nio.file.Files.readAllBytes(inbox.resolve("IMG 1.jpg")), body), "The first file is untouched");
+            check(files.list("").size() == 2, "Received files don't change the storage areas");
+            // A shared folder: files land at its top. An inbox reached through a link is refused.
+            java.nio.file.Path folder = java.nio.file.Files.createDirectories(base.resolve("folder"));
+            Session one = new Session(new FileStore(List.of(new FileStore.Root("Folder", folder.toFile()))), named, null, null, null, null, phone);
+            DataInputStream top = serve(one, simple(23, "", out -> { Wire.writeString(out, "notes.txt"); out.writeLong(1); out.write(new byte[32]); out.write('n'); }));
+            check(top.readByte() == 0 && top.readLong() == 0 && top.readByte() == 0 && java.nio.file.Files.exists(folder.resolve("notes.txt")), "SEND to a shared folder lands at its top");
+            java.nio.file.Path linked = java.nio.file.Files.createDirectories(base.resolve("linked"));
+            java.nio.file.Files.createSymbolicLink(linked.resolve("Download"), base.resolve("sd"));
+            Session escape = new Session(new FileStore(List.of(new FileStore.Root("Linked", linked.toFile()))).inbox("Download", "OpenBridge"), named, null, null, null, null, phone);
+            check(error(serve(escape, simple(23, "", out -> { Wire.writeString(out, "x"); out.writeLong(0); out.write(new byte[32]); }))).length() > 0
+                && !java.nio.file.Files.exists(base.resolve("sd/OpenBridge")), "An inbox behind a link is refused");
+            try { new FileStore(List.of(new FileStore.Root("Folder", folder.toFile()))).inbox("a/b"); check(false, "Inbox folders are names"); }
+            catch (IOException expected) { check(true, "Inbox folders are names"); }
+        } finally {
+            try (var walk = java.nio.file.Files.walk(base)) { walk.sorted(Comparator.reverseOrder()).forEach(p -> p.toFile().delete()); }
+        }
     }
 
     /**
@@ -559,7 +806,12 @@ public final class ProtocolTest {
         };
         Clipboard clipboard = new Clipboard() { public String read() { return "clip"; } public void write(String text) {} };
         byte[] fingerprint = new byte[32];
-        Session memory = new Session(new MemoryStore(), Trust.single(SECRET), fingerprint, code -> false, clipboard, outbox).describe("1.0.0", "Fuzz");
+        MemoryCompanion companion = new MemoryCompanion();
+        companion.maxWaitMillis = 50;
+        companion.log.battery(55, false);
+        companion.post("t", "App", "Title", "Text", true, "");
+        companion.post("file:hello.txt", "App", "Title", "Text", false, "123456");
+        Session memory = new Session(new MemoryStore(), Trust.single(SECRET), fingerprint, code -> false, clipboard, outbox, companion).describe("1.0.0", "Fuzz");
         int requests = fuzz(memory, random, List.of("", "folder-id", "file:hello.txt", "t"), 25_000);
 
         java.nio.file.Path base = java.nio.file.Files.createTempDirectory("openbridge-fuzz");
@@ -571,7 +823,8 @@ public final class ProtocolTest {
             FileStore files = new FileStore(List.of(new FileStore.Root("Internal storage", internal.toFile())));
             List<String> ids = new ArrayList<>(List.of(""));
             for (Store.Entry entry : files.list("")) { ids.add(entry.id); if (entry.directory) files.list(entry.id).forEach(e -> ids.add(e.id)); }
-            Session session = new Session(files, Trust.single(SECRET), fingerprint, code -> false, clipboard, outbox);
+            files.inbox("Download", "OpenBridge");
+            Session session = new Session(files, Trust.single(SECRET), fingerprint, code -> false, clipboard, outbox, companion);
             requests += fuzz(session, random, ids, 10_000);
             // Whatever the requests did, nothing escaped the shared folder.
             try (var outside = java.nio.file.Files.list(base)) { check(outside.count() == 1, "Fuzzing stayed inside the shared folder"); }
@@ -615,7 +868,9 @@ public final class ProtocolTest {
         }
         out.write(Wire.MAGIC);
         out.write(mode == 2 ? new byte[32] : SECRET);
-        out.writeByte(random.nextInt(5) == 0 ? random.nextInt(256) : 1 + random.nextInt(Session.REVISION));
+        // Every operation, with extra weight on the newest (19 to 23), and sometimes one that doesn't exist.
+        int pick = random.nextInt(10);
+        out.writeByte(pick < 2 ? random.nextInt(256) : pick < 5 ? 19 + random.nextInt(5) : 1 + random.nextInt(Session.REVISION));
         fuzzString(out, random, ids);
         int fields = random.nextInt(6);
         for (int f = 0; f < fields; f++) {
@@ -635,7 +890,8 @@ public final class ProtocolTest {
     private static void fuzzString(DataOutputStream out, Random random, List<String> ids) throws IOException {
         switch (random.nextInt(6)) {
             case 0: Wire.writeString(out, ids.get(random.nextInt(ids.size()))); break;
-            case 1: Wire.writeString(out, new String[] {"..", ".", "a/b", "名前.txt", "x".repeat(300), "\u0000", " "}[random.nextInt(7)]); break;
+            case 1: Wire.writeString(out, new String[] {"..", ".", "a/b", "名前.txt", "x".repeat(300), "\u0000", " ", "https://example.com/",
+                "javascript:alert(1)", "w".repeat(256)}[random.nextInt(10)]); break;
             case 2: out.writeInt(random.nextInt()); break;   // any length, even negative or huge
             case 3: { byte[] invalid = new byte[random.nextInt(20)]; random.nextBytes(invalid); out.writeInt(invalid.length); out.write(invalid); break; }
             default: Wire.writeString(out, "f" + random.nextInt(50) + (random.nextBoolean() ? ".jpg" : ""));

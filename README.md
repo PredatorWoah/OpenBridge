@@ -22,6 +22,10 @@
 - 📸 **Import new photos.** One click copies only the camera photos and videos you haven't imported yet.
 - 📺 **Screen mirroring.** See and control your phone in a window, powered by [scrcpy](https://github.com/Genymobile/scrcpy). Start on the cable, then go wireless and unplug.
 - 📶 **No Wi‑Fi needed: use your phone's hotspot.** Turn on your phone's own hotspot, join it from the computer, and the phone shows up by itself, ready to pair. Perfect on the go, and on hotel, campus and guest networks that keep devices apart.
+- 🔔 **Phone notifications on your computer.** Reply, dismiss or copy one-time codes from your Mac or PC. Opt-in, per app, never through a cloud.
+- 🗂️➡️📱 **Send to phone from anywhere.** Drop files on the Dock icon, menu bar or tray, or use Send to / Open With: they land in Download/OpenBridge.
+- 🖼️ **Automatic photo backup** to your computer while the phone is connected.
+- 🔋 **Battery, Ring phone and links both ways**, right in the menu bar or tray.
 - 📊 **Status at a glance.** A sun in the Mac menu bar or the Windows and Linux tray shows the connection and a progress ring while files move; click it for speed, time left and quick buttons.
 - 🎨 **Three looks, three layouts.** Dusk (the original sunset), Aurora (an observatory under the northern lights) and Tide (a harbour where the water rises with your transfers), each with its own animated layout on the Mac, Windows and Linux, and on the phone.
 - 🐘 **Big files are fine.** 4 GB and more both ways; an interrupted download or upload continues where it stopped.

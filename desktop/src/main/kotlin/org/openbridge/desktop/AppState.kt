@@ -20,7 +20,7 @@ import kotlin.system.exitProcess
 enum class SortKey { NAME, SIZE, KIND }
 
 /** Sheets over the window. */
-enum class Panel { TEXTS, SETTINGS }
+enum class Panel { TEXTS, SETTINGS, NOTIFICATIONS }
 
 /** What the folder shows: everything, or only photos and videos. */
 enum class Show { ALL, MEDIA }
@@ -47,6 +47,8 @@ sealed class Job(val name: String) {
     abstract val size: Long
     class Download(val entry: Entry, val target: File, val at: List<String>) : Job(entry.name) { override val size get() = entry.size }
     class Upload(val file: File, val into: String, val at: List<String>, name: String = file.name) : Job(name) { override val size get() = file.length() }
+    /** To the phone without a folder (SEND): it chooses where, and a free name. */
+    class Send(val file: File) : Job(file.name) { override val size get() = file.length() }
 }
 
 /** A queue of transfers: the file moving now (`index` of `count`, `fraction` of it), and bytes moved of the whole queue. */
@@ -150,6 +152,30 @@ class AppState {
     /** How many tiles the grid shows in a row, so the up and down arrows move a row. */
     var columns = 1
 
+    // The phone, from 1.2.0: notifications, battery, Ring, Open on phone, Send to phone
+    /** The open phone's notifications and battery, from EVENTS. */
+    var phoneStatus by mutableStateOf(NotificationList()); internal set
+    val battery: Battery? get() = phoneStatus.battery
+    /** Whether the open phone answers EVENTS, NOTIFICATION ACTION, RING, OPEN URL and SEND (INFO revision 23). */
+    val companion: Boolean get() = bridge != null && (phoneInfo?.revision ?: 0) >= PhoneEvents.REVISION
+    var ringing by mutableStateOf(false); internal set
+    private var ringToken = 0
+    var showNotifications by mutableStateOf(preferences.getBoolean("showNotifications", true)); private set
+    var notificationSound by mutableStateOf(preferences.getBoolean("notificationSound", true)); private set
+    /** Files to send to the phone once one that can take them is connected and nothing else runs. */
+    var sendQueue by mutableStateOf(emptyList<File>()); internal set
+    /** EVENTS cursors by phone, for this session: a reconnect continues where it left off. */
+    private val cursors = HashMap<String, Long>()
+    private val batteryAlerts = HashMap<String, BatteryAlert>()
+    /** Photo backup folders by saved phone ID; a phone without one isn't backed up. */
+    var backups by mutableStateOf(Backups.load()); private set
+    @Volatile private var backingUp = false
+    private var nextBackup = Long.MAX_VALUE
+    /** Work asked for while a backup ran: the backup stops and this runs instead. */
+    private var deferred: (() -> Unit)? = null
+    /** Brings the main window to the front; set by the window. */
+    var bringToFront: () -> Unit = {}
+
     private val worker = Executors.newSingleThreadExecutor { Thread(it, "openbridge-work").apply { isDaemon = true } }
     // One preview at a time: the phone serves only a few connections at once, and browsing and transfers come first.
     private val previews = Executors.newSingleThreadExecutor { Thread(it, "openbridge-previews").apply { isDaemon = true } }
@@ -196,6 +222,8 @@ class AppState {
             }
         }
         daemon("openbridge-searching") { Thread.sleep(10_000); ui { searchedLong = true } }
+        // Files waiting to be sent, and photo backups that are due.
+        daemon("openbridge-phone-tick") { while (true) { Thread.sleep(1_000); ui { runCatching { flushSends(); backupIfDue() } } } }
         daemon("openbridge-liveness") { while (true) { Thread.sleep(250); runCatching { checkLiveness() } } }
         // Phones in File transfer mode; Windows only. Not while a phone is open over Fast USB: it would be listed twice.
         if (Platform.windows) daemon("openbridge-wpd") {
@@ -249,12 +277,16 @@ class AppState {
      * Wi‑Fi or Fast USB shows, and has the phone checked at once: it's dropped only if it doesn't answer that either.
      */
     private fun run(work: () -> Unit) {
-        if (busy) return
+        if (busy) {
+            // A backup gives way to whatever the user asks for; it continues later.
+            if (backingUp) { deferred = work; cancelled = true }
+            return
+        }
         busy = true; error = null; cancelled = false; hungUp = false
         val phone = source
         worker.execute {
             try { work(); if (phone is BridgeClient) liveness.alive(System.currentTimeMillis()) }
-            catch (e: InterruptedException) { ui { status = if (hungUp) "" else S.cancelled; transfer = null } }
+            catch (e: InterruptedException) { val quiet = hungUp || backingUp; ui { status = if (quiet) "" else S.cancelled; transfer = null } }
             catch (e: Exception) {
                 Log.add("Failed (${transport.english}): ${e.message ?: e.javaClass.simpleName}")
                 when {
@@ -269,7 +301,15 @@ class AppState {
                     else -> ui { error = e.message ?: e.toString() }
                 }
             }
-            finally { pairing = null; ui { busy = false; pairingCode = null; pairingOver = null } }
+            finally {
+                pairing = null
+                val yielded = backingUp
+                backingUp = false
+                ui {
+                    busy = false; pairingCode = null; pairingOver = null
+                    if (yielded) { nextBackup = System.currentTimeMillis() + 60_000; deferred?.let { deferred = null; run(it) } }
+                }
+            }
         }
     }
 
@@ -379,6 +419,7 @@ class AppState {
             path = listOf("" to S.phone); entries = top; selection = emptySet(); cursor = null; anchor = null; status = ""; thumbnails = emptyMap(); sizes = emptyMap()
             pendingSizes.clear(); pendingPreviews.clear(); query = ""; results = null; phoneInfo = null; phoneOutdated = null
             isolated = false; isolation.clear()
+            phoneStatus = NotificationList(); ringing = false; nextBackup = System.currentTimeMillis() + 5_000
             if (phone is BridgeClient) { startReceiving(phone); describe(phone); watch.reset(SystemClipboard.text()) }
         }
         // An interrupted transfer continues by itself when the same phone connects again.
@@ -401,6 +442,7 @@ class AppState {
             source = phone; transport = via; usbSerial = serial
             entries = listed; path = trail; selection = emptySet(); cursor = null; anchor = null; results = null
             startReceiving(phone)
+            if (companion) startEvents(phone)
             show(S.switchedTo(via.label))
         }
     }
@@ -427,7 +469,16 @@ class AppState {
             Updates.isNewer(mine, info.version) -> S.phoneOlder(info.version, mine)
             else -> null
         }
-        ui { if (source === phone) { phoneInfo = info; phoneOutdated = outdated } }
+        ui {
+            if (source !== phone) return@ui
+            phoneInfo = info; phoneOutdated = outdated
+            if (companion) startEvents(phone)
+            else if (!preferences.getBoolean("companionHintShown", false)) {
+                // Once: what updating the phone app brings.
+                phoneOutdated = S.companionUpdate
+                preferences.putBoolean("companionHintShown", true)
+            }
+        }
     }
 
     fun dismissOutdated() { phoneOutdated = null }
@@ -473,6 +524,9 @@ class AppState {
         SystemClipboard.put(text)
         addText(TextItem(text, fromPhone = true, at = System.currentTimeMillis()))
         show(S.textFrom(deviceName))
+        singleUrl(text)?.let { link ->
+            DesktopNotify.show(S.linkFrom(deviceName), link, notificationSound, listOf(NotifyAction("open", S.openInBrowser) { openPage(link) }))
+        }
     }
 
     private fun addText(item: TextItem) {
@@ -534,24 +588,188 @@ class AppState {
         val key = openKey ?: return
         val destination = Imports.folder(chooseFolder) ?: return
         run {
-            val (folderId, at) = cameraFolder(phone) ?: throw BridgeException(S.noCamera)
-            val media = phone.list(folderId).filter { !it.directory && Kind.of(it).previewable }
-            val done = Imports.load(key)
-            // Already imported, or already in the folder (an import that was cut off): skip.
-            val fresh = media.filter { item ->
-                Imports.line(item) !in done && File(destination, item.name).let { !(it.isFile && it.length() == item.size) }
-            }
-            if (fresh.isEmpty()) {
-                Imports.save(key, done + media.map(Imports::line))
-                ui { show(S.noNewPhotos) }
-                return@run
-            }
-            ui { transfer = Transfer("…", upload = false) }
-            perform(fresh.map { Job.Download(it, Names.free(File(destination, it.name)), at) }, phone, connection)
-            Imports.save(key, done + media.map(Imports::line))
-            ui { show(S.imported(fresh.size)) }
+            val count = importInto(phone, key, destination)
+            ui { show(if (count == 0) S.noNewPhotos else S.imported(count)) }
         }
     }
+
+    /** Imports what's new from the camera into `destination`, on the worker; returns how many files. */
+    private fun importInto(phone: PhoneSource, key: String, destination: File): Int {
+        val (folderId, at) = cameraFolder(phone) ?: throw BridgeException(S.noCamera)
+        val media = phone.list(folderId).filter { !it.directory && Kind.of(it).previewable }
+        val done = Imports.load(key)
+        // Already imported, or already in the folder (an import that was cut off): skip.
+        val fresh = media.filter { item ->
+            Imports.line(item) !in done && File(destination, item.name).let { !(it.isFile && it.length() == item.size) }
+        }
+        if (fresh.isNotEmpty()) {
+            destination.mkdirs()
+            ui { transfer = Transfer("…", upload = false) }
+            perform(fresh.map { Job.Download(it, Names.free(File(destination, it.name)), at) }, phone, connection)
+        }
+        Imports.save(key, done + media.map(Imports::line))
+        return fresh.size
+    }
+
+    // Photo backup
+
+    /** The saved phone's backup folder when backup is on for it. */
+    fun backupFolder(phone: SavedPhone): File? = backups[phone.id]?.let(::File)
+
+    fun changeBackup(phone: SavedPhone, on: Boolean, folder: File? = null) {
+        val chosen = folder ?: backupFolder(phone) ?: Backups.defaultFolder(phone.name)
+        backups = if (on) backups + (phone.id to chosen.absolutePath) else backups - phone.id
+        Backups.save(backups)
+        if (on && current == phone) nextBackup = System.currentTimeMillis() + 1_000
+    }
+
+    /** On connecting and every 10 minutes while connected and idle: the new photos, quietly, then a summary. */
+    private fun backupIfDue() {
+        val saved = current ?: return
+        val phone = source ?: return
+        val key = openKey ?: return
+        val destination = backupFolder(saved) ?: return
+        if (busy || transfer?.done == false || System.currentTimeMillis() < nextBackup) return
+        nextBackup = System.currentTimeMillis() + 10 * 60_000
+        backingUp = true
+        run {
+            Log.add("Backing up new photos")
+            val count = try { importInto(phone, key, destination) } catch (e: BridgeException) {
+                if (e.message == S.noCamera) 0 else throw e
+            }
+            backingUp = false
+            if (count > 0) ui {
+                if (transfer?.done == true) transfer = null
+                DesktopNotify.show(S.backedUp(count, saved.name), destination.path, sound = false, onClick = { Platform.openFolder(destination) })
+            }
+        }
+    }
+
+    // Notifications and the rest of the phone (1.2.0)
+
+    /** Listens to the phone's EVENTS while this connection lasts, continuing from the last cursor for this phone. */
+    private fun startEvents(phone: BridgeClient) {
+        val key = openKey ?: return
+        daemon("openbridge-events") {
+            while (source === phone) {
+                val batch = try { phone.events(cursors[key] ?: 0, 20_000) }
+                catch (e: BridgeException) {
+                    if (e.unsupported) return@daemon
+                    if (source === phone) suspect(e)
+                    Thread.sleep(3_000); continue
+                } catch (e: Exception) { if (source === phone) suspect(e); Thread.sleep(3_000); continue }
+                if (source !== phone) break
+                SwingUtilities.invokeAndWait { if (source === phone) { cursors[key] = batch.cursor; eventsArrived(key, batch.events) } }
+            }
+        }
+    }
+
+    internal fun eventsArrived(key: String, events: List<PhoneEvent>) {
+        if (events.isEmpty()) return
+        val applied = phoneStatus.apply(events)
+        phoneStatus = applied.list
+        if (showNotifications) {
+            val fresh = applied.fresh
+            fresh.take(3).forEach(::announce)
+            if (fresh.size > 3) DesktopNotify.show(deviceName, S.moreNotifications(fresh.size - 3), false) { openNotifications() }
+        }
+        val battery = applied.list.battery ?: return
+        if (batteryAlerts.getOrPut(key) { BatteryAlert() }.check(battery))
+            DesktopNotify.show(S.batteryLow(deviceName, battery.level), S.batteryLowHint, notificationSound)
+    }
+
+    /** A notification from the phone on this computer's desktop. */
+    private fun announce(n: PhoneNotification) {
+        val title = listOf(n.app, n.title).filter { it.isNotBlank() }.joinToString(": ").ifBlank { deviceName }
+        val actions = buildList {
+            if (n.code.isNotEmpty()) add(NotifyAction("copy", S.copyCode) { copyCode(n.code) })
+            if (n.canDismiss) add(NotifyAction("dismiss", S.dismiss) { dismissNotification(n.key) })
+        }
+        DesktopNotify.show(title, n.text, notificationSound, actions) { openNotifications() }
+    }
+
+    fun openNotifications() { panel = Panel.NOTIFICATIONS; bringToFront() }
+
+    fun copyCode(code: String) { watch.arrived(code); SystemClipboard.put(code); show(S.codeCopied(code)) }
+
+    fun dismissNotification(key: String) {
+        val client = bridge ?: return
+        phoneStatus = phoneStatus.without(key)
+        texting.execute {
+            try { client.notificationAction(key) } catch (e: Exception) { suspect(e); Log.add("Dismiss failed: ${e.message}") }
+        }
+    }
+
+    /** Answers a notification; `done` runs once the phone took the reply. */
+    fun replyTo(key: String, text: String, done: () -> Unit = {}) {
+        val client = bridge ?: return
+        if (text.isBlank()) return
+        texting.execute {
+            try { client.notificationAction(key, text); ui { show(S.replied); done() } }
+            catch (e: Exception) { suspect(e); ui { show(e.message ?: S.dropped) } }
+        }
+    }
+
+    /** Rings the phone, or stops it; it stops by itself after a minute. */
+    fun ring() {
+        val client = bridge ?: return
+        val on = !ringing
+        ringing = on
+        val token = ++ringToken
+        texting.execute {
+            try { client.ring(on) } catch (e: Exception) { suspect(e); ui { if (ringToken == token) ringing = false; show(e.message ?: S.dropped) } }
+        }
+        if (on) daemon("openbridge-ring") { Thread.sleep(60_000); ui { if (ringToken == token) ringing = false } }
+    }
+
+    /** Offers a web link on the phone. */
+    fun sendLink(url: String, done: () -> Unit = {}) {
+        val client = bridge ?: return
+        val link = singleUrl(url)
+        if (link == null) { show(S.notALink); return }
+        texting.execute {
+            try { client.openUrl(link); ui { show(S.linkSent); done() } }
+            catch (e: Exception) { suspect(e); ui { show(e.message ?: S.dropped) } }
+        }
+    }
+
+    /** The clipboard's text when it's a single web link, to offer sending it. */
+    fun clipboardLink(): String? = SystemClipboard.text()?.let(::singleUrl)
+
+    /**
+     * Sends files to the phone without choosing a folder (folders give their files). They wait until a phone that
+     * can take them is connected and nothing else runs.
+     */
+    fun sendToPhone(files: List<File>) {
+        val found = files.flatMap(::filesIn)
+        if (found.isEmpty()) return
+        sendQueue = sendQueue + found
+        Log.add("Send to phone: ${found.size} file(s)")
+        if (!companion || (busy && !backingUp)) show(S.sendWaiting(sendQueue.size, if (source != null) deviceName else saved.firstOrNull()?.name))
+        flushSends()
+    }
+
+    // A dot name is hidden on Linux and macOS but not on Windows, where only the attribute counts: skip both everywhere.
+    private fun filesIn(file: File): List<File> = when {
+        file.isHidden || file.name.startsWith(".") -> emptyList()
+        file.isDirectory -> file.listFiles()?.sortedBy { it.name }?.flatMap(::filesIn).orEmpty()
+        file.isFile -> listOf(file)
+        else -> emptyList()
+    }
+
+    internal fun flushSends() {
+        val client = bridge ?: return
+        if (sendQueue.isEmpty() || !companion || (busy && !backingUp)) return
+        val files = sendQueue
+        sendQueue = emptyList()
+        run {
+            ui { transfer = Transfer("…", upload = true) }
+            perform(files.map { Job.Send(it) }, client, connection)
+        }
+    }
+
+    fun changeShowNotifications(on: Boolean) { showNotifications = on; preferences.putBoolean("showNotifications", on) }
+    fun changeNotificationSound(on: Boolean) { notificationSound = on; preferences.putBoolean("notificationSound", on) }
 
     /** DCIM/Camera (or DCIM), looking inside the first storage when the phone lists storages first (as over USB). */
     private fun cameraFolder(phone: PhoneSource): Pair<String, List<String>>? {
@@ -720,6 +938,7 @@ class AppState {
             ui {
                 source = client; transport = Transport.WIFI; entries = listed; path = trail; selection = emptySet(); cursor = null; results = null
                 startReceiving(client)
+                if (companion) startEvents(client)
                 show(S.switchedTo(S.wifi))
             }
         }
@@ -742,6 +961,7 @@ class AppState {
         (phone as? BridgeClient)?.close()
         source = null; current = null; usbSerial = null; entries = emptyList(); path = listOf("" to S.phone); selection = emptySet(); thumbnails = emptyMap()
         pendingPreviews.clear(); phoneInfo = null; phoneOutdated = null; status = ""; error = null; results = null
+        phoneStatus = NotificationList(); ringing = false
     }
 
     /** The phone is gone (stopped sharing, new identity, left the Wi‑Fi, cable out): back to the start, keeping unfinished transfers. */
@@ -752,6 +972,7 @@ class AppState {
         (source as? BridgeClient)?.close()
         source = null; current = null; usbSerial = null; entries = emptyList(); path = listOf("" to S.phone); selection = emptySet(); thumbnails = emptyMap()
         pendingPreviews.clear(); phoneInfo = null; phoneOutdated = null
+        phoneStatus = NotificationList(); ringing = false
         error = "$message $hint"
     }
 
@@ -1019,7 +1240,8 @@ class AppState {
 
     private fun perform(jobs: List<Job>, phone: PhoneSource, planned: Int) {
         if (jobs.isEmpty()) { ui { transfer = null }; return }
-        val upload = jobs[0] is Job.Upload
+        val upload = jobs[0] !is Job.Download
+        var sentAs: String? = null
         var last: File? = null
         val folders = HashMap<String, List<Entry>>()
         val total = jobs.sumOf { it.size }
@@ -1040,6 +1262,10 @@ class AppState {
             when (current) {
                 is Job.Download -> { phone.download(current.entry, current.target, { cancelled }, progress); last = current.target }
                 is Job.Upload -> uploadNamed(phone, current, progress)
+                is Job.Send -> {
+                    val client = phone as? BridgeClient ?: throw BridgeException(S.companionUpdate)
+                    sentAs = client.sendFile(current.file, cancelled = { cancelled }, progress = progress)
+                }
             }
             before += job.size
         }
@@ -1047,6 +1273,7 @@ class AppState {
         ui {
             transfer = transfer?.copy(done = true, fraction = 1f, saved = last, remaining = emptyList())
             if (upload && listed != null) entries = listed
+            if (jobs.size == 1) sentAs?.let { show(S.sentAs(it)) }
         }
     }
 
@@ -1081,6 +1308,7 @@ class AppState {
                 Job.Download(file, job.target, job.at)
             }
             is Job.Upload -> Job.Upload(job.file, folder(job.at).first, job.at, job.name)
+            is Job.Send -> job
         }
     }
 

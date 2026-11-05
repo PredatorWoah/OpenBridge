@@ -87,6 +87,7 @@ private struct PhoneTitle: View {
                 HStack(spacing: 10) {
                     Text(status).font(.system(size: 12.5)).foregroundStyle(Palette.muted).lineLimit(1)
                     TransportChip(model: model)
+                    BatteryBadge(feed: model.feed, size: 12)
                 }
             }
         }

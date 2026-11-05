@@ -135,4 +135,54 @@ class UiPreview {
         }
         Palette.look = Look.DUSK
     }
+
+    /** Notifications, battery and the phone's actions, with texts long enough that every row must shorten. */
+    @Test fun phone() {
+        val out = File(System.getenv("PREVIEW_DIR") ?: return).apply { mkdirs() }
+        val language = java.util.Locale.getDefault().language
+        val now = 1_762_300_000_000L
+        val notes = listOf(
+            PhoneNotification("1", "Messages", "m", "Alexandra Konstantinopoulou-Papadimitriou", "Running about ten minutes late, the train stopped between stations again. Order for me please!", now, true, true, ""),
+            PhoneNotification("2", "微信", "w", "家人群（爸爸、妈妈、姐姐和小明）", "妈妈：今天晚上回家吃饭吗？我做了你最喜欢的红烧肉，还有糖醋排骨和清蒸鱼，记得早点回来。", now - 60_000, true, true, ""),
+            PhoneNotification("3", "Bank of Somewhere International", "b", "Your verification code", "Use 482913 to sign in. Never share this code with anyone, including our staff.", now - 120_000, false, true, "482913"),
+            PhoneNotification("4", "支付宝", "a", "验证码", "您的验证码为 735102，5 分钟内有效，请勿泄露给他人。", now - 180_000, false, false, "735102"),
+            PhoneNotification("5", "Calendar", "c", "Quarterly planning review with the extended product and design teams", "Tomorrow 09:30 – 11:00 · Conference room Aurora on the fourth floor", now - 240_000, false, true, ""),
+            PhoneNotification("6", "Gmail", "g", "Weekly digest", "Fifteen new messages", now - 300_000, true, true, ""),
+            PhoneNotification("7", "Slack", "s", "#general", "Hello", now - 360_000, true, true, ""),
+        )
+        val client = BridgeClient("127.0.0.1", 1, ByteArray(32), ByteArray(32), Transport.FAST_USB)
+        fun phoneState(longName: Boolean) = AppState().apply {
+            source = client; transport = Transport.FAST_USB
+            deviceName = if (longName) "Galaxy S24 Ultra of Alexandra Konstantinopoulou-Papadimitriou (work phone)" else "vivo X300 Pro"
+            phoneInfo = PhoneInfo("1.2.0", 23, deviceName)
+            phoneStatus = NotificationList(notes, Battery(14, false))
+            entries = listOf(Entry("1", "DCIM", true, 0), Entry("2", "Download", true, 0), Entry("3", "notes.txt", false, 1200))
+            saved = listOf(SavedPhone(deviceName, ByteArray(32) { it.toByte() }, "192.168.1.23", 41987, ByteArray(32)))
+            grid = false
+        }
+        for (look in Look.entries) {
+            Palette.look = look
+            val state = phoneState(longName = false)
+            render(out, "phone-$language-${look.id}-browser", state)
+            state.panel = Panel.NOTIFICATIONS
+            render(out, "phone-$language-${look.id}-notifications", state)
+            render(out, "phone-$language-${look.id}-notifications-compact", state, width = 740, height = 500)
+            state.panel = Panel.SETTINGS
+            render(out, "phone-$language-${look.id}-settings", state, height = 1400)
+            for ((name, long) in listOf("tray" to false, "tray-long" to true)) {
+                val tray = phoneState(long)
+                val status = trayStatus(tray)
+                val scene = ImageComposeScene(360, 760, Density(1f)) {
+                    androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.padding(20.dp)) {
+                        StatusCard(status, {}, {}, {}) { TrayPhone(tray, dropping = name == "tray-long") }
+                    }
+                }
+                for (frame in 0 until 10) scene.render(frame * 100_000_000L)
+                File(out, "phone-$language-${look.id}-$name.png").writeBytes(scene.render(2_000_000_000).encodeToData(EncodedImageFormat.PNG)!!.bytes)
+                scene.close()
+                println("tooltip ($language, $name): ${status.tooltip()}")
+            }
+        }
+        Palette.look = Look.DUSK
+    }
 }
