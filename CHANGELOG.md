@@ -4,6 +4,13 @@ All notable changes to OpenBridge are recorded here. Every release has an entry;
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-11-05
+
+### Fixed
+- **The Mac's Settings window was cut off.** It couldn't be resized, so Updates, Diagnostics and About were out of reach on smaller screens. It now scrolls and resizes.
+- **A phone found on its hotspot kept the name "Phone (this hotspot)".** It now takes its own name, like "vivo X300 Pro", as soon as it connects, on the Mac, Windows and Linux (photo backup folders included).
+- Settings now say where texts, notifications and photo backup work: over Wi‑Fi, the phone's hotspot or Fast USB. Aurora and Tide are no longer marked as previews.
+
 ## [1.2.0] - 2026-11-05
 
 **Your phone, on your computer.** Its notifications pop up on your Mac, Windows or Linux computer, new photos back up by themselves, and files go to the phone without picking a folder. And the phone app is rebuilt from scratch.
