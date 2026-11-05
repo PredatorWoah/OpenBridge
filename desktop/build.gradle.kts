@@ -40,7 +40,7 @@ tasks.test {
     System.getenv("PREVIEW_LANG")?.let { systemProperty("user.language", it) }
 }
 
-val appVersion = providers.gradleProperty("appVersion").orElse("1.1.1")
+val appVersion = providers.gradleProperty("appVersion").orElse("1.2.0")
 
 // The version for development runs (the installed app gets it from its launcher): diagnostics, the phone-app check.
 val versionResource = tasks.register("versionResource") {

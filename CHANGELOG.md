@@ -4,6 +4,22 @@ All notable changes to OpenBridge are recorded here. Every release has an entry;
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-05
+
+**Your phone, on your computer.** Its notifications pop up on your Mac, Windows or Linux computer, new photos back up by themselves, and files go to the phone without picking a folder. And the phone app is rebuilt from scratch.
+
+### Added
+- **Phone notifications on your computer.** Reply to messages, dismiss notifications on the phone, or copy a one-time code, from a pop-up, the menu bar or tray, or the new Phone notifications panel. It's off until you turn on Notifications on computers on the phone, and you can leave out any app. Notifications only travel to your paired computers over the encrypted connection, never through a cloud.
+- **Automatic photo backup.** Turn it on per phone and new camera photos and videos land in Pictures/OpenBridge/<phone> when the phone connects and every 10 minutes while it's connected, skipping anything already copied.
+- **Send to phone, from anywhere.** Drop files on the Dock icon or the menu bar panel (Mac), the tray window, Send to (Windows) or Open With (Linux), or use the Mac's Services menu. They land in Download/OpenBridge with a notification, and never replace a file.
+- **Battery** in the menu bar, tray and app, with a heads-up at 15%.
+- **Ring phone** finds it at full volume, even on silent.
+- **Links both ways.** Send a link to the phone and tap the notification to open it; links shared from the phone get an Open button on the computer.
+
+### Changed
+- **A brand-new phone app.** Home, Activity, Texts and Settings tabs in a floating glass bar. The share button morphs into a live dashboard of who's connected and how; Activity is a day-by-day feed of files, texts, links and connections with photo thumbnails; Texts is a chat; Settings has live look previews and its own pages for trusted computers, notification apps, the hotspot and help. Spring animations and haptics throughout, following Android's Remove animations setting.
+- The phone app is about ten times smaller to download and starts faster.
+
 ## [1.1.1] - 2026-10-20
 
 **Your phone's own hotspot now works.** Turn on the hotspot from your phone's quick settings, join it from your Mac, Windows or Linux computer, and the phone shows up by itself, ready to pair. No router, no shared Wi‑Fi, no typing addresses.
