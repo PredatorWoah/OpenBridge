@@ -10,7 +10,7 @@ All integers are big endian. A string is a signed 32-bit nonnegative UTF-8 byte 
 | --- | --- |
 | Version | four ASCII bytes `OB01` |
 | Pairing secret | 32 raw bytes, received during pairing (each computer has its own) |
-| Operation | one byte: `1` LIST, `2` GET, `3` PUT, `4` MKDIR, `5` THUMB, `6` RESUME, `7` CLIPBOARD GET, `8` CLIPBOARD SET, `9` DELETE, `10` RENAME, `11` MEASURE, `12` PUT RESUMABLE, `13` OUTBOX, `14` OUTBOX GET, `15` OUTBOX DONE, `16` SEARCH, `17` OUTBOX ALL, `18` INFO, `19` EVENTS, `20` NOTIFICATION ACTION, `21` RING, `22` OPEN URL, `23` SEND |
+| Operation | one byte: `1` LIST, `2` GET, `3` PUT, `4` MKDIR, `5` THUMB, `6` RESUME, `7` CLIPBOARD GET, `8` CLIPBOARD SET, `9` DELETE, `10` RENAME, `11` MEASURE, `12` PUT RESUMABLE, `13` OUTBOX, `14` OUTBOX GET, `15` OUTBOX DONE, `16` SEARCH, `17` OUTBOX ALL, `18` INFO, `19` EVENTS, `20` NOTIFICATION ACTION, `21` RING, `22` OPEN URL, `23` SEND, `24` MEDIA CONTROL |
 | Document ID | string, maximum 128 bytes; empty for root |
 
 Authentication is checked before the operation reaches storage. There is no unauthenticated metadata endpoint. A status is one byte: `0` success, or `1` followed by an error string (client limit 512 bytes). Any unexpected status, length, EOF, TLS failure, or timeout means failure. Close the connection; do not parse additional commands.
@@ -27,6 +27,15 @@ A new client pairs on a TLS connection **without** a pin, recording the SHA-256 
 6. Server sends status `0` and the 32-byte secret if the user approved, or status `1` and an error. The client then pins `F` and uses the secret for OB01 requests.
 
 **Remembered pairing.** From 0.11.0 the phone keeps the same certificate for as long as the app is installed, and gives each computer its own random secret, kept until the user taps **Forget** on the phone. The phone stores only SHA-256 of each secret. A computer may save `F`, its secret and the phone's last address, and reconnect later without pairing; a request with a forgotten secret gets status `1` and `Pairing rejected`, after which the computer forgets the phone and asks to pair again.
+
+**Pairing by QR code (OBP3, from 1.3.0).** Instead of comparing codes, the computer shows a QR code and the phone scans it. The QR code is the text `openbridge://pair?k=<K>&n=<name>`: `K` is 16 random bytes in unpadded base64url, made fresh for each code and forgotten after 2 minutes, and `name` is the computer's name, percent-encoded UTF-8 of at most 128 bytes. The phone keeps `K` for 2 minutes (or until used once, or after 3 failed attempts) and starts sharing if it wasn't. The computer then tries each phone it finds (announced, at the default gateway, or over Fast USB) on a TLS connection without a pin, recording `F` as in OBP2:
+
+1. Client sends `OBP3`, its name in exactly 128 bytes as in OBP2, and its nonce `Nm` (32 bytes).
+2. Server replies status `1` and an error when it holds no `K` (for example "Scan the code on the computer first"), or status `0`, its nonce `Np` (32 bytes) and `Ps = HMAC-SHA256(K, "OpenBridge QR phone" ‖ F ‖ Nm ‖ Np)`.
+3. Client checks `Ps` with the `F` it saw and closes the connection on a mismatch (another phone, or something in between). Otherwise it sends `Pc = HMAC-SHA256(K, "OpenBridge QR computer" ‖ F ‖ Nm ‖ Np)`.
+4. Server checks `Pc` in constant time: on a match it forgets `K` and sends status `0` and the 32-byte secret; otherwise status `1` and an error (the third failure forgets `K`). The client then pins `F` and uses the secret as after OBP2.
+
+Scanning is the user's approval, so the phone shows no code to confirm; it says which computer was paired. A phone older than 1.3.0 answers `OBP3` like a wrong secret (status `1`), and the computer falls back to the 6-digit code. `K` never leaves the QR code and the two devices' memory; the strings are ASCII labels and `‖` is concatenation.
 
 Reference vector: with `F`, `Nm` and `Np` filled with the bytes `01`, `02` and `03`, the commitment is `8ef8a25a…9b356` and the code is `520380`.
 
@@ -109,7 +118,7 @@ Like OUTBOX, for computers that also take texts (from 0.13.0). Same request. Rep
 
 ## INFO (18)
 
-The document ID is empty. Reply: status; on success, the phone app's version (string, at most 64 bytes, like `1.0.0`), a signed 32-bit revision (the highest operation number the phone answers: 18 from 0.13.0, 23 from 1.2.0) and the phone's name (string, at most 128 bytes). A computer can check the revision before offering an operation, instead of waiting for the "update OpenBridge on the phone" error.
+The document ID is empty. Reply: status; on success, the phone app's version (string, at most 64 bytes, like `1.0.0`), a signed 32-bit revision (the highest operation number the phone answers: 18 from 0.13.0, 23 from 1.2.0, 24 from 1.3.0) and the phone's name (string, at most 128 bytes). A computer can check the revision before offering an operation, instead of waiting for the "update OpenBridge on the phone" error.
 
 ## EVENTS (19)
 
@@ -123,12 +132,17 @@ With cursor 0, or a cursor the phone doesn't recognize (it restarted, or the com
 | `1` | NOTIFICATION | key (string, at most 256 bytes), app name (at most 128), app package (at most 128), title (at most 512), text (at most 4,096), signed 64-bit time in milliseconds since 1970, a flags byte (bit 0: it can be answered with REPLY; bit 1: it can be dismissed), and a code (string, at most 16 bytes: a one-time code the phone found in the title or text, or empty). The same key again replaces the earlier one. |
 | `2` | REMOVED | key: the notification is gone from the phone |
 | `3` | BATTERY | level byte (0 to 100), then a byte: `1` charging, `0` not |
+| `4` | MEDIA | from 1.3.0: what's playing on the phone. App name (string, at most 128 bytes), title (at most 512), artist (at most 512), signed 64-bit duration and position in milliseconds (`-1` when unknown), a state byte (`0` nothing playing, `1` playing, `2` paused), and an actions byte (bit 0 play/pause, bit 1 next, bit 2 previous, bit 3 seek). Sent when it changes (not for position alone, except on seek), and after RESET while something plays. A computer that knows the position and state can advance it locally. |
 
 Notifications are sent only while the user has turned on **Notifications on computers** on the phone (which needs Android's notification access) and only for apps they haven't excluded. Ongoing notifications (music, navigation, OpenBridge's own) and group summaries are left out. Battery is always sent. Strings longer than their limit are cut at a character boundary.
 
 ## NOTIFICATION ACTION (20)
 
 ID is a notification key from EVENTS; for this operation only, the Document ID may be up to 256 bytes. After the common header, send an action byte: `1` dismiss, or `2` reply followed by the text (string, 1 to 4,096 bytes). Reply: status. Fails when the notification is gone, can't be answered, or notifications on computers are off.
+
+## MEDIA CONTROL (24)
+
+From 1.3.0. The document ID is empty. After the common header, send an action byte (`1` play, `2` pause, `3` play/pause, `4` next, `5` previous, `6` seek) and, for seek, a signed 64-bit position in milliseconds. Reply: status. Fails when nothing is playing, or the playing app doesn't offer that action. Media is sent and controlled only while Notifications on computers is on (it uses the same Android access) and **Media controls on computers** is on.
 
 ## RING (21)
 
@@ -148,4 +162,4 @@ OB01 is frozen from 1.0.0: operations 1 to 18, their requests, replies and limit
 
 ## Evolution
 
-Unknown operation/version fails closed; servers older than 0.9.6 answer operations 4–8 with an error, and those older than 0.11.0 operations 9–11 and OBP2, and those older than 0.12.0 operations 12–15 (clients then upload with PUT and don't collect files), and those older than 0.12.1 operation 16, and those older than 0.13.0 operations 17 and 18 (clients then collect only files with OUTBOX), and those older than 1.2.0 operations 19 to 23 (clients then hide notifications, battery, Ring, Open on phone and Send to phone), and the computer asks to update the phone app. Future companion features should use a new version/capability negotiation, with explicit permissions, rather than adding implicit access to this file capability. OB01 has no arbitrary path access, background synchronization, public hosting, or command execution. (Screen mirroring is separate: it uses USB debugging over the cable, not this protocol; see SECURITY.md.)
+Unknown operation/version fails closed; servers older than 0.9.6 answer operations 4–8 with an error, and those older than 0.11.0 operations 9–11 and OBP2, and those older than 0.12.0 operations 12–15 (clients then upload with PUT and don't collect files), and those older than 0.12.1 operation 16, and those older than 0.13.0 operations 17 and 18 (clients then collect only files with OUTBOX), and those older than 1.2.0 operations 19 to 23 (clients then hide notifications, battery, Ring, Open on phone and Send to phone), and those older than 1.3.0 operation 24 and OBP3 (clients hide media controls and pair with the 6-digit code), and the computer asks to update the phone app. Future companion features should use a new version/capability negotiation, with explicit permissions, rather than adding implicit access to this file capability. OB01 has no arbitrary path access, background synchronization, public hosting, or command execution. (Screen mirroring is separate: it uses USB debugging over the cable, not this protocol; see SECURITY.md.)
