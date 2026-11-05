@@ -119,7 +119,7 @@ final class InteropTests: XCTestCase {
         XCTAssertThrowsError(try BridgeClient(saved: "127.0.0.1", port: port, fingerprint: fingerprint, secret: secret),
                              "loopback only through the tunnel initializer")
         let info = try await tunnelled.info()
-        XCTAssertEqual(info.revision, 18)
+        XCTAssertEqual(info.revision, 23)
         // This fixture has no outbox: OUTBOX ALL is answered with an error, not misparsed.
         do { _ = try await tunnelled.outboxAll(wait: 0); XCTFail("No outbox in the fixture") }
         catch { XCTAssertFalse(BridgeError.isUnsupported(error), error.localizedDescription) }
