@@ -17,10 +17,11 @@ import javax.net.ssl.SSLSocket
 import kotlin.concurrent.thread
 
 /**
- * A phone speaking OB01 operations 18 to 23 exactly as docs/protocol.md describes them, over real TLS on loopback,
- * for testing the client before the phone's own server has them. Anything else is answered "Unsupported operation".
+ * A phone speaking OB01 operations 2, 6 and 18 to 24, and pairing by QR code (OBP3), exactly as docs/protocol.md
+ * describes them, over real TLS on loopback, for testing the client before the phone's own server has them. Anything
+ * else is answered "Unsupported operation". A `revision` below 24 behaves like a phone before 1.3.0.
  */
-class FakePhone(private val revision: Int = 23) : AutoCloseable {
+class FakePhone(private val revision: Int = 24) : AutoCloseable {
     val base: File = Files.createTempDirectory("openbridge-fake").toFile()
     val secret = ByteArray(32) { 0x33 }
     val fingerprint: ByteArray
@@ -36,6 +37,26 @@ class FakePhone(private val revision: Int = 23) : AutoCloseable {
     val sent = File(base, "Download/OpenBridge").apply { mkdirs() }
     /** Bytes SEND says it already holds from an interrupted send, by name. */
     val partial = HashMap<String, ByteArray>()
+
+    /** The key of a QR code the phone scanned (OBP3), or null; forgotten once used, or after 3 failed attempts. */
+    @Volatile var qrKey: ByteArray? = null
+    /** Answer OBP3 with a proof made with another key, as a phone that didn't scan this code (or a relay) would. */
+    @Volatile var qrWrongProof = false
+    /** The computers' names OBP3 brought, and the proofs (Pc) that arrived, checked or not. */
+    val qrNames = CopyOnWriteArrayList<String>()
+    val qrProofs = CopyOnWriteArrayList<ByteArray>()
+    /** The phone's nonce for OBP3; random unless set. */
+    @Volatile var qrPhoneNonce: ByteArray? = null
+    private var qrFailures = 0
+
+    /** Files GET and RESUME serve, by ID. */
+    val files = java.util.concurrent.ConcurrentHashMap<String, ByteArray>()
+    /** The offset of each GET (0) or RESUME request, in order. */
+    val reads = CopyOnWriteArrayList<Long>()
+    /** Reads cut off because the computer closed the connection before the end. */
+    val readsCut = java.util.concurrent.atomic.AtomicInteger()
+    /** MEDIA CONTROL answers "Nothing is playing." */
+    @Volatile var nothingPlaying = false
 
     init {
         val keystore = File(base, "fake.p12")
@@ -67,13 +88,34 @@ class FakePhone(private val revision: Int = 23) : AutoCloseable {
 
     private fun serve(input: DataInputStream, output: DataOutputStream) {
         val magic = ByteArray(4).also(input::readFully)
+        if (magic.contentEquals(QrPairing.MAGIC) && revision >= 24) return pairByQr(input, output)
         val key = ByteArray(32).also(input::readFully)
         if (!magic.contentEquals(Wire.MAGIC) || !key.contentEquals(secret)) return fail(output, "Pairing rejected")
         val operation = input.readUnsignedByte()
         val id = Wire.readString(input, 256)
         if (operation in 19..23 && revision < 23) return fail(output, "Unsupported operation; update OpenBridge on the phone")
+        if (operation == 24 && revision < 24) return fail(output, "Unsupported operation; update OpenBridge on the phone")
         when (operation) {
-            18 -> { output.writeByte(0); Wire.writeString(output, "1.2.0"); output.writeInt(revision); Wire.writeString(output, "Fake phone") }
+            2, 6 -> {
+                val bytes = files[id] ?: return fail(output, "No such file")
+                val offset = if (operation == 6) input.readLong() else 0L
+                if (offset !in 0..bytes.size.toLong()) return fail(output, "Invalid offset")
+                reads += offset
+                output.writeByte(0); output.writeLong(bytes.size.toLong())
+                try {
+                    var at = offset.toInt()
+                    while (at < bytes.size) { val n = minOf(16_384, bytes.size - at); output.write(bytes, at, n); at += n }
+                    output.flush()
+                } catch (e: java.io.IOException) { readsCut.incrementAndGet(); throw e }
+            }
+            24 -> {
+                val action = input.readUnsignedByte()
+                if (action !in 1..6) return fail(output, "Invalid action")
+                received += if (action == 6) "media 6 ${input.readLong()}" else "media $action"
+                if (nothingPlaying) return fail(output, "Nothing is playing.")
+                output.writeByte(0)
+            }
+            18 -> { output.writeByte(0); Wire.writeString(output, if (revision >= 24) "1.3.0" else "1.2.0"); output.writeInt(revision); Wire.writeString(output, "Fake phone") }
             19 -> {
                 val cursor = input.readLong(); val wait = input.readInt()
                 eventRequests += cursor to wait
@@ -118,6 +160,26 @@ class FakePhone(private val revision: Int = 23) : AutoCloseable {
         output.flush()
     }
 
+    /** OBP3, after the magic: name, the computer's nonce; then the phone's nonce and proof, the computer's proof, the secret. */
+    private fun pairByQr(input: DataInputStream, output: DataOutputStream) {
+        val block = ByteArray(128).also(input::readFully)
+        qrNames += String(block, Charsets.UTF_8).trimEnd('\u0000')
+        val computerNonce = ByteArray(32).also(input::readFully)
+        val key = qrKey ?: return fail(output, "Scan the code on the computer first")
+        val phoneNonce = qrPhoneNonce ?: ByteArray(32).also { java.security.SecureRandom().nextBytes(it) }
+        val proofKey = if (qrWrongProof) ByteArray(16) { 9 } else key
+        output.writeByte(0); output.write(phoneNonce); output.write(QrPairing.phoneProof(proofKey, fingerprint, computerNonce, phoneNonce)); output.flush()
+        val proof = ByteArray(32)
+        try { input.readFully(proof) } catch (e: java.io.IOException) { return }   // the computer hung up: it didn't trust the proof
+        qrProofs += proof
+        if (!MessageDigest.isEqual(proof, QrPairing.computerProof(key, fingerprint, computerNonce, phoneNonce))) {
+            if (++qrFailures >= 3) { qrKey = null; qrFailures = 0 }
+            return fail(output, "That code didn't match. Scan it again.")
+        }
+        qrKey = null; qrFailures = 0
+        output.writeByte(0); output.write(secret); output.flush()
+    }
+
     /** A default EVENTS reply: nothing new, the same cursor back. */
     private fun events(cursor: Long): ByteArray = reply(cursor)
 
@@ -138,6 +200,10 @@ class FakePhone(private val revision: Int = 23) : AutoCloseable {
 
         fun removed(key: String) = 2 to bytes { Wire.writeString(this, key) }
         fun battery(level: Int, charging: Boolean) = 3 to bytes { writeByte(level); writeByte(if (charging) 1 else 0) }
+        fun media(app: String, title: String, artist: String, duration: Long, position: Long, state: Int, actions: Int) = 4 to bytes {
+            Wire.writeString(this, app); Wire.writeString(this, title); Wire.writeString(this, artist)
+            writeLong(duration); writeLong(position); writeByte(state); writeByte(actions)
+        }
         val reset = 0 to ByteArray(0)
     }
 }

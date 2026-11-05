@@ -41,6 +41,13 @@ data class FolderSize(val bytes: Long, val files: Long, val complete: Boolean)
 /** Something sent from the phone, waiting to be collected: a file, or a text for the clipboard. */
 data class Waiting(val entry: Entry, val text: Boolean)
 
+/** How a phone answered pairing by QR code: paired, or not (yet) holding the code's key. */
+sealed class QrAnswer {
+    class Paired(val client: BridgeClient) : QrAnswer()
+    /** The phone's answer, like "Scan the code on the computer first"; `old` when it's older than 1.3.0. */
+    class NotYet(val message: String, val old: Boolean) : QrAnswer()
+}
+
 /** What INFO says about the phone: its OpenBridge version, the highest operation it answers, and its name. */
 data class PhoneInfo(val version: String, val revision: Int, val name: String)
 
@@ -159,6 +166,44 @@ class BridgeClient internal constructor(
                 val secret = ByteArray(32).also(input::readFully)
                 return BridgeClient(host, port, f, secret, transport)
             }
+        }
+
+        /**
+         * Pairing by QR code (OBP3) with whatever answers at the address, using the key `key` from the code on
+         * screen. [QrAnswer.NotYet] when the phone holds no key (it hasn't scanned the code; `old` when it is older
+         * than 1.3.0 and needs the 6-digit code). Throws when the phone's proof doesn't match the certificate seen
+         * (another phone, or something in between): then nothing was sent that proves this computer holds the key.
+         */
+        internal fun pairByQr(host: String, port: Int, key: ByteArray, transport: Transport = Transport.WIFI, name: String = Platform.computerName,
+                              timeout: Int = 4_000, opened: (Closeable) -> Unit = {}): QrAnswer {
+            var fingerprint: ByteArray? = null
+            val socket = open(host, port, null, timeout, seen = { fingerprint = it })
+            opened(socket)
+            try {
+                socket.use {
+                    val f = fingerprint ?: throw BridgeException("The phone sent no certificate.")
+                    val input = DataInputStream(socket.inputStream.buffered())
+                    val output = DataOutputStream(socket.outputStream.buffered())
+                    val computerNonce = ByteArray(Pairing.NONCE).also { SecureRandom().nextBytes(it) }
+                    output.write(QrPairing.MAGIC); output.write(Pairing.nameBlock(name)); output.write(computerNonce); output.flush()
+                    when (input.readUnsignedByte()) {
+                        0 -> {}
+                        1 -> { val message = Wire.readString(input, 512); return QrAnswer.NotYet(message, old = message == REJECTED) }
+                        else -> throw BridgeException("The phone sent an invalid reply.")
+                    }
+                    val phoneNonce = ByteArray(Pairing.NONCE).also(input::readFully)
+                    val proof = ByteArray(32).also(input::readFully)
+                    if (!MessageDigest.isEqual(proof, QrPairing.phoneProof(key, f, computerNonce, phoneNonce))) throw BridgeException(S.pairingTampered)
+                    output.write(QrPairing.computerProof(key, f, computerNonce, phoneNonce)); output.flush()
+                    when (input.readUnsignedByte()) {
+                        0 -> {}
+                        1 -> throw BridgeException(Wire.readString(input, 512))
+                        else -> throw BridgeException("The phone sent an invalid reply.")
+                    }
+                    val secret = ByteArray(32).also(input::readFully)
+                    return QrAnswer.Paired(BridgeClient(host, port, f, secret, transport))
+                }
+            } catch (e: BridgeException) { throw e } catch (e: IOException) { throw BridgeException(S.dropped, lost = true) }
         }
 
         private fun status(input: DataInputStream) {
