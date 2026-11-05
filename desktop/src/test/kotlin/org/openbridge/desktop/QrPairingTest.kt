@@ -27,6 +27,16 @@ class QrPairingTest {
         assertEquals("openbridge://pair?k=BAQEBAQEBAQEBAQEBAQEBA&n=Aditya%27s%20MacBook%20Air", QrPairing.link(key, "Aditya's MacBook Air"))
     }
 
+    /** The phone's and the Mac's vector: K = bytes 00 to 0f, F, Nm and Np as above. */
+    @Test
+    fun matchesThePhonesVector() {
+        val key = ByteArray(16) { it.toByte() }
+        val f = ByteArray(32) { 1 }; val nm = ByteArray(32) { 2 }; val np = ByteArray(32) { 3 }
+        assertEquals("3a0bac9b999778f24e7aee72417ec7de8b211b4a76de2af63c3d4570a9f5585d", hex(QrPairing.phoneProof(key, f, nm, np)))
+        assertEquals("3d8f513260fbb3245d86903c5e06f23003c55c21f2afbc3988490133bc86819d", hex(QrPairing.computerProof(key, f, nm, np)))
+        assertEquals("openbridge://pair?k=AAECAwQFBgcICQoLDA0ODw&n=Aditya%27s%20MacBook%20Air", QrPairing.link(key, "Aditya's MacBook Air"))
+    }
+
     @Test
     fun theCodeCarriesTheNameEncodedAndCut() {
         val key = ByteArray(16)
