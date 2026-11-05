@@ -1,0 +1,55 @@
+# Baseline profile: the startup path and the first frames of the home screen, compiled ahead of time on install
+# (installed by androidx.profileinstaller). Written by hand: the app's own screens and state, the shared hero drawing,
+# and the Compose runtime, UI, foundation, animation and Material pieces every frame goes through.
+
+# App start: the activity, sharing state and what it attaches.
+HSPLorg/openbridge/android/MainActivity;->**(**)**
+HSPLorg/openbridge/android/Sharing;->**(**)**
+HSPLorg/openbridge/android/Trusted;->**(**)**
+HSPLorg/openbridge/android/Texts;->**(**)**
+HSPLorg/openbridge/android/Feed;->**(**)**
+HSPLorg/openbridge/android/PhoneOutbox;->**(**)**
+HSPLorg/openbridge/android/Hotspot;->**(**)**
+HSPLorg/openbridge/android/Mirror;->**(**)**
+HSPLorg/openbridge/android/PhoneCompanion;->**(**)**
+HSPLorg/openbridge/android/Updater;->**(**)**
+HSPLorg/openbridge/android/LiveModel;->**(**)**
+HSPLorg/openbridge/android/S;->**(**)**
+HSPLorg/openbridge/android/Log;->**(**)**
+
+# The screens: the app frame, the home dashboard, the hero, and the design system.
+HSPLorg/openbridge/android/AppKt**->**(**)**
+HSPLorg/openbridge/android/HomeKt**->**(**)**
+HSPLorg/openbridge/android/HeroKt**->**(**)**
+HSPLorg/openbridge/android/HeroState;->**(**)**
+HSPLorg/openbridge/android/UiKt**->**(**)**
+HSPLorg/openbridge/android/Type;->**(**)**
+HSPLorg/openbridge/android/Motion;->**(**)**
+HSPLorg/openbridge/android/Haptics;->**(**)**
+HSPLorg/openbridge/android/ShareUi;->**(**)**
+HSPLorg/openbridge/android/ComposableSingletons**->**(**)**
+HSPLorg/openbridge/android/ActivityScreenKt**->**(**)**
+HSPLorg/openbridge/android/TextsScreenKt**->**(**)**
+HSPLorg/openbridge/android/SettingsKt**->**(**)**
+
+# The look: palette, backdrop and the hero's engine and drawing, run every frame.
+HSPLorg/openbridge/ui/**->**(**)**
+
+# Compose and the libraries every frame goes through.
+HSPLandroidx/compose/runtime/**->**(**)**
+HSPLandroidx/compose/ui/**->**(**)**
+HSPLandroidx/compose/foundation/**->**(**)**
+HSPLandroidx/compose/animation/**->**(**)**
+HSPLandroidx/compose/material3/**->**(**)**
+HSPLandroidx/activity/**->**(**)**
+HSPLandroidx/lifecycle/**->**(**)**
+HSPLkotlinx/coroutines/**->**(**)**
+
+# Classes loaded at startup.
+Lorg/openbridge/android/**;
+Lorg/openbridge/ui/**;
+Landroidx/compose/runtime/**;
+Landroidx/compose/ui/**;
+Landroidx/compose/foundation/**;
+Landroidx/compose/animation/**;
+Landroidx/compose/material3/**;
