@@ -14,6 +14,7 @@ import androidx.compose.material.Text
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.QrCode2
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -145,11 +146,10 @@ fun QrCard(state: AppState, side: Dp, modifier: Modifier = Modifier) {
                 val parts: @Composable () -> Unit = {
                     Text(if (expired) S.qrExpired else S.qrExpiresIn(code.secondsLeft(now)), color = if (expired) Palette.amber else Palette.muted, fontSize = 12.5.sp,
                         maxLines = 1, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
-                    if (!expired) GhostButton(S.qrNew) { state.showQr() }
+                    // A narrow card has room for the button's icon only.
+                    if (!expired) { if (narrow) IconButton(Icons.Filled.Refresh, S.qrNew) { state.showQr() } else GhostButton(S.qrNew) { state.showQr() } }
                 }
-                // A narrow card stacks the countdown over the button.
-                if (narrow) Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) { parts() }
-                else Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) { parts() }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(if (narrow) 6.dp else 10.dp)) { parts() }
             }
         }
         if (paired == null && state.qrOld.isNotEmpty())
@@ -163,7 +163,7 @@ fun QrCard(state: AppState, side: Dp, modifier: Modifier = Modifier) {
             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = m.semantics { heading() })
     }
     val hint: @Composable () -> Unit = {
-        if (paired == null) Text(S.qrHint, color = Palette.muted, fontSize = 12.5.sp, textAlign = TextAlign.Center, maxLines = 3,
+        if (paired == null && !narrow) Text(S.qrHint, color = Palette.muted, fontSize = 12.5.sp, textAlign = TextAlign.Center, maxLines = 3,
             overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = qrSide + 80.dp))
     }
     when (Palette.look) {
