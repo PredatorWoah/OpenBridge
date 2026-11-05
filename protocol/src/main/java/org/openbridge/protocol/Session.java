@@ -95,11 +95,13 @@ public final class Session {
             byte[] magic = new byte[4];
             in.readFully(magic);
             if (Arrays.equals(magic, Pairing.MAGIC3)) {
-                Pairing.Scanned qr = scanned;
-                if (qr == null || fingerprint == null) throw new IOException("Pairing is not available");
+                // The whole request is read before any refusal: closing with unread bytes would reset the connection, and
+                // the computer would see a broken connection instead of the reason.
                 String computer = Pairing.readName(in);
                 byte[] nonce = new byte[Pairing.NONCE];
                 in.readFully(nonce);
+                Pairing.Scanned qr = scanned;
+                if (qr == null || fingerprint == null) throw new IOException("Pairing is not available");
                 byte[] key = qr.key();
                 if (key == null || key.length != Pairing.KEY) throw new IOException("Scan the code on the computer first");
                 responseStarted = true;   // pairing reports its own errors after the exchange begins
