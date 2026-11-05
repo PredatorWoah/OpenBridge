@@ -242,10 +242,12 @@ final class QRPairer: ObservableObject {
 
     /// Pairs with an older phone the usual way: compare 6-digit codes.
     func pairWithCode(_ old: OldPhone, model: BrowserModel) {
+        // The tunnel to an old phone on the cable goes to the model, so the search mustn't close it.
+        let tunnel: FastUSB.Found? = old.cable ? oldCable : nil
+        if old.cable { oldCable = nil }
         stopLooking()
         if old.cable {
-            if let found = model.cableCandidate ?? oldCable { model.pairOverUSB(found) }
-            oldCable = nil
+            if let found = model.cableCandidate ?? tunnel { model.pairWithCode(over: found) }
         } else {
             model.host = old.host
             model.port = String(old.port)

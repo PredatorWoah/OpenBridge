@@ -811,7 +811,7 @@ final class BrowserModel: ObservableObject {
     }
 
     /// A phone over the cable too old for QR codes: offer "Pair over USB" with the 6-digit code, and start it.
-    func pairOverUSB(_ found: FastUSB.Found) {
+    func pairWithCode(over found: FastUSB.Found) {
         if usbCandidate?.tunnel !== found.tunnel {
             forgetUSBCandidate()
             usbCandidate = found
