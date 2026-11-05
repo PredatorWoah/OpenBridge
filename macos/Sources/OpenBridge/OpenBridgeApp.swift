@@ -90,6 +90,7 @@ struct RootView: View {
         .sheet(isPresented: $wifi) { WiFiSheet(model: model, discovery: model.discovery, isPresented: $wifi) }
         .sheet(isPresented: $model.showTexts) { TextsPanel(model: model, history: model.texts) }
         .sheet(isPresented: $model.showNotifications) { PhoneNotificationsSheet(model: model, feed: model.feed) }
+        .sheet(isPresented: $model.showQRPairing) { QRPairingSheet(model: model, qr: model.qr) }
         .overlay(alignment: .topTrailing) {
             if let update = model.update {
                 UpdatePill(update: update, updater: model.updater, busy: model.busy || model.transfer.map { !$0.done } == true)
@@ -112,6 +113,7 @@ struct RootView: View {
         .onChange(of: model.connected) { connected in
             guard connected else { return }
             wifi = false
+            model.showQRPairing = false
             if openAutomatically {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) { if model.connected { model.showBrowser = true } }
             }
@@ -461,6 +463,15 @@ struct WiFiSheet: View {
                     .buttonStyle(.plain).glass(12).disabled(model.busy)
                 }
             }
+            Button {
+                isPresented = false
+                // One sheet at a time: the QR code opens once this one has gone.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { model.showQRPairing = true }
+            } label: {
+                Label("Pair with QR code instead", systemImage: "qrcode")
+            }
+            .buttonStyle(GhostButton()).disabled(model.busy)
+            .help("Show a code to scan with OpenBridge 1.3 or later on the phone: nothing to compare or type")
             Text("OR TYPE IT").font(.system(size: 11, weight: .semibold)).tracking(1.4).foregroundStyle(Palette.muted)
             HStack {
                 TextField("Phone address, like 192.168.1.23", text: $model.host)

@@ -133,6 +133,9 @@ final class BrowserModel: ObservableObject {
     @Published var companionHint = false
     /// Photo backup running in the background (not a `transfer`: browsing and transfers carry on beside it).
     @Published var backup: BackupProgress?
+    /// Pairing by QR code (phone app 1.3.0): the sheet with the code, and the search for the phone that scans it.
+    @Published var showQRPairing = false
+    let qr = QRPairer()
     var eventsTask: Task<Void, Never>?
     var ringTask: Task<Void, Never>?
     var backupTask: Task<Void, Never>?
@@ -775,6 +778,45 @@ final class BrowserModel: ObservableObject {
             self.tunnel = found.tunnel
             self.adopt(paired, as: phone, entries: entries, fastUSB: true)
         }
+    }
+
+    // MARK: Pairing by QR code
+
+    /// The unpaired phone answering over the cable, if one does (for pairing by QR code).
+    var cableCandidate: FastUSB.Found? { usbCandidate }
+
+    /// The default gateway (the phone, on its own hotspot), looked up at most every 20 seconds.
+    func gatewayAddress() async -> String? { await currentGateway() }
+
+    /// A phone paired by QR code: saved like one paired with a code, and opened. `cable` is the Fast USB tunnel it
+    /// was paired through, if it was.
+    func adoptPaired(_ paired: BridgeClient, name: String, cable: FastUSB.Found?) async throws {
+        let entries: [Entry] = try await paired.list()
+        let info: PhoneInfo? = try? await paired.info()
+        let phoneName: String = info?.name ?? name
+        if busy { abandonRunning() }
+        if let cable {
+            if usbCandidate?.tunnel === cable.tunnel { usbCandidate = nil; usbPairable = nil } else { forgetUSBCandidate() }
+            if tunnel !== cable.tunnel { tunnel?.stop() }
+            tunnel = cable.tunnel
+            // No Wi‑Fi address yet: it's learned when the phone is seen on Wi‑Fi.
+            let phone = SavedPhone(name: phoneName, host: "", port: 41987, fingerprint: paired.fingerprint, secret: paired.secret)
+            adopt(paired, as: phone, entries: entries, fastUSB: true)
+        } else {
+            let phone = SavedPhone(name: phoneName, host: paired.host, port: paired.port,
+                                   fingerprint: paired.fingerprint, secret: paired.secret)
+            adopt(paired, as: phone, entries: entries)
+        }
+    }
+
+    /// A phone over the cable too old for QR codes: offer "Pair over USB" with the 6-digit code, and start it.
+    func pairOverUSB(_ found: FastUSB.Found) {
+        if usbCandidate?.tunnel !== found.tunnel {
+            forgetUSBCandidate()
+            usbCandidate = found
+            usbPairable = found.model ?? "Your phone"
+        }
+        pairOverUSB()
     }
 
     func cancelUSBPairing() {

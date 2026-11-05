@@ -43,7 +43,7 @@ enum ConnectText {
     static let isolated = "This Wi‑Fi keeps devices apart (common on guest, hotel and campus networks). On the phone, open OpenBridge › Settings › Phone hotspot and join that network from this computer, or use a USB cable."
 }
 
-/// "No cable? Pair over Wi‑Fi", at the foot of every connect screen.
+/// "No cable? Pair with QR code · Pair over Wi‑Fi", at the foot of every connect screen.
 struct PairOverWiFiLink: View {
     @ObservedObject var model: BrowserModel
     @Binding var wifi: Bool
@@ -51,8 +51,12 @@ struct PairOverWiFiLink: View {
         HStack(spacing: 6) {
             Text("No cable?").foregroundStyle(Palette.muted)
             if Screenshots.active {
+                Text("Pair with QR code").foregroundStyle(Color.accentColor)
+                Text("·").foregroundStyle(Palette.muted)
                 Text("Pair over Wi‑Fi").foregroundStyle(Color.accentColor)
             } else {
+                Button("Pair with QR code") { model.showQRPairing = true }.buttonStyle(.link).disabled(model.busy || model.connected)
+                Text("·").foregroundStyle(Palette.muted)
                 Button("Pair over Wi‑Fi") { wifi = true }.buttonStyle(.link).disabled(model.busy || model.connected)
             }
         }
