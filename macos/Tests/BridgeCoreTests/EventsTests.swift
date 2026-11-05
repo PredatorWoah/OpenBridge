@@ -66,7 +66,91 @@ final class EventsTests: XCTestCase {
         let data = reply(cursor: 7, [event(9, future), event(3, Data([15, 0])), event(200, Data()), event(0, Data())])
         let batch = try EventCodec.batch(data)
         XCTAssertEqual(batch.events, [.battery(BatteryState(level: 15, charging: false)), .reset])
-        XCTAssertNil(try EventCodec.event(kind: 4, body: Data([1, 2, 3])))
+        XCTAssertNil(try EventCodec.event(kind: 5, body: Data([1, 2, 3])))
+    }
+
+    private func mediaBody(app: String = "Spotify", title: String = "Clair de lune", artist: String = "Claude Debussy",
+                           duration: Int64 = 300_000, position: Int64 = 61_500, state: UInt8 = 1, actions: UInt8 = 0x0F) -> Data {
+        var body = Data()
+        body += string(app)
+        body += string(title)
+        body += string(artist)
+        body += Wire.integer(duration)
+        body += Wire.integer(position)
+        body += Data([state, actions])
+        return body
+    }
+
+    func testMediaDecodes() throws {
+        let batch = try EventCodec.batch(reply(cursor: 9, [event(0, Data()), event(4, mediaBody())]))
+        XCTAssertEqual(batch.events.count, 2)
+        guard case .media(let media) = batch.events[1] else { return XCTFail("Expected media") }
+        XCTAssertEqual(media.app, "Spotify")
+        XCTAssertEqual(media.title, "Clair de lune")
+        XCTAssertEqual(media.artist, "Claude Debussy")
+        XCTAssertEqual(media.duration, 300_000)
+        XCTAssertEqual(media.position, 61_500)
+        XCTAssertEqual(media.playback, .playing)
+        XCTAssertTrue(media.active)
+        XCTAssertTrue(media.canPlayPause && media.canNext && media.canPrevious && media.canSeek)
+    }
+
+    func testMediaUnknownValuesAndActionBits() throws {
+        guard case .media(let unknown)? = try EventCodec.event(kind: 4, body: mediaBody(duration: -1, position: -1, state: 0, actions: 0)) else {
+            return XCTFail("Expected media")
+        }
+        XCTAssertNil(unknown.duration)
+        XCTAssertNil(unknown.position)
+        XCTAssertEqual(unknown.playback, .none)
+        XCTAssertFalse(unknown.active)
+        XCTAssertFalse(unknown.canPlayPause || unknown.canNext || unknown.canPrevious || unknown.canSeek)
+        for (bits, expected) in [(UInt8(1), [true, false, false, false]), (2, [false, true, false, false]),
+                                 (4, [false, false, true, false]), (8, [false, false, false, true]), (0xF0, [false, false, false, false])] {
+            guard case .media(let media)? = try EventCodec.event(kind: 4, body: mediaBody(state: 2, actions: bits)) else {
+                return XCTFail("Expected media")
+            }
+            XCTAssertEqual(media.playback, .paused)
+            XCTAssertEqual([media.canPlayPause, media.canNext, media.canPrevious, media.canSeek], expected, "actions \(bits)")
+        }
+        // Fields added later at the end are ignored.
+        XCTAssertNoThrow(try EventCodec.event(kind: 4, body: mediaBody() + Data([7, 7, 7])))
+    }
+
+    func testMediaLimits() {
+        XCTAssertThrowsError(try EventCodec.event(kind: 4, body: mediaBody(state: 3)))
+        XCTAssertThrowsError(try EventCodec.event(kind: 4, body: mediaBody(duration: -2)))
+        XCTAssertThrowsError(try EventCodec.event(kind: 4, body: mediaBody(position: -5)))
+        XCTAssertThrowsError(try EventCodec.event(kind: 4, body: mediaBody(app: String(repeating: "a", count: 129))))
+        XCTAssertNoThrow(try EventCodec.event(kind: 4, body: mediaBody(app: String(repeating: "a", count: 128))))
+        XCTAssertThrowsError(try EventCodec.event(kind: 4, body: mediaBody(title: String(repeating: "t", count: 513))))
+        XCTAssertThrowsError(try EventCodec.event(kind: 4, body: mediaBody(artist: String(repeating: "r", count: 513))))
+        XCTAssertNoThrow(try EventCodec.event(kind: 4, body: mediaBody(title: String(repeating: "t", count: 512),
+                                                                       artist: String(repeating: "r", count: 512))))
+        XCTAssertThrowsError(try EventCodec.event(kind: 4, body: mediaBody().dropLast()))
+    }
+
+    func testMediaPositionAdvancesLocally() throws {
+        let playing = MediaState(app: "", title: "", artist: "", duration: 10_000, position: 4_000, playback: .playing,
+                                 canPlayPause: true, canNext: true, canPrevious: true, canSeek: true)
+        XCTAssertEqual(playing.position(after: 2.5), 6_500)
+        XCTAssertEqual(playing.position(after: 60), 10_000)
+        XCTAssertEqual(playing.position(after: -3), 4_000)
+        let paused: MediaState = playing.with(position: 4_000, playback: .paused)
+        XCTAssertEqual(paused.position(after: 30), 4_000)
+        XCTAssertNil(playing.with(position: nil, playback: .playing).position(after: 1))
+        let endless = MediaState(app: "", title: "", artist: "", duration: nil, position: 1_000, playback: .playing,
+                                 canPlayPause: true, canNext: false, canPrevious: false, canSeek: false)
+        XCTAssertEqual(endless.position(after: 100), 101_000)
+    }
+
+    func testMediaControlRequests() throws {
+        XCTAssertEqual(try EventCodec.mediaRequest(.play), Data([1]))
+        XCTAssertEqual(try EventCodec.mediaRequest(.pause), Data([2]))
+        XCTAssertEqual(try EventCodec.mediaRequest(.playPause), Data([3]))
+        XCTAssertEqual(try EventCodec.mediaRequest(.next), Data([4]))
+        XCTAssertEqual(try EventCodec.mediaRequest(.previous), Data([5]))
+        XCTAssertEqual(try EventCodec.mediaRequest(.seek(90_500)), Data([6, 0, 0, 0, 0, 0, 0x01, 0x61, 0x84]))
+        XCTAssertThrowsError(try EventCodec.mediaRequest(.seek(-1)))
     }
 
     func testFieldsAddedLaterAtTheEndAreIgnored() throws {

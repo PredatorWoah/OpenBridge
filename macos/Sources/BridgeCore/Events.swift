@@ -32,6 +32,69 @@ public struct BatteryState: Equatable {
     public init(level: Int, charging: Bool) { self.level = level; self.charging = charging }
 }
 
+/// What's playing on the phone (EVENTS kind 4 MEDIA, from phone app 1.3.0).
+public struct MediaState: Equatable {
+    public enum Playback: UInt8 {
+        case none = 0, playing = 1, paused = 2
+    }
+
+    public let app: String
+    public let title: String
+    public let artist: String
+    /// Milliseconds, or nil when the phone doesn't know.
+    public let duration: Int64?
+    /// Milliseconds when the phone sent this, or nil when unknown.
+    public let position: Int64?
+    public let playback: Playback
+    public let canPlayPause: Bool
+    public let canNext: Bool
+    public let canPrevious: Bool
+    public let canSeek: Bool
+
+    public init(app: String, title: String, artist: String, duration: Int64?, position: Int64?, playback: Playback,
+                canPlayPause: Bool, canNext: Bool, canPrevious: Bool, canSeek: Bool) {
+        self.app = app; self.title = title; self.artist = artist
+        self.duration = duration; self.position = position; self.playback = playback
+        self.canPlayPause = canPlayPause; self.canNext = canNext; self.canPrevious = canPrevious; self.canSeek = canSeek
+    }
+
+    /// Something is playing or paused.
+    public var active: Bool { playback != .none }
+
+    /// The position `elapsed` seconds after the phone sent it: advancing while playing, never past the end.
+    public func position(after elapsed: TimeInterval) -> Int64? {
+        guard let position else { return nil }
+        var now: Int64 = position
+        if playback == .playing && elapsed > 0 { now += Int64((elapsed * 1000).rounded()) }
+        if let duration, duration > 0 { now = min(now, duration) }
+        return max(now, 0)
+    }
+
+    /// The same media at another position and state, as after a control from this Mac.
+    public func with(position: Int64?, playback: Playback) -> MediaState {
+        MediaState(app: app, title: title, artist: artist, duration: duration, position: position, playback: playback,
+                   canPlayPause: canPlayPause, canNext: canNext, canPrevious: canPrevious, canSeek: canSeek)
+    }
+}
+
+/// What a computer can ask of the phone's media (MEDIA CONTROL, 24).
+public enum MediaCommand: Equatable {
+    case play, pause, playPause, next, previous
+    /// Milliseconds from the start.
+    case seek(Int64)
+
+    var code: UInt8 {
+        switch self {
+        case .play: return 1
+        case .pause: return 2
+        case .playPause: return 3
+        case .next: return 4
+        case .previous: return 5
+        case .seek: return 6
+        }
+    }
+}
+
 /// One event from EVENTS. Kinds this Mac doesn't know are skipped while reading, so they never appear here.
 public enum PhoneEvent: Equatable {
     /// Forget every notification shown from this phone; the current state follows.
@@ -40,6 +103,8 @@ public enum PhoneEvent: Equatable {
     /// The notification with this key is gone from the phone.
     case removed(String)
     case battery(BatteryState)
+    /// What's playing changed (or nothing plays any more: `playback` is `.none`).
+    case media(MediaState)
 }
 
 /// What one EVENTS reply said: the cursor to ask from next time, and the events this Mac understands, in order.
@@ -94,9 +159,35 @@ public enum EventCodec {
             let charging: UInt64 = try reader.number(1)
             guard level <= 100, charging <= 1 else { throw invalid }
             return .battery(BatteryState(level: Int(level), charging: charging == 1))
+        case 4:
+            return .media(try media(&reader))
         default:
             return nil
         }
+    }
+
+    /// A MEDIA body: app, title, artist, duration and position (-1 when unknown), state and actions.
+    static func media(_ reader: inout ByteReader) throws -> MediaState {
+        let app: String = try reader.string(limit: 128)
+        let title: String = try reader.string(limit: 512)
+        let artist: String = try reader.string(limit: 512)
+        let duration: Int64 = Int64(bitPattern: try reader.number(8))
+        let position: Int64 = Int64(bitPattern: try reader.number(8))
+        let state: UInt64 = try reader.number(1)
+        let actions: UInt64 = try reader.number(1)
+        guard duration >= -1, position >= -1, let playback = MediaState.Playback(rawValue: UInt8(truncatingIfNeeded: state)),
+              state <= 2 else { throw invalid }
+        return MediaState(app: app, title: title, artist: artist,
+                          duration: duration < 0 ? nil : duration, position: position < 0 ? nil : position,
+                          playback: playback, canPlayPause: actions & 1 != 0, canNext: actions & 2 != 0,
+                          canPrevious: actions & 4 != 0, canSeek: actions & 8 != 0)
+    }
+
+    /// The MEDIA CONTROL request after the common header: the action byte, and for seek the position.
+    public static func mediaRequest(_ command: MediaCommand) throws -> Data {
+        guard case .seek(let millis) = command else { return Data([command.code]) }
+        guard millis >= 0 else { throw BridgeError.message("Can't seek before the start.") }
+        return Data([command.code]) + Wire.integer(millis)
     }
 
     /// A whole EVENTS reply after its status: cursor, count, then each kind, length and body.

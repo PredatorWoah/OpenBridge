@@ -36,6 +36,17 @@ extension BridgeClient {
         try await channel.status()
     }
 
+    /// The revision from which the phone sends MEDIA events and answers MEDIA CONTROL (phone app 1.3.0).
+    public static let mediaRevision = 24
+
+    /// Plays, pauses, skips or seeks what's playing on the phone (MEDIA CONTROL, 24).
+    public func mediaControl(_ command: MediaCommand) async throws {
+        let extra: Data = try EventCodec.mediaRequest(command)
+        let channel = try await open(operation: 24, id: "", extra: extra)
+        defer { channel.close() }
+        try await channel.status()
+    }
+
     /// Rings the phone at full alarm volume for up to 60 seconds, or stops it (RING).
     public func ring(_ on: Bool) async throws {
         let channel = try await open(operation: 21, id: "", extra: Data([on ? 1 : 0]))
