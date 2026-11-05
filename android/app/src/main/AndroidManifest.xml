@@ -16,6 +16,11 @@
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" android:usesPermissionFlags="neverForLocation"
         tools:targetApi="33" />
+    <!-- Pair with QR code: the camera, asked for only when the user opens the scanner, and only to read the code on the
+         computer's screen. Phones without a camera can still pair with the 6-digit code. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
     <!-- Update in the app: Android's installer still asks the user and checks the signing key. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Notifications on computers: the names and icons of apps that show notifications, for the Apps list. Only apps

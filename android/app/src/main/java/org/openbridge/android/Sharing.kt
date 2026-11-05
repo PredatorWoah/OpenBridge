@@ -153,6 +153,11 @@ object Sharing {
         return approved
     }
 
+    /** A computer paired by QR code (on the main thread): it counts as connected, as after an approved code. */
+    fun pairedByCode(asking: String) {
+        if (server != null) { paired = true; computer = asking; ShareService.refresh(app) }
+    }
+
     fun decidePairing(approve: Boolean) {
         synchronized(this) { pairingDecision }?.complete(approve)
         pairingCode = null
@@ -285,6 +290,7 @@ object Sharing {
                 Log.add("Couldn't start sharing: ${e.javaClass.simpleName}")
                 main.post {
                     if (generation == current) {
+                        ScanPairing.sharingEnded()
                         busy = false
                         note = when (e) {
                             is SecurityException -> S.folderDenied
@@ -329,6 +335,7 @@ object Sharing {
     fun stop(reason: String? = null) {
         generation++
         decidePairing(false)
+        ScanPairing.sharingEnded()
         if (server != null || busy) Log.add("Stopped sharing")
         server?.close(); server = null; busy = false; paired = false; computer = null; transport = null
         endpoints = emptyList()

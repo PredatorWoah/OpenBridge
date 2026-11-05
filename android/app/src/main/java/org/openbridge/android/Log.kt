@@ -40,6 +40,9 @@ object Log {
             "All files access: ${if (AllFiles.granted(context)) "yes" else "no"}, background sharing: ${if (Sharing.inBackground) "on" else "off"}",
             "Trusted computers: ${Trusted.computers.size}, waiting to send: ${PhoneOutbox.waiting.size}",
             "Look: ${org.openbridge.ui.Palette.look.id}",
+            "Pairing by QR code: ${ScanPairing.summary}",
+            "Notifications on computers: ${if (Mirror.enabled) "on" else "off"}, media controls on computers: " +
+                "${if (MediaMirror.enabled) "on" else "off"}${if (MediaMirror.active) ", sending what's playing" else ""}",
         )
         val recent = synchronized(this) { lines.toList() }
         return (header + "" + "Recent events:" + recent).joinToString("\n")

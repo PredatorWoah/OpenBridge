@@ -118,6 +118,45 @@ object S {
     fun codeNotice(code: String) = t("Code ${code.chunked(3).joinToString(" ")}. Tap Pair only if your computer shows the same code.",
         "数字 ${code.chunked(3).joinToString(" ")}。只有电脑上显示相同数字时才点“配对”。")
 
+    // Pair with QR code
+    val pairWithQr get() = t("Pair with QR code", "扫码配对")
+    val pairWithQrDetail get() = t("Scan the code OpenBridge shows on your computer", "扫描电脑上 OpenBridge 显示的二维码")
+    val scanTitle get() = t("Scan the code on your computer", "扫描电脑上的二维码")
+    val scanHelp get() = t("In OpenBridge on your Mac or PC, choose Pair with QR code, then hold the phone so the code fits in the frame.",
+        "在 Mac 或电脑上的 OpenBridge 中选择“扫码配对”，然后让二维码对准取景框。")
+    val scanNotOurs get() = t("That isn't an OpenBridge pairing code. Scan the one on your computer.", "这不是 OpenBridge 的配对二维码。请扫描电脑上显示的那个。")
+    val scanDamaged get() = t("This code can't be read. Show a new one on your computer, or update OpenBridge on both.",
+        "无法读取这个二维码。请在电脑上重新生成一个，或把两边的 OpenBridge 都更新到最新版本。")
+    val torchOn get() = t("Turn on the light", "打开手电筒")
+    val torchOff get() = t("Turn off the light", "关闭手电筒")
+    val cameraUnavailable get() = t("The camera isn't available. Close other apps using it, or pair with the 6-digit code.",
+        "相机无法使用。请关闭正在使用相机的其他应用，或改用 6 位数字配对。")
+    fun readyToPair(computer: String) = t("Ready to pair with $computer", "准备与 $computer 配对")
+    val readyDetail get() = t("Your computer connects by itself. Keep it on the same Wi‑Fi, or plugged in by cable, and keep this screen open.",
+        "电脑会自动连接。请让电脑和手机在同一 Wi‑Fi 下，或用数据线连接，并保持此页面打开。")
+    fun timeLeft(seconds: Long) = t("${seconds / 60}:${"%02d".format(seconds % 60)} left", "剩余 ${seconds / 60}:${"%02d".format(seconds % 60)}")
+    fun pairedWith(computer: String) = t("Paired with $computer", "已与 $computer 配对")
+    val pairedDetail get() = t("It's now a trusted computer and reconnects by itself, without a code.", "它已成为受信任的电脑，以后会自动重新连接，无需验证码。")
+    val done get() = t("Done", "完成")
+    val scanAgain get() = t("Scan again", "重新扫描")
+    val pairingDidntFinish get() = t("Pairing didn't finish", "配对没有完成")
+    fun qrExpired(computer: String?) = t("${computer ?: "Your computer"} didn't connect within 2 minutes. Check that it's on the same Wi‑Fi as the phone (or plugged in by cable), then scan a new code.",
+        "${computer ?: "电脑"} 没有在 2 分钟内连接。请确认电脑和手机在同一 Wi‑Fi 下（或用数据线连接），然后扫描新的二维码。")
+    val qrRefused get() = t("Something other than your computer tried this code three times, so it was cancelled. Show a new code on your computer and scan it again.",
+        "有其他设备用这个二维码尝试了三次，因此已取消。请在电脑上重新生成二维码再扫描。")
+    val qrNotSharing get() = t("Sharing stopped, so your computer couldn't reach the phone. Start sharing and scan a new code.",
+        "共享已停止，电脑无法连接到手机。请开始共享，然后扫描新的二维码。")
+    val qrNoCamera get() = t("OpenBridge needs the camera only to scan the code on your computer. Allow it in Settings, or pair with the 6-digit code instead.",
+        "OpenBridge 只用相机扫描电脑上的二维码。请在设置中允许，或改用 6 位数字配对。")
+    val openSettings get() = t("Open settings", "打开设置")
+    val orCode get() = t("No camera? Your computer can also pair with a 6-digit code.", "没有相机？电脑也可以用 6 位数字配对。")
+
+    // Media controls on computers
+    val mediaControls get() = t("Media controls on computers", "电脑上的媒体控制")
+    val mediaOn get() = t("Computers show what's playing and can play, pause, skip and seek.", "电脑会显示正在播放的内容，并可以播放、暂停、切歌和调整进度。")
+    val mediaOff get() = t("Off. Computers don't see what's playing.", "已关闭。电脑看不到正在播放的内容。")
+    val mediaNeedsNotifications get() = t("Works while notifications on computers is on.", "需要先打开“电脑上的通知”。")
+
     // Trusted computers
     val trusted get() = t("Trusted computers", "已信任的电脑")
     fun trustedCount(count: Int) = t(if (count == 1) "1 computer reconnects without a code" else "$count computers reconnect without a code",

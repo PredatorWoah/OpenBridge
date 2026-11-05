@@ -22,6 +22,7 @@ data class FakeModel(
     override val hotspot: HotspotUi = HotspotUi(),
     override val update: UpdateUi = UpdateUi(),
     override val events: List<Feed.Event> = emptyList(),
+    override val qr: QrUi = QrUi(),
     override val collecting: Float = 0f,
     override val now: Long = Fixtures.now,
     override val version: String = "1.1.1",
@@ -50,6 +51,13 @@ object FakeActions : Actions {
     override fun mirror(on: Boolean) {}
     override fun showApp(packageName: String, shown: Boolean) {}
     override fun forget(id: String) {}
+    override fun scanQr() {}
+    override fun closeScanner() {}
+    override fun scanned(text: String) = ScanPairing.Read.OTHER
+    override fun cancelQr() {}
+    override fun dismissQr() {}
+    override fun appSettings() {}
+    override fun mediaControls(on: Boolean) {}
     override fun decidePairing(approve: Boolean) {}
     override fun dismissNote() {}
     override fun chooseLook(look: Look) {}
@@ -71,6 +79,38 @@ object FakeActions : Actions {
             drawCircle(if (warm) Color(0xFF8D6E63) else Color(0xFF43A047), 110f, Offset(150f, 250f))
         }
         return image
+    }
+}
+
+/**
+ * The camera in the pictures: a computer's screen, slightly lit, showing a real pairing code (drawn with ZXing's encoder),
+ * as the phone would see it through the scanner's window.
+ */
+object FakeCamera : CameraFeed {
+    private val code = com.google.zxing.qrcode.QRCodeWriter().encode("openbridge://pair?k=AAECAwQFBgcICQoLDA0ODw&n=Maya%27s%20MacBook%20Pro",
+        com.google.zxing.BarcodeFormat.QR_CODE, 0, 0, mapOf(com.google.zxing.EncodeHintType.MARGIN to 0))
+
+    @androidx.compose.runtime.Composable
+    override fun Feed(torch: Boolean, onText: (String) -> Unit, onReady: (Boolean) -> Unit, onFailed: () -> Unit, modifier: androidx.compose.ui.Modifier) {
+        androidx.compose.runtime.LaunchedEffect(Unit) { onReady(true) }
+        androidx.compose.foundation.Canvas(modifier) {
+            // A desk, the laptop's screen glowing, and the code on a white card in the middle of it.
+            drawRect(Brush.verticalGradient(listOf(Color(0xFF2B2A33), Color(0xFF15141B))))
+            val screen = androidx.compose.ui.geometry.Size(size.width * 1.1f, size.height * 0.62f)
+            val origin = Offset((size.width - screen.width) / 2, size.height * 0.42f - screen.height / 2)
+            drawRoundRect(Brush.radialGradient(listOf(Color(0xFF3C4A6B), Color(0xFF1E2333)), Offset(size.width / 2, size.height * 0.42f), size.width),
+                origin, screen, androidx.compose.ui.geometry.CornerRadius(40f))
+            val side = minOf(size.width * 0.5f, size.height * 0.29f)
+            val card = Offset((size.width - side) / 2, size.height * 0.42f - side / 2)
+            val pad = side * 0.08f
+            drawRoundRect(Color(0xFFF7F4EE), card, androidx.compose.ui.geometry.Size(side, side), androidx.compose.ui.geometry.CornerRadius(side * 0.06f))
+            val cell = (side - 2 * pad) / code.width
+            for (y in 0 until code.height) for (x in 0 until code.width) if (code.get(x, y))
+                drawRect(Color(0xFF16141C), Offset(card.x + pad + x * cell, card.y + pad + y * cell), androidx.compose.ui.geometry.Size(cell + 0.5f, cell + 0.5f))
+            // The phone's reflection: a soft diagonal sheen.
+            drawRect(Brush.linearGradient(listOf(Color.White.copy(alpha = 0.05f), Color.Transparent, Color.White.copy(alpha = 0.03f)),
+                Offset.Zero, Offset(size.width, size.height)))
+        }
     }
 }
 

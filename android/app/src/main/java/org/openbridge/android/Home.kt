@@ -96,6 +96,11 @@ fun HomeScreen(model: AppModel, actions: Actions, hero: HeroState, padding: Padd
                 UpdatePill(model.update, actions)
                 Hints(share, actions)
                 if (live) LiveDashboard(model, actions, hero, scopes) else IdleHero(share, actions, hero, scopes)
+                // Pair with QR code, while off or sharing (not while starting); once connected, Trusted computers has it.
+                AnimatedVisibility(share.phase == Phase.OFF || share.phase == Phase.WAITING,
+                    enter = fadeIn(motion()) + expandVertically(motion()), exit = fadeOut(motion()) + shrinkVertically(motion())) {
+                    PairWithQrRow(actions)
+                }
                 QuickActions(actions, openTab)
                 val outbox = model.outbox
                 AnimatedVisibility(outbox.items.isNotEmpty(), enter = fadeIn(motion()) + expandVertically(motion()), exit = fadeOut(motion()) + shrinkVertically(motion())) {

@@ -90,7 +90,7 @@ fun App(model: AppModel, actions: Actions, startTab: Tab = Tab.HOME, startPage: 
     val motion = LocalMotion.current
     val share = model.share
     val pairing = model.pairing
-    val hero = rememberHero(share.running || share.byCable, share.connected, visible = tab == Tab.HOME && pairing == null)
+    val hero = rememberHero(share.running || share.byCable, share.connected, visible = tab == Tab.HOME && pairing == null && !model.qr.scanning)
     val ime = WindowInsets.isImeVisible
 
     // Activity's badge: events that arrived since it was last opened.
@@ -143,6 +143,7 @@ fun App(model: AppModel, actions: Actions, startTab: Tab = Tab.HOME, startPage: 
         }
 
         PairingDialog(pairing, actions)
+        QrPairingLayer(model.qr, model.now, actions)
     }
 }
 

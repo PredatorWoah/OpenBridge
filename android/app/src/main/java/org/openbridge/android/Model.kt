@@ -56,7 +56,9 @@ data class AppEntry(val packageName: String, val label: String)
 
 @Immutable
 data class MirrorUi(val enabled: Boolean = false, val access: Boolean = false, val excluded: Set<String> = emptySet(),
-                    val apps: List<AppEntry> = emptyList()) {
+                    val apps: List<AppEntry> = emptyList(),
+                    /** Media controls on computers (on by default; works while notifications on computers is on). */
+                    val media: Boolean = true) {
     val on get() = enabled && access
 }
 
@@ -96,6 +98,8 @@ interface AppModel {
     val hotspot: HotspotUi
     val update: UpdateUi
     val events: List<Feed.Event>
+    /** Pairing by QR code: the scanner, a scanned code waiting for its computer, and how it ended. */
+    val qr: QrUi
     /** How much of the item a computer is collecting has gone, 0 to 1 (raises Tide's water). Apart from [share], as it changes often. */
     val collecting: Float
     /** The time relative times are counted from; moves on every half minute. */
@@ -131,6 +135,18 @@ interface Actions {
     fun mirror(on: Boolean)
     fun showApp(packageName: String, shown: Boolean)
     fun forget(id: String)
+    /** Pair with QR code: asks for the camera if needed, then opens the scanner. */
+    fun scanQr()
+    fun closeScanner()
+    /** The scanner read a QR code's text; returns what it was. */
+    fun scanned(text: String): ScanPairing.Read
+    /** Cancels a scanned code that is waiting for its computer. */
+    fun cancelQr()
+    /** Closes the paired or problem card. */
+    fun dismissQr()
+    /** Android's settings for this app (to allow the camera after "Don't ask again"). */
+    fun appSettings()
+    fun mediaControls(on: Boolean)
     fun decidePairing(approve: Boolean)
     fun dismissNote()
     fun chooseLook(look: Look)
@@ -179,12 +195,13 @@ object LiveModel : AppModel {
     override val texts get() = Texts.history
     override val trusted get() = Trusted.computers
     override val mirror get() = MirrorUi(Mirror.enabled, Mirror.access, Mirror.excluded,
-        Mirror.seen.map { AppEntry(it, Mirror.label(it)) }.sortedBy { it.label.lowercase() })
+        Mirror.seen.map { AppEntry(it, Mirror.label(it)) }.sortedBy { it.label.lowercase() }, MediaMirror.enabled)
     override val hotspot get() = HotspotUi(Hotspot.network?.name, Hotspot.network?.password, Hotspot.starting, Hotspot.problem,
         Hotspot.supported, Sharing.endpoints.firstOrNull { it.via == Via.HOTSPOT })
     override val update get() = UpdateUi(Updater.available?.version, Updater.available?.page, Updater.step, Updater.progress, Updater.problem,
         Updater.checking, Updater.upToDate)
     override val events get() = Feed.events
+    override val qr get() = ScanPairing.ui
     override val collecting get() = PhoneOutbox.progress.values.maxOrNull() ?: 0f
     override val now get() = clock
     override val version: String get() = BuildConfig.VERSION_NAME

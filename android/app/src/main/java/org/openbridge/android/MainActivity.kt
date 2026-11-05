@@ -47,6 +47,10 @@ class MainActivity : ComponentActivity(), Actions {
     private val nearby = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted && Build.VERSION.SDK_INT >= 33) Hotspot.start(this) else Hotspot.denied()
     }
+    /** Pair with QR code: the camera is asked for here only, when the user opens the scanner. */
+    private val camera = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) ScanPairing.open() else { Log.add("Camera permission refused"); ScanPairing.noCamera() }
+    }
     /** Send files: the system picker, then the same path as Share › OpenBridge. */
     private val files = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris -> if (uris.isNotEmpty()) queue(uris) }
 
@@ -221,6 +225,28 @@ class MainActivity : ComponentActivity(), Actions {
     override fun mirror(on: Boolean) = Mirror.enable(on)
     override fun showApp(packageName: String, shown: Boolean) = Mirror.include(packageName, shown)
     override fun forget(id: String) = Trusted.forget(id)
+
+    override fun scanQr() {
+        if (granted(Manifest.permission.CAMERA)) ScanPairing.open() else camera.launch(Manifest.permission.CAMERA)
+    }
+
+    override fun closeScanner() = ScanPairing.close()
+
+    /** A pairing code starts sharing when it isn't on, so the computer can reach the phone within the 2 minutes. */
+    override fun scanned(text: String): ScanPairing.Read {
+        val read = ScanPairing.scanned(text)
+        if (read == ScanPairing.Read.PAIRING && model.server == null && !model.busy) toggleSharing()
+        return read
+    }
+
+    override fun cancelQr() = ScanPairing.cancel()
+    override fun dismissQr() = ScanPairing.dismiss()
+
+    override fun appSettings() {
+        runCatching { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) }
+    }
+
+    override fun mediaControls(on: Boolean) = MediaMirror.enable(on)
     override fun decidePairing(approve: Boolean) = model.decidePairing(approve)
     override fun dismissNote() = model.dismissNote()
     override fun chooseLook(look: Look) = model.chooseLook(look)

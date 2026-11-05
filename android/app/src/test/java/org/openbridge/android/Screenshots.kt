@@ -56,6 +56,13 @@ val shots = listOf(
         served = Endpoint(Via.HOTSPOT, "192.168.49.1", 41986))) }, Tab.SETTINGS, Page.HOTSPOT),
     Shot("16-settings-help", base, Tab.SETTINGS, Page.HELP),
     Shot("17-share-sheet", base, sheet = true),
+    Shot("18-qr-scanner", { base(it).copy(share = ShareUi(Phase.WAITING, endpoints = Fixtures.endpoints), qr = QrUi(scanning = true)) }),
+    Shot("19-qr-ready", { base(it).copy(share = ShareUi(Phase.WAITING, endpoints = Fixtures.endpoints),
+        qr = QrUi(waitingFor = Fixtures.MAC, expiresAt = Fixtures.now + 94_000)) }),
+    Shot("20-qr-paired", { base(it).copy(share = ShareUi(Phase.CONNECTED, computer = Fixtures.MAC, transport = Via.WIFI, endpoints = Fixtures.endpoints),
+        qr = QrUi(paired = Fixtures.MAC)) }),
+    Shot("21-qr-expired", { base(it).copy(share = ShareUi(Phase.WAITING, endpoints = Fixtures.endpoints),
+        qr = QrUi(problem = QrProblem.EXPIRED, problemComputer = Fixtures.MAC)) }),
 )
 
 /** Sets the screen size, font scale, language and look before the activity starts. */
@@ -79,7 +86,7 @@ abstract class Gallery(qualifiers: String, locale: Locale, private val look: Loo
     protected fun render(folder: String, list: List<Shot>, rtl: Boolean = false) {
         var current by mutableStateOf(list.first())
         compose.setContent {
-            CompositionLocalProvider(LocalMotion provides Motion(frozen = true),
+            CompositionLocalProvider(LocalMotion provides Motion(frozen = true), LocalCameraFeed provides FakeCamera,
                 LocalLayoutDirection provides if (rtl) LayoutDirection.Rtl else LayoutDirection.Ltr) {
                 OpenBridgeTheme {
                     val shot = current
@@ -124,7 +131,7 @@ class EveryScreen(private val look: Look, private val language: String, private 
 }
 
 private val largeText = listOf("01-home-idle", "04-home-connected", "05-pairing-code", "06-activity", "08-texts", "10-settings",
-    "12-settings-notifications", "15-settings-hotspot-on")
+    "12-settings-notifications", "15-settings-hotspot-on", "18-qr-scanner", "19-qr-ready", "20-qr-paired")
 
 /** The text at 200%: nothing may be cut off. */
 @RunWith(ParameterizedRobolectricTestRunner::class)

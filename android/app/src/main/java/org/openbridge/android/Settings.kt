@@ -34,6 +34,7 @@ import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Laptop
+import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.PhoneAndroid
@@ -274,6 +275,7 @@ fun TrustedPage(model: AppModel, actions: Actions, padding: PaddingValues, onBac
     val share = model.share
     val now = model.now
     PageFrame(S.trusted, padding, onBack) {
+        PairWithQrRow(actions)
         if (computers.isEmpty()) EmptyState(S.noTrustedShort, S.noTrusted, Icons.Rounded.VerifiedUser)
         else {
             Text(S.forgetHint, style = Type.body, color = Palette.muted, modifier = Modifier.padding(horizontal = 4.dp))
@@ -319,6 +321,13 @@ fun NotificationsPage(model: AppModel, actions: Actions, padding: PaddingValues,
                     actions.mirror(enable)
                     if (enable && !mirror.access) actions.notificationAccess()
                 }, icon = Icons.Rounded.Notifications, tint = Palette.pink)
+                Divider()
+                // What's playing, and play, pause, skip and seek from computers: on by default, with notifications.
+                ToggleRow(S.mediaControls, when {
+                    !mirror.media -> S.mediaOff
+                    !mirror.on -> S.mediaNeedsNotifications
+                    else -> S.mediaOn
+                }, mirror.media, actions::mediaControls, icon = Icons.Rounded.MusicNote, tint = Palette.violet)
                 Divider()
                 // Android's notification access, and the way to its screen.
                 NavRow(if (mirror.access) S.accessAllowed else S.accessMissing, S.notificationAccess, Icons.Rounded.Shield, actions::notificationAccess,

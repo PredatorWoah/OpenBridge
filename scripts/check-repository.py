@@ -19,7 +19,11 @@ assert permissions == {"android.permission.INTERNET", "android.permission.ACCESS
                        "android.permission.WRITE_EXTERNAL_STORAGE", "android.permission.FOREGROUND_SERVICE",
                        "android.permission.FOREGROUND_SERVICE_DATA_SYNC", "android.permission.POST_NOTIFICATIONS",
                        "android.permission.WAKE_LOCK", "android.permission.CHANGE_WIFI_STATE",
-                       "android.permission.NEARBY_WIFI_DEVICES", "android.permission.REQUEST_INSTALL_PACKAGES"}, permissions
+                       "android.permission.NEARBY_WIFI_DEVICES", "android.permission.REQUEST_INSTALL_PACKAGES",
+                       # Pair with QR code: asked for only when the user opens the scanner, to read the code on the computer.
+                       "android.permission.CAMERA"}, permissions
+# The camera is optional: phones without one still install the app and pair with the 6-digit code.
+assert all(f.attrib.get(ns + "required") == "false" for f in manifest.findall("uses-feature")), "camera features must be optional"
 assert all(r.attrib[ns + "exported"] == "false" for r in manifest.find("application").findall("receiver")), "receivers stay private"
 # The phone hotspot needs Nearby devices, which must never give location (and no location permission is asked for).
 assert all(p.attrib.get(ns + "usesPermissionFlags") == "neverForLocation" for p in manifest.findall("uses-permission")

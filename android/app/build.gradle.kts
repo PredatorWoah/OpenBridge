@@ -86,6 +86,11 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.0")
     // Installs the baseline profile (src/main/baseline-prof.txt), so the startup path is compiled ahead of time.
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
+    // Pair with QR code: the camera preview and frames (CameraX), and a pure-Java QR decoder (no Play services or ML Kit).
+    implementation("androidx.camera:camera-camera2:1.4.2")
+    implementation("androidx.camera:camera-lifecycle:1.4.2")
+    implementation("androidx.camera:camera-view:1.4.2")
+    implementation("com.google.zxing:core:3.5.3")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.14.1")

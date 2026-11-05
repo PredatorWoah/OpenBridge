@@ -307,6 +307,7 @@ class SharingServer(private val context: Context, private val store: Store, priv
         override fun computer(secret: ByteArray): String? = trust.computer(secret)?.also { seen(it, via) }
         override fun admit(computer: String): ByteArray = trust.admit(computer).also { seen(computer, via) }
     }, fingerprint, approver, clipboard, PhoneOutbox, PhoneCompanion).describe(BuildConfig.VERSION_NAME, deviceName)
+        .scanning(ScanPairing.keys)
 
     private fun seen(computer: String, via: Via) = events.seen(computer, via)
 
