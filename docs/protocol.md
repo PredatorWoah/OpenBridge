@@ -39,6 +39,8 @@ Scanning is the user's approval, so the phone shows no code to confirm; it says 
 
 Reference vector: with `F`, `Nm` and `Np` filled with the bytes `01`, `02` and `03`, the commitment is `8ef8a25a…9b356` and the code is `520380`.
 
+OBP3 reference vector: with `K` the 16 bytes `04` (`k=BAQEBAQEBAQEBAQEBAQEBA` in the code) and `F`, `Nm` and `Np` filled with the bytes `01`, `02` and `03`, `Ps` is `aa955a6147859395f4e5c691978f1bd5956f86fff65b5b16a308c8ab7cd718e9` and `Pc` is `d0cefd86bda6b8324bfacfe9e84f88d0cac0f0ac1e70cb808b4efa4a549c698e`. The code `openbridge://pair?k=BAQEBAQEBAQEBAQEBAQEBA&n=Maya%27s%20MacBook%20Pro` names "Maya's MacBook Pro".
+
 ## LIST (1)
 
 The ID names a previously returned directory or the empty root. Reply: status; on success, a 32-bit count (0–10,000), then that many entries:

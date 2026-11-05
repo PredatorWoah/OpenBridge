@@ -12,11 +12,19 @@ import java.security.SecureRandom;
  * sees a different certificate fingerprint on each side, gets matching codes with probability 1 in 10^6.
  * Only after confirmation does the phone release the session secret; the Mac then pins the certificate.
  * OBP2 is the same exchange, preceded by the computer's name so the phone can list the computers it trusts.
+ * OBP3 pairs by QR code instead: the computer shows a code holding a fresh 16-byte key K, the phone scans it, and both
+ * prove they hold K with HMAC-SHA256 over the certificate fingerprint and both nonces (see {@link #serveScanned}).
  */
 public final class Pairing {
     private Pairing() {}
     public static final byte[] MAGIC = {'O', 'B', 'P', '1'};
     public static final byte[] MAGIC2 = {'O', 'B', 'P', '2'};
+    public static final byte[] MAGIC3 = {'O', 'B', 'P', '3'};
+    /** The length of the key in an OBP3 QR code. */
+    public static final int KEY = 16;
+    /** How long the phone keeps a scanned key, and how many wrong proofs it takes before forgetting it. */
+    public static final long KEY_MILLIS = 120_000;
+    public static final int KEY_FAILURES = 3;
     /**
      * OBP2 sends the computer's name as exactly this many bytes: UTF-8, padded with zeros. A fixed block, at
      * least as long as a secret, makes a phone that predates OBP2 answer "Pairing rejected" straight away
@@ -60,6 +68,80 @@ public final class Pairing {
 
         /** Like {@link #approve(String)}, naming the computer asking to pair. */
         default boolean approve(String code, String computer) throws InterruptedException { return approve(code); }
+    }
+
+    /**
+     * The key of the QR code the user scanned (OBP3), held by the platform. Scanning is the approval: a computer that
+     * proves it holds the key is trusted without a code to compare. Thread-safe; {@link QrPairing} is the usual one.
+     */
+    public interface Scanned {
+        /** The key waiting for a computer (16 bytes): scanned less than 2 minutes ago, unused and not refused. Null when none. */
+        byte[] key();
+
+        /**
+         * A computer proved it holds `key`. Forgets it, so it's used once, and returns true; false when it's no longer
+         * waiting (it expired, was used, or another code was scanned meanwhile).
+         */
+        boolean use(byte[] key);
+
+        /** A computer sent a wrong proof for `key`. The third wrong proof forgets it. */
+        void failed(byte[] key);
+
+        /** Pairing finished: `computer` (its name, as it sent it) has its secret and is trusted. After the reply is sent. */
+        default void paired(String computer) {}
+    }
+
+    /** OBP3, step 2: the phone's proof that it holds the key, over the certificate it presented and both nonces. */
+    public static byte[] phoneProof(byte[] key, byte[] fingerprint, byte[] computerNonce, byte[] phoneNonce) {
+        return hmac(key, "OpenBridge QR phone", fingerprint, computerNonce, phoneNonce);
+    }
+
+    /** OBP3, step 3: the computer's proof that it holds the key. */
+    public static byte[] computerProof(byte[] key, byte[] fingerprint, byte[] computerNonce, byte[] phoneNonce) {
+        return hmac(key, "OpenBridge QR computer", fingerprint, computerNonce, phoneNonce);
+    }
+
+    /**
+     * Phone side of OBP3, after the magic, the computer's name and its nonce were read and a key is waiting. Writes
+     * status 0, the phone's nonce and its proof; reads the computer's proof and checks it in constant time; then writes
+     * status 0 and the secret (forgetting the key), or status 1 and an error (counting a failure).
+     */
+    static void serveScanned(DataInputStream in, DataOutputStream out, byte[] fingerprint, Trust trust, String computer,
+                             byte[] computerNonce, byte[] key, Scanned scanned, SecureRandom random) throws IOException {
+        byte[] phoneNonce = new byte[NONCE];
+        random.nextBytes(phoneNonce);
+        out.writeByte(0);
+        out.write(phoneNonce);
+        out.write(phoneProof(key, fingerprint, computerNonce, phoneNonce));
+        out.flush();
+        byte[] proof = new byte[32];
+        in.readFully(proof);
+        if (!MessageDigest.isEqual(proof, computerProof(key, fingerprint, computerNonce, phoneNonce))) {
+            scanned.failed(key);
+            out.writeByte(1);
+            Wire.writeString(out, "The code didn't match. Scan it again on the phone");
+            return;
+        }
+        if (!scanned.use(key)) {
+            out.writeByte(1);
+            Wire.writeString(out, "The code expired. Scan a new one on the phone");
+            return;
+        }
+        byte[] secret = trust.admit(computer);
+        out.writeByte(0);
+        out.write(secret);
+        out.flush();
+        try { scanned.paired(computer); } catch (RuntimeException ignored) { /* the computer is paired */ }
+    }
+
+    private static byte[] hmac(byte[] key, String label, byte[]... parts) {
+        try {
+            javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
+            mac.init(new javax.crypto.spec.SecretKeySpec(key, "HmacSHA256"));
+            mac.update(label.getBytes(StandardCharsets.US_ASCII));
+            for (byte[] part : parts) mac.update(part);
+            return mac.doFinal();
+        } catch (java.security.GeneralSecurityException e) { throw new IllegalStateException(e); }
     }
 
     /** A computer name fit to show: control characters removed, never empty. */

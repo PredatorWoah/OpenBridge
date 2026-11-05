@@ -107,6 +107,8 @@ public final class ProtocolTest {
         editingTests();
         resumeAndOutboxTests();
         companionTests();
+        qrPairingTests();
+        mediaTests();
         fuzzTests();
         System.out.println("Protocol tests passed: " + checks + " assertions");
     }
@@ -789,6 +791,326 @@ public final class ProtocolTest {
         }
     }
 
+    /** A computer's side of a connection, run against a session over a loopback socket (OBP3 needs a conversation). */
+    interface Exchange { void run(DataInputStream in, DataOutputStream out) throws IOException; }
+    private static void talk(Session session, Exchange client) throws Exception {
+        try (java.net.ServerSocket server = new java.net.ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+            Thread phone = new Thread(() -> {
+                try (java.net.Socket socket = server.accept()) { session.serve(socket.getInputStream(), socket.getOutputStream()); }
+                catch (IOException ignored) { /* the computer hung up */ }
+            });
+            phone.start();
+            try (java.net.Socket socket = new java.net.Socket(InetAddress.getLoopbackAddress(), server.getLocalPort())) {
+                socket.setSoTimeout(5_000);
+                client.run(new DataInputStream(socket.getInputStream()), new DataOutputStream(socket.getOutputStream()));
+            }
+            phone.join(5_000);
+            check(!phone.isAlive(), "The phone finished the connection");
+        }
+    }
+
+    /** Ways an OBP3 computer can go wrong. */
+    enum Twist { NONE, WRONG_PROOF, IGNORE_PHONE_PROOF }
+
+    /**
+     * OBP3 as a computer would: `key` from the code it shows, `seen` the fingerprint of the certificate it saw. Returns
+     * "secret:<hex>", "error:<message>", or "phone-mismatch" when the computer refused the phone's proof and hung up.
+     */
+    private static String obp3(Session session, byte[] key, byte[] seen, String name, Twist twist) throws Exception {
+        String[] result = new String[1];
+        talk(session, (in, out) -> {
+            byte[] computerNonce = new byte[32]; new Random(name.hashCode()).nextBytes(computerNonce);
+            out.write(Pairing.MAGIC3); out.write(Pairing.nameBlock(name)); out.write(computerNonce); out.flush();
+            if (in.readUnsignedByte() != 0) { result[0] = "error:" + Wire.readString(in, 512); check(in.read() < 0, "Nothing after a refusal"); return; }
+            byte[] phoneNonce = new byte[32]; in.readFully(phoneNonce);
+            byte[] phoneProof = new byte[32]; in.readFully(phoneProof);
+            boolean genuine = java.security.MessageDigest.isEqual(phoneProof, Pairing.phoneProof(key, seen, computerNonce, phoneNonce));
+            if (!genuine && twist != Twist.IGNORE_PHONE_PROOF) { result[0] = "phone-mismatch"; return; }
+            byte[] proof = Pairing.computerProof(key, seen, computerNonce, phoneNonce);
+            if (twist == Twist.WRONG_PROOF) proof[7] ^= 0x20;
+            out.write(proof); out.flush();
+            int status = in.readUnsignedByte();
+            if (status != 0) { result[0] = "error:" + Wire.readString(in, 512); check(in.read() < 0, "No secret after a wrong proof"); return; }
+            byte[] secret = new byte[32]; in.readFully(secret);
+            check(in.read() < 0, "Nothing after the secret");
+            result[0] = "secret:" + HexFormat.of().formatHex(secret);
+        });
+        return result[0];
+    }
+
+    /** Pairing by QR code (OBP3): the reference vector, the code's text, and the exchange with its limits. */
+    private static void qrPairingTests() throws Exception {
+        byte[] key = new byte[16]; Arrays.fill(key, (byte) 4);
+        byte[] fingerprint = new byte[32]; Arrays.fill(fingerprint, (byte) 1);
+        byte[] computerNonce = new byte[32]; Arrays.fill(computerNonce, (byte) 2);
+        byte[] phoneNonce = new byte[32]; Arrays.fill(phoneNonce, (byte) 3);
+        // Reference vector in docs/protocol.md, shared with the computer apps.
+        check(HexFormat.of().formatHex(Pairing.phoneProof(key, fingerprint, computerNonce, phoneNonce))
+            .equals("aa955a6147859395f4e5c691978f1bd5956f86fff65b5b16a308c8ab7cd718e9"), "Phone proof vector");
+        check(HexFormat.of().formatHex(Pairing.computerProof(key, fingerprint, computerNonce, phoneNonce))
+            .equals("d0cefd86bda6b8324bfacfe9e84f88d0cac0f0ac1e70cb808b4efa4a549c698e"), "Computer proof vector");
+        byte[] otherFingerprint = fingerprint.clone(); otherFingerprint[31] ^= 1;
+        check(!Arrays.equals(Pairing.phoneProof(key, otherFingerprint, computerNonce, phoneNonce), Pairing.phoneProof(key, fingerprint, computerNonce, phoneNonce)),
+            "Proofs depend on the certificate");
+        check(!Arrays.equals(Pairing.phoneProof(key, fingerprint, computerNonce, phoneNonce), Pairing.computerProof(key, fingerprint, computerNonce, phoneNonce)),
+            "The two proofs differ");
+
+        // The code's text.
+        QrPairing.Code code = QrPairing.parse("openbridge://pair?k=BAQEBAQEBAQEBAQEBAQEBA&n=Maya%27s%20MacBook%20Pro");
+        check(Arrays.equals(code.key, key) && code.computer.equals("Maya's MacBook Pro"), "Code vector parsed");
+        String[][] good = {
+            {"OpenBridge://PAIR?k=BAQEBAQEBAQEBAQEBAQEBA&n=Mac", "Mac"},
+            {"openbridge://pair?n=Maya's%20Mac&k=BAQEBAQEBAQEBAQEBAQEBA", "Maya's Mac"},
+            {"openbridge://pair?k=BAQEBAQEBAQEBAQEBAQEBA&n=C%2B%2B+box", "C+++box"},
+            {"openbridge://pair?k=BAQEBAQEBAQEBAQEBAQEBA&n=%E5%B7%A5%E4%BD%9C%E7%94%B5%E8%84%91", "工作电脑"},
+            {"openbridge://pair?k=BAQEBAQEBAQEBAQEBAQEBA&n=Mac%0A%07", "Mac"},
+            {"openbridge://pair?k=BAQEBAQEBAQEBAQEBAQEBA&n=%0A", "Computer"},
+            {"openbridge://pair?k=-_-_-_-_-_-_-_-_-_-_-w&n=" + "x".repeat(128), "x".repeat(128)},
+        };
+        for (String[] pair : good) check(QrPairing.parse(pair[0]).computer.equals(pair[1]), "Code accepted: " + pair[0]);
+        check(QrPairing.isPairingCode("OPENBRIDGE://pair?x") && !QrPairing.isPairingCode("https://example.com") && !QrPairing.isPairingCode(null),
+            "Pairing codes told from other QR codes");
+        String[] bad = {
+            "https://example.com/?k=BAQEBAQEBAQEBAQEBAQEBA&n=Mac", "openbridge://pair", "openbridge://pair?", "openbridge://pairing?k=BAQEBAQEBAQEBAQEBAQEBA&n=Mac",
+            "openbridge://pair?k=BAQEBAQEBAQEBAQEBAQEBA", "openbridge://pair?n=Mac", "openbridge://pair?k=BAQEBAQEBAQEBAQEBAQEBA&n=Mac&x=1",
+            "openbridge://pair?k=BAQEBAQEBAQEBAQEBAQEBA&k=BAQEBAQEBAQEBAQEBAQEBA&n=Mac", "openbridge://pair?k=BAQEBAQEBAQEBAQEBAQEBA&n=Mac&n=PC",
+            "openbridge://pair?k=BAQEBAQEBAQEBAQEBAQEB&n=Mac", "openbridge://pair?k=BAQEBAQEBAQEBAQEBAQEBAQ&n=Mac",
+            "openbridge://pair?k=BAQEBAQEBAQEBAQEBAQEBA==&n=Mac", "openbridge://pair?k=BAQEBAQEBAQEBAQEBAQEBB&n=Mac",
+            "openbridge://pair?k=BAQEBAQEBAQEBAQEBAQE+A&n=Mac", "openbridge://pair?k=BAQEBAQEBAQEBAQEBAQE/A&n=Mac",
+            "openbridge://pair?K=BAQEBAQEBAQEBAQEBAQEBA&n=Mac", "openbridge://pair?k=BAQEBAQEBAQEBAQEBAQEBA&n=",
+            "openbridge://pair?k=BAQEBAQEBAQEBAQEBAQEBA&n=Mac%2", "openbridge://pair?k=BAQEBAQEBAQEBAQEBAQEBA&n=Mac%zz",
+            "openbridge://pair?k=BAQEBAQEBAQEBAQEBAQEBA&n=%C3", "openbridge://pair?k=BAQEBAQEBAQEBAQEBAQEBA&n=%ED%A0%80",
+            "openbridge://pair?k=BAQEBAQEBAQEBAQEBAQEBA&n=My Mac", "openbridge://pair?k=BAQEBAQEBAQEBAQEBAQEBA&n=Mac#x",
+            "openbridge://pair?k=BAQEBAQEBAQEBAQEBAQEBA&n=café", "openbridge://pair?k=BAQEBAQEBAQEBAQEBAQEBA&n=" + "x".repeat(129),
+            "openbridge://pair?k=BAQEBAQEBAQEBAQEBAQEBA&n=" + "%C3%A9".repeat(65), "openbridge://pair?k=BAQEBAQEBAQEBAQEBAQEBA&n=Mac&",
+            "openbridge://pair?k=BAQEBAQEBAQEBAQEBAQEBA&n=" + "x".repeat(1_000), " openbridge://pair?k=BAQEBAQEBAQEBAQEBAQEBA&n=Mac",
+            "openbridge://pair?k=BAQEBAQEBAQEBAQEBAQEBA&n=Mac\n",
+        };
+        for (String text : bad) {
+            try { QrPairing.parse(text); check(false, "Code accepted: " + text); }
+            catch (IllegalArgumentException expected) { check(expected.getMessage() != null, "A refused code says why"); }
+        }
+
+        // The exchange.
+        Map<String, byte[]> given = new LinkedHashMap<>();
+        Trust trust = new Trust() {
+            public synchronized String computer(byte[] secret) {
+                for (Map.Entry<String, byte[]> entry : given.entrySet())
+                    if (java.security.MessageDigest.isEqual(entry.getValue(), secret)) return entry.getKey();
+                return null;
+            }
+            public synchronized byte[] admit(String computer) {
+                byte[] secret = new byte[32]; new java.security.SecureRandom().nextBytes(secret);
+                given.put(computer, secret);
+                return secret;
+            }
+        };
+        long[] now = {1_000_000};
+        QrPairing qr = new QrPairing(() -> now[0]);
+        List<String> heard = Collections.synchronizedList(new ArrayList<>());
+        qr.listen(new QrPairing.Listener() {
+            @Override public void paired(String computer) { heard.add("paired:" + computer); }
+            @Override public void refused() { heard.add("refused"); }
+        });
+        Session session = new Session(new MemoryStore(), trust, fingerprint, c -> false, null).scanning(qr);
+        check(obp3(session, key, fingerprint, "Mac", Twist.NONE).equals("error:Scan the code on the computer first"), "No code scanned: refused at once");
+        check(obp3(new Session(new MemoryStore(), trust, fingerprint, c -> true, null), key, fingerprint, "Mac", Twist.NONE)
+            .equals("error:Pairing is not available"), "A phone without QR pairing refuses OBP3");
+
+        // Success: the computer is trusted under the name it sent (cleaned), told to the platform, and the key is gone.
+        check(qr.offer(code) == now[0] + 120_000 && qr.waitingFor().equals("Maya's MacBook Pro") && qr.expiresAt() == now[0] + 120_000, "Key waits 2 minutes");
+        String paired = obp3(session, key, fingerprint, "Maya’s MacBook Pro\n", Twist.NONE);
+        check(paired.startsWith("secret:") && HexFormat.of().formatHex(given.get("Maya’s MacBook Pro")).equals(paired.substring(7)),
+            "OBP3 pairs and trusts the computer by its name: " + given.keySet());
+        check(heard.equals(List.of("paired:Maya’s MacBook Pro")), "The platform hears who paired: " + heard);
+        check(qr.key() == null && qr.waitingFor() == null && qr.expiresAt() == 0, "The key is used once");
+        check(obp3(session, key, fingerprint, "Mac", Twist.NONE).equals("error:Scan the code on the computer first"), "The key can't be used again");
+        ByteArrayOutputStream list = new ByteArrayOutputStream();
+        DataOutputStream listOut = new DataOutputStream(list);
+        listOut.write(Wire.MAGIC); listOut.write(HexFormat.of().parseHex(paired.substring(7))); listOut.writeByte(1); Wire.writeString(listOut, "");
+        check(serve(session, list.toByteArray()).readByte() == 0, "The secret from OBP3 opens the phone");
+
+        // Wrong K: the computer sees the phone's proof doesn't match and hangs up, which costs the phone nothing.
+        byte[] otherKey = key.clone(); otherKey[0] ^= 1;
+        qr.offer(code);
+        for (int i = 0; i < 4; i++) check(obp3(session, otherKey, fingerprint, "Mac", Twist.NONE).equals("phone-mismatch"), "Wrong key: the computer refuses the phone");
+        // Tampered Ps (a phone or relay presenting another certificate): the computer refuses it.
+        check(obp3(session, key, otherFingerprint, "Mac", Twist.NONE).equals("phone-mismatch"), "Another certificate: the computer refuses the phone");
+        check(qr.key() != null, "Hanging up isn't a failure");
+        // Wrong K pushed through, and a tampered Pc: each a failure; two leave the key, and the right one still works.
+        check(obp3(session, otherKey, fingerprint, "Thief", Twist.IGNORE_PHONE_PROOF).startsWith("error:The code didn't match"), "Wrong key's proof refused");
+        check(obp3(session, key, fingerprint, "Thief", Twist.WRONG_PROOF).startsWith("error:The code didn't match"), "Tampered proof refused");
+        check(qr.key() != null && !given.containsKey("Thief"), "Two failures keep the key; nothing trusted");
+        check(obp3(session, key, fingerprint, "PC", Twist.NONE).startsWith("secret:"), "The right computer pairs after two failures");
+        // Three failures forget the key.
+        heard.clear();
+        qr.offer(code);
+        for (int i = 0; i < 3; i++) check(obp3(session, key, fingerprint, "Thief", Twist.WRONG_PROOF).startsWith("error:The code didn't match"), "Failure " + i);
+        check(qr.key() == null && heard.equals(List.of("refused")), "The third failure forgets the key and tells the platform");
+        check(obp3(session, key, fingerprint, "Mac", Twist.NONE).equals("error:Scan the code on the computer first"), "Nothing to pair with after three failures");
+        check(!given.containsKey("Thief"), "A wrong proof is never trusted");
+
+        // Expiry: the key works until 2 minutes are up.
+        qr.offer(code);
+        now[0] += 119_999;
+        check(qr.key() != null, "Still waiting just before 2 minutes");
+        now[0] += 1;
+        check(qr.key() == null && qr.waitingFor() == null, "Gone after 2 minutes");
+        check(obp3(session, key, fingerprint, "Mac", Twist.NONE).equals("error:Scan the code on the computer first"), "An expired key pairs nothing");
+        // A key that expires during the exchange: the right proof is turned away.
+        Pairing.Scanned expiring = new Pairing.Scanned() {
+            public byte[] key() { return key.clone(); }
+            public boolean use(byte[] used) { return false; }
+            public void failed(byte[] used) {}
+        };
+        check(obp3(new Session(new MemoryStore(), trust, fingerprint, null, null).scanning(expiring), key, fingerprint, "Late", Twist.NONE)
+            .startsWith("error:The code expired"), "A key gone meanwhile pairs nothing");
+        check(!given.containsKey("Late"), "Nothing trusted after expiry");
+        // Scanning another code replaces the first.
+        qr.offer(code);
+        qr.offer(QrPairing.parse("openbridge://pair?k=AAAAAAAAAAAAAAAAAAAAAA&n=PC"));
+        check(obp3(session, key, fingerprint, "Mac", Twist.NONE).equals("phone-mismatch") && qr.waitingFor().equals("PC"), "The newest code wins");
+        qr.cancel();
+        check(qr.key() == null, "Cancel forgets the key");
+
+        // Requests that break off or carry an invalid name never reach the key.
+        qr.offer(code);
+        byte[] brokenName = Pairing.nameBlock("ok"); brokenName[2] = (byte) 0xC3;
+        DataInputStream invalid = serve(session, concat(concat(Pairing.MAGIC3, brokenName), new byte[32]));
+        check(invalid.readByte() == 1 && invalid.available() > 0, "Invalid computer name refused");
+        for (int length : new int[] {4, 50, 132, 159}) {
+            byte[] request = concat(concat(Pairing.MAGIC3, Pairing.nameBlock("Mac")), new byte[32]);
+            check(serve(session, Arrays.copyOf(request, length)).readByte() == 1, "A cut-off OBP3 request is refused");
+        }
+        try { serve(session, concat(concat(Pairing.MAGIC3, Pairing.nameBlock("Mac")), new byte[32])); check(false, "A connection that stops before its proof is answered"); }
+        catch (IOException expected) { /* the phone sent its proof, then the connection ended */ }
+        check(qr.key() != null, "Breaking off isn't a failure");
+
+        // Older phones: OBP3 reads as a wrong secret at once (the computer then pairs with the 6-digit code), and a phone
+        // with QR pairing still pairs with OBP2.
+        try {
+            Wire.authenticate(new DataInputStream(new ByteArrayInputStream(Pairing.nameBlock("Mac"))), Pairing.MAGIC3, SECRET);
+            check(false, "OBP3 accepted by an old phone");
+        } catch (IOException expected) { check(expected.getMessage().equals("Pairing rejected"), "Old phones answer OBP3 straight away"); }
+        Session both = new Session(new MemoryStore(), trust, fingerprint, c -> true, null).scanning(qr);
+        ByteArrayOutputStream obp2 = new ByteArrayOutputStream();
+        obp2.write(Pairing.MAGIC2); obp2.write(Pairing.nameBlock("Old Mac")); obp2.write(new byte[32]);
+        DataInputStream reply = serve(both, obp2.toByteArray());
+        check(reply.readByte() == 0, "OBP2 still pairs");
+        reply.readFully(new byte[64]);
+        check(reply.readByte() == 0 && given.containsKey("Old Mac"), "OBP2 approved beside OBP3");
+    }
+
+    /** MEDIA events and MEDIA CONTROL (24). */
+    private static void mediaTests() throws Exception {
+        // Phones without it: no companion, or a companion from before 1.3.0.
+        byte[] play = simple(24, "", out -> out.writeByte(Companion.PLAY));
+        check(error(serve(new Session(new MemoryStore(), SECRET), play)).equals("Unsupported operation; update OpenBridge on the phone"), "No companion: update");
+        Companion old = new Companion() {
+            public EventLog.Batch events(long cursor, long millis) { return new EventLog.Batch(cursor, new ArrayList<>()); }
+            public void dismiss(String key) {}
+            public void reply(String key, String text) {}
+            public void ring(boolean on) {}
+            public void openUrl(String url, String computer) {}
+            public void received(String name, String location, String computer) {}
+        };
+        check(error(serve(new Session(new MemoryStore(), Trust.single(SECRET), null, null, null, null, old), play))
+            .equals("Unsupported operation; update OpenBridge on the phone"), "A companion without media: update");
+        check(Session.REVISION == 24, "Revision 24");
+
+        MemoryCompanion phone = new MemoryCompanion();
+        Session session = new Session(new MemoryStore(), Trust.single(SECRET), null, null, null, null, phone);
+        check(error(serve(session, play)).contains("Nothing is playing"), "Nothing playing");
+        phone.play("Music", "Song", "Artist", 200_000, 5_000, EventLog.PLAYING, 15);
+        for (int action = Companion.PLAY; action <= Companion.SEEK; action++) {
+            final int a = action;
+            DataInputStream reply = serve(session, simple(24, "", out -> { out.writeByte(a); if (a == Companion.SEEK) out.writeLong(90_000); }));
+            check(reply.readByte() == 0 && reply.available() == 0, "Media action " + action);
+        }
+        check(phone.mediaRequests.size() == 6 && phone.mediaRequests.get(5)[0] == Companion.SEEK && phone.mediaRequests.get(5)[1] == 90_000
+            && phone.mediaRequests.get(0)[1] == -1, "Actions reach the phone with the seek position");
+        for (int action : new int[] {0, 7, 255})
+            check(error(serve(session, simple(24, "", out -> out.writeByte(action)))).equals("Invalid media action"), "Invalid action " + action);
+        check(error(serve(session, simple(24, "", out -> { out.writeByte(Companion.SEEK); out.writeLong(-1); }))).equals("Invalid position"), "Negative seek");
+        check(!error(serve(session, simple(24, "", out -> { out.writeByte(Companion.SEEK); out.writeInt(5); }))).isEmpty(), "Cut-off seek");
+        check(!error(serve(session, simple(24, "", out -> {}))).isEmpty(), "No action");
+        check(error(serve(session, simple(24, "x", out -> out.writeByte(Companion.PLAY)))).equals("Invalid request"), "Media control takes no ID");
+        check(serve(session, simple(24, "", out -> { out.writeByte(Companion.SEEK); out.writeLong(Long.MAX_VALUE); })).readByte() == 0,
+            "Seeking past the end is the app's to clamp");
+        phone.play("Radio", "Live", "", -1, -1, EventLog.PLAYING, EventLog.CAN_PLAY_PAUSE);
+        check(error(serve(session, simple(24, "", out -> out.writeByte(Companion.NEXT)))).contains("doesn't offer"), "Actions the app doesn't offer fail");
+        check(serve(session, simple(24, "", out -> out.writeByte(Companion.PAUSE))).readByte() == 0, "Pause offered");
+        phone.mediaOn = false;
+        check(error(serve(session, play)).contains("off"), "Media controls off");
+        phone.mediaOn = true;
+
+        // MEDIA events: the fields, their limits, and which changes are events.
+        long[] clock = {50_000};
+        EventLog log = new EventLog(new Random(4), () -> clock[0]);
+        log.battery(80, true);
+        check(!log.media("", "", "", -1, -1, EventLog.NOTHING, 0, false), "Nothing playing at first is no news");
+        Reply first = eventsOf(log, 0);
+        check(first.kinds.equals(List.of(EventLog.RESET, EventLog.BATTERY)), "No MEDIA after RESET while nothing plays");
+        String app = "♫".repeat(50), title = "é".repeat(300), artist = "a".repeat(600);
+        check(log.media(app, title, artist, 240_000, 12_000, EventLog.PLAYING, 0xFF, false), "Playing is news");
+        Reply playing = eventsOf(log, first.cursor);
+        check(playing.kinds.equals(List.of(EventLog.MEDIA)), "One MEDIA event");
+        Object[] fields = mediaFields(playing.bodies.get(0));
+        check(fields[0].equals("♫".repeat(42)) && fields[1].equals("é".repeat(256)) && fields[2].equals("a".repeat(512)), "MEDIA strings cut at character boundaries");
+        check(fields[3].equals(240_000L) && fields[4].equals(12_000L) && fields[5].equals(EventLog.PLAYING) && fields[6].equals(15), "MEDIA numbers, and only known action bits");
+        clock[0] += 3_000;
+        check(!log.media(app, title, artist, 240_000, 15_000, EventLog.PLAYING, 15, false), "The position moving by itself is no news");
+        check(log.media(app, title, artist, 240_000, 100_000, EventLog.PLAYING, 15, true), "A seek is news");
+        check(log.media(app, title, artist, 240_000, 100_000, EventLog.PAUSED, 15, false), "Pausing is news");
+        check(log.media(app, "Next song", artist, 180_000, 0, EventLog.PLAYING, 15, false), "Another song is news");
+        check(log.media(app, "Next song", artist, 180_000, 0, EventLog.PLAYING, EventLog.CAN_PLAY_PAUSE, false), "Fewer actions are news");
+        Reply changes = eventsOf(log, playing.cursor);
+        check(changes.kinds.equals(List.of(EventLog.MEDIA, EventLog.MEDIA, EventLog.MEDIA, EventLog.MEDIA)), "Four changes: " + changes.kinds);
+        check(mediaFields(changes.bodies.get(0))[4].equals(100_000L) && mediaFields(changes.bodies.get(1))[5].equals(EventLog.PAUSED), "Seek and pause carried");
+        // After RESET, what plays comes with its position now.
+        clock[0] += 7_000;
+        Reply reset = eventsOf(log, 0);
+        check(reset.kinds.equals(List.of(EventLog.RESET, EventLog.BATTERY, EventLog.MEDIA)), "MEDIA after RESET while playing: " + reset.kinds);
+        check(mediaFields(reset.bodies.get(2))[4].equals(7_000L) && mediaFields(reset.bodies.get(2))[1].equals("Next song"), "Position moved on while playing");
+        clock[0] += 1_000_000;
+        check(mediaFields(eventsOf(log, 0).bodies.get(2))[4].equals(180_000L), "Position stops at the end");
+        log.media("Podcasts", "Episode", "Host", 3_600_000, 60_000, EventLog.PAUSED, 15, false);
+        clock[0] += 9_000;
+        check(mediaFields(eventsOf(log, 0).bodies.get(2))[4].equals(60_000L), "A paused position stays");
+        // Nothing playing: state 0 with nothing else, and no MEDIA after RESET.
+        long before = eventsOf(log, 0).cursor;
+        check(log.media("Podcasts", "Episode", "Host", 1, 1, EventLog.NOTHING, 15, false), "Stopping is news");
+        check(!log.media("Other", "x", "y", 5, 5, 9, 15, false), "Nothing again (an unknown state is nothing) is no news");
+        Reply stopped = eventsOf(log, before);
+        check(stopped.kinds.equals(List.of(EventLog.MEDIA)), "One MEDIA for stopping");
+        Object[] nothing = mediaFields(stopped.bodies.get(0));
+        check(nothing[0].equals("") && nothing[1].equals("") && nothing[2].equals("") && nothing[3].equals(-1L) && nothing[4].equals(-1L)
+            && nothing[5].equals(EventLog.NOTHING) && nothing[6].equals(0), "Nothing playing carries nothing");
+        check(eventsOf(log, 0).kinds.equals(List.of(EventLog.RESET, EventLog.BATTERY)), "No MEDIA after RESET once stopped");
+        check(log.media()[0] == EventLog.NOTHING, "The state is kept");
+        // Through the operation, as a computer reads it.
+        phone.play("Music", "Song", "Artist", 200_000, 5_000, EventLog.PLAYING, 15);
+        Reply wire = events(session, 0, 0);
+        check(wire.kinds.contains(EventLog.MEDIA) && mediaFields(wire.bodies.get(wire.kinds.indexOf(EventLog.MEDIA)))[1].equals("Song"), "MEDIA through EVENTS");
+    }
+
+    private static Reply eventsOf(EventLog log, long cursor) throws InterruptedException {
+        EventLog.Batch batch = log.read(cursor, 0);
+        Reply reply = new Reply();
+        reply.cursor = batch.cursor;
+        for (EventLog.Event event : batch.events) { reply.kinds.add(event.kind); reply.bodies.add(event.body); }
+        return reply;
+    }
+
+    /** A MEDIA body: app, title, artist, duration, position, state and actions. */
+    private static Object[] mediaFields(byte[] body) throws IOException {
+        DataInputStream in = new DataInputStream(new ByteArrayInputStream(body));
+        Object[] fields = {Wire.readString(in, 128), Wire.readString(in, 512), Wire.readString(in, 512), in.readLong(), in.readLong(),
+            in.readUnsignedByte(), in.readUnsignedByte()};
+        check(in.available() == 0, "Nothing after the media fields");
+        return fields;
+    }
+
     /**
      * Random and half-valid requests: the phone must answer each with a status or close the connection (IOException),
      * never crash with another exception, and never wait. OB01 is frozen from 1.0, so this guards every operation.
@@ -811,7 +1133,16 @@ public final class ProtocolTest {
         companion.log.battery(55, false);
         companion.post("t", "App", "Title", "Text", true, "");
         companion.post("file:hello.txt", "App", "Title", "Text", false, "123456");
-        Session memory = new Session(new MemoryStore(), Trust.single(SECRET), fingerprint, code -> false, clipboard, outbox, companion).describe("1.0.0", "Fuzz");
+        companion.play("Music", "Song", "Artist", 200_000, 1_000, EventLog.PLAYING, EventLog.CAN_PLAY_PAUSE | EventLog.CAN_SEEK);
+        // A key that is always waiting, so random OBP3 requests reach the proof check.
+        byte[] fuzzKey = new byte[16];
+        Pairing.Scanned always = new Pairing.Scanned() {
+            public byte[] key() { return fuzzKey.clone(); }
+            public boolean use(byte[] key) { return true; }
+            public void failed(byte[] key) {}
+        };
+        Session memory = new Session(new MemoryStore(), Trust.single(SECRET), fingerprint, code -> false, clipboard, outbox, companion)
+            .describe("1.0.0", "Fuzz").scanning(always);
         int requests = fuzz(memory, random, List.of("", "folder-id", "file:hello.txt", "t"), 25_000);
 
         java.nio.file.Path base = java.nio.file.Files.createTempDirectory("openbridge-fuzz");
@@ -824,7 +1155,7 @@ public final class ProtocolTest {
             List<String> ids = new ArrayList<>(List.of(""));
             for (Store.Entry entry : files.list("")) { ids.add(entry.id); if (entry.directory) files.list(entry.id).forEach(e -> ids.add(e.id)); }
             files.inbox("Download", "OpenBridge");
-            Session session = new Session(files, Trust.single(SECRET), fingerprint, code -> false, clipboard, outbox, companion);
+            Session session = new Session(files, Trust.single(SECRET), fingerprint, code -> false, clipboard, outbox, companion).scanning(new QrPairing());
             requests += fuzz(session, random, ids, 10_000);
             // Whatever the requests did, nothing escaped the shared folder.
             try (var outside = java.nio.file.Files.list(base)) { check(outside.count() == 1, "Fuzzing stayed inside the shared folder"); }
@@ -861,16 +1192,18 @@ public final class ProtocolTest {
         DataOutputStream out = new DataOutputStream(bytes);
         int mode = random.nextInt(10);
         if (mode == 0) { byte[] noise = new byte[random.nextInt(80)]; random.nextBytes(noise); return noise; }
-        if (mode == 1) {   // pairing, old and named
-            out.write(random.nextBoolean() ? Pairing.MAGIC : Pairing.MAGIC2);
+        if (mode == 1) {   // pairing: old, named, and by QR code (sometimes with a well-formed name and nonce)
+            int kind = random.nextInt(3);
+            out.write(kind == 0 ? Pairing.MAGIC : kind == 1 ? Pairing.MAGIC2 : Pairing.MAGIC3);
+            if (kind == 2 && random.nextBoolean()) { out.write(Pairing.nameBlock("Fuzz " + random.nextInt(9))); out.write(new byte[32]); }
             byte[] noise = new byte[random.nextInt(200)]; random.nextBytes(noise); out.write(noise);
             return bytes.toByteArray();
         }
         out.write(Wire.MAGIC);
         out.write(mode == 2 ? new byte[32] : SECRET);
-        // Every operation, with extra weight on the newest (19 to 23), and sometimes one that doesn't exist.
-        int pick = random.nextInt(10);
-        out.writeByte(pick < 2 ? random.nextInt(256) : pick < 5 ? 19 + random.nextInt(5) : 1 + random.nextInt(Session.REVISION));
+        // Every operation, with extra weight on the newest (19 to 24, MEDIA CONTROL most), and sometimes one that doesn't exist.
+        int pick = random.nextInt(12);
+        out.writeByte(pick < 2 ? random.nextInt(256) : pick < 5 ? 19 + random.nextInt(6) : pick < 7 ? 24 : 1 + random.nextInt(Session.REVISION));
         fuzzString(out, random, ids);
         int fields = random.nextInt(6);
         for (int f = 0; f < fields; f++) {

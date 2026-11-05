@@ -15,11 +15,12 @@ public final class Session {
     private final Clipboard clipboard;
     private final Outbox outbox;
     private final Companion companion;
+    private volatile Pairing.Scanned scanned;
     private final SecureRandom random = new SecureRandom();
     private String version = "unknown", device = "Phone";
 
     /** The highest operation number this phone answers, reported by INFO. */
-    public static final int REVISION = 23;
+    public static final int REVISION = 24;
 
     /** A session that only accepts clients that already hold the secret. */
     public Session(Store store, byte[] secret) { this(store, Trust.single(secret), null, null, null); }
@@ -48,8 +49,8 @@ public final class Session {
     }
 
     /**
-     * Also answers EVENTS, NOTIFICATION ACTION, RING, OPEN URL and SEND (operations 19 to 23) through `companion`
-     * (null: they answer "Unsupported operation; update OpenBridge on the phone").
+     * Also answers EVENTS, NOTIFICATION ACTION, RING, OPEN URL, SEND and MEDIA CONTROL (operations 19 to 24) through
+     * `companion` (null: they answer "Unsupported operation; update OpenBridge on the phone").
      */
     public Session(Store store, Trust trust, byte[] fingerprint, Pairing.Approver approver, Clipboard clipboard, Outbox outbox, Companion companion) {
         this.store = store; this.trust = trust; this.approver = approver; this.clipboard = clipboard; this.outbox = outbox; this.companion = companion;
@@ -60,6 +61,16 @@ public final class Session {
     public Session describe(String appVersion, String deviceName) {
         this.version = appVersion.length() > 64 ? appVersion.substring(0, 64) : appVersion;
         this.device = deviceName.length() > 128 ? deviceName.substring(0, 128) : deviceName;
+        return this;
+    }
+
+    /**
+     * Also pairs by QR code (OBP3) with the key the user scanned, held by `scanned` (null, the default: OBP3 answers
+     * "Pairing is not available", and the computer falls back to the 6-digit code). Needs the certificate fingerprint
+     * given to the constructor. Returns this session.
+     */
+    public Session scanning(Pairing.Scanned scanned) {
+        this.scanned = scanned;
         return this;
     }
 
@@ -83,6 +94,18 @@ public final class Session {
         try {
             byte[] magic = new byte[4];
             in.readFully(magic);
+            if (Arrays.equals(magic, Pairing.MAGIC3)) {
+                Pairing.Scanned qr = scanned;
+                if (qr == null || fingerprint == null) throw new IOException("Pairing is not available");
+                String computer = Pairing.readName(in);
+                byte[] nonce = new byte[Pairing.NONCE];
+                in.readFully(nonce);
+                byte[] key = qr.key();
+                if (key == null || key.length != Pairing.KEY) throw new IOException("Scan the code on the computer first");
+                responseStarted = true;   // pairing reports its own errors after the exchange begins
+                Pairing.serveScanned(in, out, fingerprint, trust, computer, nonce, key, qr, random);
+                return;
+            }
             boolean named = Arrays.equals(magic, Pairing.MAGIC2);
             if (named || Arrays.equals(magic, Pairing.MAGIC)) {
                 if (approver == null || fingerprint == null) throw new IOException("Pairing is not available");
@@ -379,6 +402,20 @@ public final class Session {
                         out.flush();
                         try { companion.received(saved, location, computer); } catch (RuntimeException ignored) { /* the file is saved */ }
                     }
+                    break;
+                }
+                case 24: {   // MEDIA CONTROL: play, pause, play/pause, next, previous, or seek to a position
+                    if (companion == null) throw new IOException(UNSUPPORTED);
+                    if (!id.isEmpty()) throw new IOException("Invalid request");
+                    int action = in.readUnsignedByte();
+                    if (action < Companion.PLAY || action > Companion.SEEK) throw new IOException("Invalid media action");
+                    long position = -1;
+                    if (action == Companion.SEEK) {
+                        position = in.readLong();
+                        if (position < 0) throw new IOException("Invalid position");
+                    }
+                    companion.media(action, position);
+                    out.writeByte(0);
                     break;
                 }
                 default: throw new IOException(UNSUPPORTED);
