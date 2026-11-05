@@ -85,12 +85,14 @@ object Sharing {
         val preferences = preferences()
         inBackground = preferences.getBoolean("inBackground", true)
         Palette.look = Look.of(preferences.getString("look", null))
+        Feed.attach(app)
         Trusted.attach(app)
         PhoneOutbox.attach(app)
         Texts.attach(app)
         Hotspot.attach(app)
         PhoneCompanion.attach(app)
-        PhoneOutbox.onCollected = { _ -> main.post {
+        PhoneOutbox.onCollected = { item -> main.post {
+            if (item.kind == org.openbridge.protocol.Outbox.FILE) Feed.fileSent(item.name, computer, item.path)
             if (PhoneOutbox.waiting.isEmpty()) android.widget.Toast.makeText(app, S.sentTo(computer), android.widget.Toast.LENGTH_SHORT).show()
             if (note?.let { it == lastWaitingNote } == true) note = null
         } }
@@ -147,7 +149,7 @@ object Sharing {
             main.post { if (pairingCode == code) pairingCode = null; ShareService.clearPairing(app) }
         }
         Log.add(if (approved) "Pairing approved" else "Pairing declined or timed out")
-        if (approved) main.post { if (server != null) { paired = true; computer = asking; ShareService.refresh(app) } }
+        if (approved) main.post { Feed.paired(asking); if (server != null) { paired = true; computer = asking; ShareService.refresh(app) } }
         return approved
     }
 
@@ -168,6 +170,7 @@ object Sharing {
     fun sendText(text: String): Boolean {
         if (!PhoneOutbox.addText(text)) return false
         Texts.sent(text)
+        Feed.textSent(text)
         Log.add("Queued a text")
         return true
     }
@@ -315,7 +318,7 @@ object Sharing {
             main.post {
                 if (generation != current || server == null) return@post
                 if (!paired || this@Sharing.computer != computer || transport != via) {
-                    if (!paired || transport != via) Log.add("A computer connected over ${via.label}")
+                    if (!paired || transport != via) { Log.add("A computer connected over ${via.label}"); Feed.connected(computer, via) }
                     paired = true; this@Sharing.computer = computer; transport = via
                     ShareService.refresh(app)
                 }

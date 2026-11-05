@@ -63,7 +63,7 @@ object PhoneCompanion : Companion {
 
     override fun reply(key: String, text: String) = Mirror.reply(key, text)
 
-    override fun ring(on: Boolean) { if (on) Ringer.start(app) else Ringer.stop(app) }
+    override fun ring(on: Boolean) { if (on) { Feed.ring(Sharing.lastComputer); Ringer.start(app) } else Ringer.stop(app) }
 
     override fun openUrl(url: String, computer: String) = Alerts.link(app, url, computer)
 
@@ -134,6 +134,7 @@ object Alerts {
             .setAutoCancel(true)
             .build())
         Log.add("A computer sent a link")
+        Feed.link(url, computer)
     }
 
     /** A file a computer sent: tapping opens it in an app that can, with read access to just that file. */
@@ -179,6 +180,7 @@ object Alerts {
                 .build())
         }
         Log.add("Received a file from a computer")
+        Feed.fileReceived(name, computer, location)
     }
 
     fun clearReceived() = synchronized(this) { received.clear() }
