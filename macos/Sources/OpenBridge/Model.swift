@@ -338,7 +338,7 @@ final class BrowserModel: ObservableObject {
         host = "192.168.1.23"
         client = try? BridgeClient(saved: "192.168.1.23", port: 41987, fingerprint: Data(repeating: 1, count: 32),
                                    secret: Data(count: 32))
-        phoneInfo = PhoneInfo(version: "1.2.0", revision: BridgeClient.phoneFeaturesRevision, name: phone)
+        phoneInfo = PhoneInfo(version: "1.3.0", revision: BridgeClient.mediaRevision, name: phone)
     }
 
     /// An error message for the diagnostics log: names in quotes (files, folders) left out.

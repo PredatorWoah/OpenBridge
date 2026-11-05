@@ -42,6 +42,15 @@ enum Screenshots {
             if !renderPhoneMenuBar(to: phonePanel) { failed = true }
             let sheet = folder.appendingPathComponent("\(look.rawValue)-notifications.png")
             if !renderNotificationsSheet(to: sheet) { failed = true }
+            // 1.3.0: pairing by QR code, Now playing, and the player window.
+            let qr = folder.appendingPathComponent("\(look.rawValue)-qr-pairing.png")
+            if !renderQRPairing(to: qr) { failed = true }
+            let mediaPanel = folder.appendingPathComponent("\(look.rawValue)-menubar-media.png")
+            if !renderMediaMenuBar(to: mediaPanel) { failed = true }
+            let nowPlaying = folder.appendingPathComponent("\(look.rawValue)-now-playing.png")
+            if !renderNowPlayingWindow(look: look, to: nowPlaying) { failed = true }
+            let player = folder.appendingPathComponent("\(look.rawValue)-player.png")
+            if !renderPlayer(to: player) { failed = true }
         }
         exit(failed ? 1 : 0)
     }
@@ -105,6 +114,59 @@ enum Screenshots {
         let renderer = ImageRenderer(content: sheet)
         renderer.scale = 2
         renderer.proposedSize = ProposedViewSize(width: 480, height: nil)
+        return write(renderer.cgImage, to: file)
+    }
+
+    /// The QR pairing sheet: the code in the look's card, about a minute and a half left.
+    @MainActor private static func renderQRPairing(to file: URL) -> Bool {
+        let model = BrowserModel()
+        model.qr.showSample(name: "Aditya's MacBook Air")
+        let sheet = QRPairingSheet(model: model, qr: model.qr)
+            .environment(\.colorScheme, .dark)
+        let renderer = ImageRenderer(content: sheet)
+        renderer.scale = 2
+        renderer.proposedSize = ProposedViewSize(width: 420, height: nil)
+        return write(renderer.cgImage, to: file)
+    }
+
+    /// The menu bar panel of a phone from 1.3.0 playing music, above its notifications.
+    @MainActor private static func renderMediaMenuBar(to file: URL) -> Bool {
+        let model = SampleData.mediaModel()
+        let icon: NSImage = MenuBarGlyph.image(connected: true, progress: nil)
+        let shot = VStack(alignment: .trailing, spacing: 4) {
+            Image(nsImage: icon).renderingMode(.template).foregroundStyle(Color.white).padding(.trailing, 24)
+            MenuBarPanel(model: model)
+        }
+        .padding(12)
+        .background(Palette.background)
+        .environment(\.colorScheme, .dark)
+        let renderer = ImageRenderer(content: shot)
+        renderer.scale = 2
+        return write(renderer.cgImage, to: file)
+    }
+
+    /// The window's connect screen while connected, with the Now playing card on the phone's card.
+    @MainActor private static func renderNowPlayingWindow(look: Look, to file: URL) -> Bool {
+        let model = SampleData.mediaModel()
+        let scene = LookScene(model: model, look: look, wifi: .constant(false), dropping: .constant(false),
+                              openAutomatically: .constant(false), mirror: {})
+            .frame(width: size.width, height: size.height)
+            .environment(\.colorScheme, .dark)
+        let renderer = ImageRenderer(content: scene)
+        renderer.scale = 2
+        renderer.proposedSize = ProposedViewSize(size)
+        return write(renderer.cgImage, to: file)
+    }
+
+    /// The player window's chrome around a placeholder frame, buffering.
+    @MainActor private static func renderPlayer(to file: URL) -> Bool {
+        let model = SampleData.phoneFeaturesModel()
+        let session = PlayerSession(sample: SampleData.video)
+        let screen = PlayerScreen(session: session, model: model)
+            .frame(width: 880, height: 540)
+            .environment(\.colorScheme, .dark)
+        let renderer = ImageRenderer(content: screen)
+        renderer.scale = 2
         return write(renderer.cgImage, to: file)
     }
 
@@ -203,6 +265,16 @@ private enum SampleData {
             note("m1", "Messages", "+91 98450 12345", "Parcel delivered to the front desk", minutes: 90, flags: (true, true))
         ]
         model.feed.showSample(phone: name, notifications: notes, battery: BatteryState(level: 82, charging: true))
+        return model
+    }
+
+    /// The phone from 1.3.0 playing a song that can be skipped and scrubbed, a minute and a bit in.
+    static func mediaModel() -> BrowserModel {
+        let model = phoneFeaturesModel()
+        let song = MediaState(app: "Spotify", title: "Clair de lune (Suite bergamasque, L. 75: III)",
+                              artist: "Claude Debussy · Alexis Weissenberg", duration: 302_000, position: 81_000,
+                              playback: .playing, canPlayPause: true, canNext: true, canPrevious: true, canSeek: true)
+        model.feed.showSampleMedia(song)
         return model
     }
 
