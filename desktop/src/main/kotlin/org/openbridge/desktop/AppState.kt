@@ -803,6 +803,33 @@ class AppState {
         if (on) daemon("openbridge-ring") { Thread.sleep(60_000); ui { if (ringToken == token) ringing = false } }
     }
 
+    /** What plays on the open phone (from 1.3.0), or null. */
+    val media: PhoneMedia? get() = phoneStatus.media.takeIf { mediaControls }
+    /** Whether the open phone sends what it plays and takes MEDIA CONTROL (INFO revision 24). */
+    val mediaControls: Boolean get() = companion && (phoneInfo?.revision ?: 0) >= PhoneEvents.MEDIA_REVISION
+
+    /**
+     * Plays, pauses, skips or seeks on the phone. Play, pause and seek show at once; the phone's next MEDIA event
+     * says how it really is.
+     */
+    fun mediaAction(action: MediaAction, position: Long = 0) {
+        val client = bridge ?: return
+        phoneStatus.media?.let { now ->
+            val shown = when (action) {
+                MediaAction.PLAY_PAUSE -> now.withState(!now.playing)
+                MediaAction.PLAY -> now.withState(true)
+                MediaAction.PAUSE -> now.withState(false)
+                MediaAction.SEEK -> now.seekedTo(position)
+                else -> now
+            }
+            phoneStatus = phoneStatus.copy(media = shown)
+        }
+        texting.execute {
+            try { client.mediaControl(action, position) }
+            catch (e: Exception) { suspect(e); Log.add("Media control failed: ${e.message}"); ui { show(e.message ?: S.dropped) } }
+        }
+    }
+
     /** Offers a web link on the phone. */
     fun sendLink(url: String, done: () -> Unit = {}) {
         val client = bridge ?: return

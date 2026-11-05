@@ -23,6 +23,8 @@ sealed class PhoneEvent {
     data class Notified(val notification: PhoneNotification) : PhoneEvent()
     data class Removed(val key: String) : PhoneEvent()
     data class BatteryChanged(val battery: Battery) : PhoneEvent()
+    /** What plays on the phone changed (from 1.3.0). */
+    data class MediaChanged(val media: PhoneMedia) : PhoneEvent()
 }
 
 /** What one EVENTS request returned: the cursor for the next one, and the events after the one sent. */
@@ -34,6 +36,8 @@ object PhoneEvents {
     const val MAX_BODY = 65_536
     /** The first revision (INFO) that answers EVENTS, NOTIFICATION ACTION, RING, OPEN URL and SEND. */
     const val REVISION = 23
+    /** The first revision that sends MEDIA and answers MEDIA CONTROL (1.3.0). */
+    const val MEDIA_REVISION = 24
 
     private fun invalid(): Nothing = throw BridgeException("The phone sent an invalid reply.")
 
@@ -78,6 +82,17 @@ object PhoneEvents {
                     if (level > 100 || charging > 1) invalid()
                     PhoneEvent.BatteryChanged(Battery(level, charging == 1))
                 }
+                4 -> {
+                    val app = Wire.readString(input, 128)
+                    val title = Wire.readString(input, 512)
+                    val artist = Wire.readString(input, 512)
+                    val duration = input.readLong()
+                    val position = input.readLong()
+                    val state = input.readUnsignedByte()
+                    val actions = input.readUnsignedByte()
+                    if (duration < -1 || position < -1 || state > 2) invalid()
+                    PhoneEvent.MediaChanged(PhoneMedia(app, title, artist, duration, position, PhoneMedia.State.entries[state], actions and 15))
+                }
                 else -> null
             }
         } catch (e: BridgeException) { throw e } catch (e: IOException) { invalid() }
@@ -89,16 +104,17 @@ object PhoneEvents {
  * this computer: new, or changed in what they say. The state a phone sends after a RESET is not announced: those
  * notifications were already on its screen.
  */
-data class NotificationList(val items: List<PhoneNotification> = emptyList(), val battery: Battery? = null) {
+data class NotificationList(val items: List<PhoneNotification> = emptyList(), val battery: Battery? = null, val media: PhoneMedia? = null) {
     data class Applied(val list: NotificationList, val fresh: List<PhoneNotification>)
 
     fun apply(events: List<PhoneEvent>): Applied {
         var items = items
         var battery = battery
+        var media = media
         val fresh = LinkedHashMap<String, PhoneNotification>()
         var replaying = false
         for (event in events) when (event) {
-            PhoneEvent.Reset -> { items = emptyList(); fresh.clear(); replaying = true }
+            PhoneEvent.Reset -> { items = emptyList(); media = null; fresh.clear(); replaying = true }
             is PhoneEvent.Notified -> {
                 val n = event.notification
                 val before = items.firstOrNull { it.key == n.key }
@@ -107,8 +123,9 @@ data class NotificationList(val items: List<PhoneNotification> = emptyList(), va
             }
             is PhoneEvent.Removed -> { items = items.filter { it.key != event.key }; fresh.remove(event.key) }
             is PhoneEvent.BatteryChanged -> battery = event.battery
+            is PhoneEvent.MediaChanged -> media = event.media.takeIf { it.shown }
         }
-        return Applied(NotificationList(items.sortedByDescending { it.time }.take(KEEP), battery), fresh.values.toList())
+        return Applied(NotificationList(items.sortedByDescending { it.time }.take(KEEP), battery, media), fresh.values.toList())
     }
 
     fun without(key: String) = copy(items = items.filter { it.key != key })

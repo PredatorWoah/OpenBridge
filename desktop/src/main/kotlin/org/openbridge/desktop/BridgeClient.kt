@@ -542,6 +542,21 @@ class BridgeClient internal constructor(
         request(20, key, { if (reply == null) it.writeByte(1) else { it.writeByte(2); Wire.writeString(it, reply) } }) { input, _ -> status(input) }
     }
 
+    /** Plays, pauses, skips or seeks (`position`, in milliseconds) what plays on the phone (MEDIA CONTROL, from 1.3.0). */
+    fun mediaControl(action: MediaAction, position: Long = 0) =
+        request(24, "", { it.writeByte(action.code); if (action == MediaAction.SEEK) it.writeLong(position.coerceAtLeast(0)) }) { input, _ -> status(input) }
+
+    /**
+     * Reads a listed file from `offset` (RESUME): `body` gets the file's full size and a stream of the bytes from the
+     * offset on, and may stop reading early; the connection closes when it returns. For streaming to a player.
+     */
+    fun <T> read(entry: Entry, offset: Long, body: (Long, java.io.InputStream) -> T): T = request(6, entry.id, { it.writeLong(offset) }) { input, _ ->
+        status(input)
+        val total = input.readLong()
+        if (total != entry.size || offset !in 0..total) throw BridgeException(Partial.CHANGED)
+        body(total, input)
+    }
+
     /** Rings the phone at full alarm volume (for at most a minute), or stops it. */
     fun ring(on: Boolean) = request(21, "", { it.writeByte(if (on) 1 else 0) }) { input, _ -> status(input) }
 
