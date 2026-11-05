@@ -543,6 +543,7 @@ struct OpenBridgeApp: App {
             .windowStyle(.hiddenTitleBar)
             .defaultSize(width: 380, height: 780)
         Settings { SettingsView(model: model) }
+            .windowResizability(.contentMinSize)
         // Always in the menu bar while OpenBridge runs: the phone, the transfer and the main actions.
         MenuBarExtra {
             MenuBarContent(model: model)

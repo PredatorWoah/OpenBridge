@@ -16,13 +16,10 @@ struct SettingsView: View {
                 .padding(.vertical, 4)
             } header: {
                 Text("Look")
-            } footer: {
-                Text("Aurora and Tide are previews: they may change before they're finished.")
-                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("Texts") {
                 Toggle("Send copied text to the phone automatically", isOn: $model.autoSendTexts)
-                Text("While connected over Wi‑Fi or Fast USB. Passwords copied from password managers are never sent.")
+                Text("While connected over Wi‑Fi, the phone's hotspot or Fast USB. Passwords copied from password managers are never sent.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             PhoneNotificationSettings(feed: model.feed)
@@ -34,7 +31,7 @@ struct SettingsView: View {
             } header: {
                 Text("Photo backup")
             } footer: {
-                Text("New photos and videos from the camera are copied when the phone connects over Wi‑Fi or Fast USB, then every 10 minutes while it stays connected. Photos imported before are skipped, and nothing is ever replaced.")
+                Text("New photos and videos from the camera are copied when the phone connects over Wi‑Fi, its hotspot or Fast USB, then every 10 minutes while it stays connected. Photos imported before are skipped, and nothing is ever replaced.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             Section("Updates") {
@@ -64,8 +61,8 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 520)
-        .fixedSize(horizontal: false, vertical: true)
+        // The grouped form scrolls, and the window can be resized: nothing ends up below the bottom of the screen.
+        .frame(minWidth: 520, idealWidth: 560, maxWidth: 760, minHeight: 420, idealHeight: 680, maxHeight: .infinity)
     }
 
     @State private var checking = false
@@ -94,7 +91,7 @@ private struct PhoneNotificationSettings: View {
         Section("Phone notifications") {
             Toggle("Show phone notifications on this Mac", isOn: $feed.showOnMac)
             Toggle("Play sound", isOn: $feed.playSound).disabled(!feed.showOnMac)
-            Text("From phones with OpenBridge 1.2 or later, while connected over Wi‑Fi or Fast USB, once Notifications on computers is on in OpenBridge on the phone.")
+            Text("From phones with OpenBridge 1.2 or later, while connected over Wi‑Fi, the phone's hotspot or Fast USB, once Notifications on computers is on in OpenBridge on the phone.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
     }
