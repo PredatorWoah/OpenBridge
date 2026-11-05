@@ -68,6 +68,8 @@ object PhoneCompanion : Companion {
     override fun openUrl(url: String, computer: String) = Alerts.link(app, url, computer)
 
     override fun received(name: String, location: String?, computer: String) = Alerts.received(app, name, location, computer)
+
+    override fun media(action: Int, position: Long) = MediaMirror.control(action, position)
 }
 
 /** Notifications for ringing, links and files from computers, and their channels. */

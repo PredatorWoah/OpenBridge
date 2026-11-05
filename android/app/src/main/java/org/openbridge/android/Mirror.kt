@@ -50,6 +50,7 @@ object Mirror {
         enabled = preferences.getBoolean("enabled", false)
         excluded = preferences.getStringSet("excluded", emptySet())!!.toSet()
         seen = preferences.getStringSet("seen", emptySet())!!.toSet()
+        MediaMirror.attach(app)
         refreshAccess()
     }
 
@@ -73,6 +74,7 @@ object Mirror {
         preferences().edit().putBoolean("enabled", on).apply()
         Log.add("Notifications on computers turned ${if (on) "on" else "off"}")
         if (on) { refreshAccess(); listener?.sendAll() } else clear()
+        MediaMirror.refresh()
     }
 
     /** The screen where the user allows (or takes away) notification access. */
@@ -104,12 +106,14 @@ object Mirror {
         Log.add("Notification listener connected")
         refreshAccess()
         service.sendAll()
+        MediaMirror.refresh()
     }
 
     internal fun disconnected(service: NotificationMirror) {
         if (listener === service) listener = null
         Log.add("Notification listener disconnected")
         clear()
+        MediaMirror.refresh()
     }
 
     /** On the main thread, where Android delivers the listener's callbacks. */
